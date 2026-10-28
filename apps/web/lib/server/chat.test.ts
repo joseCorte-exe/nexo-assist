@@ -1,9 +1,16 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createMemory, createNexoAgent, simulatedModel } from "@nexo/agent";
 import { scriptedModel } from "@nexo/agent/testing";
 import { and, eq, ne } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
+import { createDb } from "@/db";
+import { migrateDb } from "@/db/migrate";
 import { conversations, decisions, messages } from "@/db/schema";
+import { seed } from "@/db/seed";
 import { chat } from "./chat";
-import { ana, NOW, rafael, readStream, request, sessionCookieFor, testAgent, testDeps, type TestDeps } from "./test-deps";
+import { ana, fakeTicketService, NOW, rafael, readStream, request, sessionCookieFor, testAgent, testDeps, type TestDeps } from "./test-deps";
 
 // With the clock frozen, the reply falls in the same millisecond as the message, so it is dated 1 ms later.
 const REPLY_AT = new Date(NOW.getTime() + 1);
@@ -218,4 +225,49 @@ describe("POST /api/chat", () => {
     expect((await messagesOf(deps, conversation!.id)).map(({ author }) => author)).toEqual(["employee"]);
     expect(conversation?.firstResponseAt).toBeNull();
   });
+});
+
+describe("POST /api/chat under concurrent messages", () => {
+  it("answers each one at once, with the agent memory writing to the same database file", async () => {
+    // A file database, as in production: the route and the agent memory are two clients of the same file.
+    // Holding the write lock across awaits would make the other client spin on it for seconds.
+    const dir = mkdtempSync(join(tmpdir(), "nexo-chat-"));
+    const url = `file:${join(dir, "conversations.db")}`;
+    const db = createDb(url);
+    await migrateDb(db);
+    await seed(db, NOW);
+    const ticketService = fakeTicketService();
+    const deps = await testDeps({
+      db,
+      agent: createNexoAgent({ model: simulatedModel({ delayMs: 35 }), memory: createMemory({ url }), helpCenter: ticketService }),
+    });
+    const employees = [
+      { role: "employee" as const, ...ana },
+      { role: "employee" as const, id: "emp-bruno", name: "Bruno Tavares", email: "bruno.tavares@nexo.com.br" },
+      { role: "employee" as const, id: "emp-elisa", name: "Elisa Prado", email: "elisa.prado@nexo.com.br" },
+    ];
+    // Warm up: the memory creates its tables on first use.
+    await readStream(await chat(await post({ text: "Oi" }, await sessionCookieFor(employees[0]!)), deps));
+    await deps.settled();
+
+    const started = performance.now();
+    const firstChunks = await Promise.all(
+      employees.flatMap((employee) =>
+        [1, 2, 3, 4].map(async (n) => {
+          const response = await chat(await post({ text: `Qual o horário? ${n}` }, await sessionCookieFor(employee)), deps);
+          const reader = response.body!.getReader();
+          await reader.read();
+          const at = performance.now() - started;
+          while (!(await reader.read()).done);
+          return at;
+        }),
+      ),
+    );
+    await deps.settled();
+
+    expect(Math.max(...firstChunks)).toBeLessThan(1000);
+    const counts = await deps.db.select({ employeeId: conversations.employeeId, count: conversations.messageCount }).from(conversations).where(ne(conversations.state, "closed"));
+    expect(counts.find(({ employeeId }) => employeeId === "emp-ana")?.count).toBe(5);
+    expect(counts.find(({ employeeId }) => employeeId === "emp-elisa")?.count).toBe(4);
+  }, 30_000);
 });

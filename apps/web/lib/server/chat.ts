@@ -3,7 +3,7 @@ import { toAISdkStream } from "@mastra/ai-sdk";
 import { streamReply, type TurnResult } from "@nexo/agent";
 import { chatInput, type ConversationPart } from "@nexo/shared";
 import { createUIMessageStream, createUIMessageStreamResponse, type InferUIMessageChunk } from "ai";
-import { desc, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import type { Db } from "@/db";
 import { conversations, decisions, messages } from "@/db/schema";
@@ -17,55 +17,46 @@ const AGENT_FAILED = "O Nexo não conseguiu responder. Tente de novo.";
 type StartedTurn = { ok: true; conversation: ConversationPart; startedAt: Date } | { ok: false };
 
 /**
- * Saves the employee message in the active conversation, or in a new one, and counts it, all in one write
- * transaction: two tabs sending at once cannot open two conversations or lose a count.
- * The same text sent again after a failed reply is answered without being saved twice.
+ * Saves the employee message in the active conversation, or in a new one, and counts it, in one batch: a single
+ * round trip that SQLite runs as one transaction. Nothing holds the write lock across an await, so the agent
+ * memory, which writes to the same database, never waits on it, and two tabs at once cannot open two
+ * conversations or lose a count.
+ *
  * Outside with_agent nothing is saved and the agent is not called (feature 5 handles those messages).
+ * The same text right after a message the agent did not answer is that message sent again (the employee pressed
+ * "Tentar de novo", or the network dropped the response): it is answered, not saved and counted twice.
  */
 async function startTurn(db: Db, { employeeId, text, now }: { employeeId: string; text: string; now: Date }) {
-  return db.transaction(async (tx): Promise<StartedTurn> => {
-    let [conversation] = await tx.select().from(conversations).where(activeConversationOf(employeeId)).limit(1);
-    conversation ??= (
-      await tx
-        .insert(conversations)
-        .values({ id: `conv-${randomUUID()}`, employeeId, state: "with_agent", messageCount: 0, createdAt: now })
-        .returning()
-    )[0];
-    if (!conversation) throw new Error("Insert returned no conversation");
-    if (conversation.state !== "with_agent") return { ok: false };
-
-    // The same text right after a message the agent did not answer is that message sent again (the employee
-    // pressed "Tentar de novo", or the network dropped the response): it is answered, not saved and counted twice.
-    const [last] = await tx
-      .select({ author: messages.author, text: messages.text })
-      .from(messages)
-      .where(eq(messages.conversationId, conversation.id))
-      .orderBy(desc(messages.createdAt))
-      .limit(1);
-    if (last?.author === "employee" && last.text === text) {
-      const { id, state, messageCount } = conversation;
-      return { ok: true, conversation: { id, state, messageCount }, startedAt: now };
-    }
-
-    await tx.insert(messages).values({
-      id: `msg-${randomUUID()}`,
-      conversationId: conversation.id,
-      author: "employee",
-      text,
-      parts: null,
-      createdAt: now,
-    });
-    const [counted] = await tx
+  const messageId = `msg-${randomUUID()}`;
+  const at = now.getTime();
+  const [, , , [conversation]] = await db.batch([
+    // The partial unique index (one conversation that is not closed per employee) makes this a no-op when it exists.
+    // Written by hand: the conflict target of a partial index needs its WHERE before DO NOTHING.
+    db.run(sql`
+      insert into ${conversations} (id, employee_id, state, message_count, created_at)
+      values (${`conv-${randomUUID()}`}, ${employeeId}, 'with_agent', 0, ${at})
+      on conflict (employee_id) where state <> 'closed' do nothing`),
+    db.run(sql`
+      insert into ${messages} (id, conversation_id, author, text, parts, created_at)
+      select ${messageId}, c.id, 'employee', ${text}, null, ${at}
+      from ${conversations} c
+      where c.employee_id = ${employeeId} and c.state = 'with_agent'
+        and (
+          select m.author || char(0) || m.text from ${messages} m
+          where m.conversation_id = c.id order by m.created_at desc limit 1
+        ) is not ('employee' || char(0) || ${text})`),
+    db
       .update(conversations)
       .set({ messageCount: sql`${conversations.messageCount} + 1` })
-      .where(eq(conversations.id, conversation.id))
-      .returning({ messageCount: conversations.messageCount });
-    return {
-      ok: true,
-      conversation: { id: conversation.id, state: conversation.state, messageCount: counted?.messageCount ?? 0 },
-      startedAt: now,
-    };
-  });
+      .where(sql`${conversations.id} = (select conversation_id from ${messages} where id = ${messageId})`),
+    db
+      .select({ id: conversations.id, state: conversations.state, messageCount: conversations.messageCount })
+      .from(conversations)
+      .where(activeConversationOf(employeeId)),
+  ]);
+  if (!conversation) throw new Error("The active conversation is missing after it was ensured");
+  if (conversation.state !== "with_agent") return { ok: false } satisfies StartedTurn;
+  return { ok: true, conversation, startedAt: now } satisfies StartedTurn;
 }
 
 /**
