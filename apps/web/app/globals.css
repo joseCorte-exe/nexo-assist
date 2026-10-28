@@ -117,6 +117,32 @@
   }
 }
 
+/*
+ * Focus and error ring of the login fields: 1.5 px straddling the edge, as in nexo.pen. A 1x screen cannot draw
+ * half a pixel and would round it to 1 px, so there it is drawn as the design rasterizes it: 2 px at 75%.
+ */
+.field {
+  --ring-width: 1.5px;
+  --ring-strength: 100%;
+
+  @media (max-resolution: 1dppx) {
+    --ring-width: 2px;
+    --ring-strength: 75%;
+  }
+
+  &:focus-within,
+  &[data-invalid="true"] {
+    box-shadow: none;
+    outline-width: var(--ring-width);
+    outline-offset: calc(var(--ring-width) / -2);
+    outline-color: color-mix(in srgb, var(--color-cta) var(--ring-strength), transparent);
+  }
+
+  &[data-invalid="true"] {
+    outline-color: color-mix(in srgb, var(--color-danger) var(--ring-strength), transparent);
+  }
+}
+
 /* Popover menus scale from their trigger. */
 .menu-enter {
   transform-origin: var(--origin, bottom left);

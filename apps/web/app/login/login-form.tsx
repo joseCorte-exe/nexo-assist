@@ -168,7 +168,7 @@ function Field({
       </div>
       <div
         data-invalid={Boolean(error)}
-        className="group flex h-11 items-center gap-2.5 rounded-lg bg-white pr-2 pl-3.5 shadow-field outline-1 -outline-offset-[0.5px] outline-field transition-[outline-color,box-shadow] duration-150 focus-within:shadow-none focus-within:outline-[1.5px] focus-within:-outline-offset-[0.75px] focus-within:outline-cta data-[invalid=true]:outline-[1.5px] data-[invalid=true]:-outline-offset-[0.75px] data-[invalid=true]:outline-danger"
+        className="field group flex h-11 items-center gap-2.5 rounded-lg bg-white pr-2 pl-3.5 shadow-field outline-1 -outline-offset-[0.5px] outline-field transition-[outline-color,box-shadow] duration-150"
       >
         <Icon
           aria-hidden
