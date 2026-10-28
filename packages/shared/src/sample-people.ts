@@ -17,4 +17,9 @@ export const sampleAnalysts = [
   { id: "analyst-rafael", name: "Rafael Lima", email: "rafael.lima@nexo.com.br", level: "N2", available: true },
   { id: "analyst-juliana", name: "Juliana Costa", email: "juliana.costa@nexo.com.br", level: "N1", available: true },
   { id: "analyst-marcos", name: "Marcos Oliveira", email: "marcos.oliveira@nexo.com.br", level: "N1", available: false },
+  // With these, 6 analysts are available, the number on the login screen of the design.
+  { id: "analyst-patricia", name: "Patrícia Alves", email: "patricia.alves@nexo.com.br", level: "N1", available: true },
+  { id: "analyst-thiago", name: "Thiago Moreira", email: "thiago.moreira@nexo.com.br", level: "N1", available: true },
+  { id: "analyst-larissa", name: "Larissa Campos", email: "larissa.campos@nexo.com.br", level: "N2", available: true },
+  { id: "analyst-rodrigo", name: "Rodrigo Nogueira", email: "rodrigo.nogueira@nexo.com.br", level: "N1", available: true },
 ] as const satisfies ReadonlyArray<{ level: AnalystLevel; available: boolean } & Record<string, unknown>>;

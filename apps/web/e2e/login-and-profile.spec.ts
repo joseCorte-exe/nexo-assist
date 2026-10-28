@@ -21,8 +21,8 @@ test.describe("login screen", () => {
     await page.goto("/login");
     const stats = page.getByRole("list", { name: "Números do service desk" });
     await expect(stats.getByRole("listitem").nth(0)).toHaveText(/8 s\s*primeira resposta, em média/);
-    await expect(stats.getByRole("listitem").nth(1)).toHaveText(/50%\s*resolvidos sem fila/);
-    await expect(stats.getByRole("listitem").nth(2)).toHaveText(/2\s*analistas online agora/);
+    await expect(stats.getByRole("listitem").nth(1)).toHaveText(/72%\s*resolvidos sem fila/);
+    await expect(stats.getByRole("listitem").nth(2)).toHaveText(/6\s*analistas online agora/);
   });
 
   test("asks for the e-mail and the password before sending", async ({ page }) => {

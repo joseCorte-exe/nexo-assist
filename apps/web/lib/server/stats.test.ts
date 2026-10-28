@@ -8,12 +8,12 @@ const ago = (ms: number) => new Date(NOW.getTime() - ms);
 
 describe("getLoginStats", () => {
   it("computes the three numbers from the sample data", async () => {
-    // Replies take 8 s on average; of the 2 closed conversations, Elisa's was resolved by the agent;
-    // Rafael and Juliana are available.
+    // The numbers of the design: replies take 8 s on average, 13 of the 18 closed conversations were
+    // resolved by the agent, and 6 analysts are available.
     expect(await getLoginStats(await testDeps())).toEqual({
       firstResponseSeconds: 8,
-      resolvedWithoutQueuePercent: 50,
-      analystsOnline: 2,
+      resolvedWithoutQueuePercent: 72,
+      analystsOnline: 6,
     });
   });
 
@@ -29,7 +29,7 @@ describe("getLoginStats", () => {
       firstResponseAt: ago(31 * DAY - 600_000),
       closedAt: ago(30 * DAY + 1000),
     });
-    expect(await getLoginStats(deps)).toMatchObject({ firstResponseSeconds: 8, resolvedWithoutQueuePercent: 50 });
+    expect(await getLoginStats(deps)).toMatchObject({ firstResponseSeconds: 8, resolvedWithoutQueuePercent: 72 });
   });
 
   it("has no numbers without conversations", async () => {
@@ -40,7 +40,7 @@ describe("getLoginStats", () => {
     expect(await getLoginStats(deps)).toEqual({
       firstResponseSeconds: null,
       resolvedWithoutQueuePercent: null,
-      analystsOnline: 2,
+      analystsOnline: 6,
     });
   });
 
@@ -48,7 +48,7 @@ describe("getLoginStats", () => {
     const deps = await testDeps({ ticketService: fakeTicketService({ down: true }) });
     expect(await getLoginStats(deps)).toEqual({
       firstResponseSeconds: 8,
-      resolvedWithoutQueuePercent: 50,
+      resolvedWithoutQueuePercent: 72,
       analystsOnline: null,
     });
   });
@@ -60,8 +60,8 @@ describe("GET /api/stats/login", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       firstResponseSeconds: 8,
-      resolvedWithoutQueuePercent: 50,
-      analystsOnline: 2,
+      resolvedWithoutQueuePercent: 72,
+      analystsOnline: 6,
     });
   });
 });
