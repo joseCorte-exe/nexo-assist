@@ -1,6 +1,7 @@
 import { type Analyst, type Employee, sampleAnalysts, sampleEmployees, type TicketServiceResult } from "@nexo/shared";
 import { NextRequest } from "next/server";
-import { createDb, migrateDb } from "@/db";
+import { createDb } from "@/db";
+import { migrateDb } from "@/db/migrate";
 import { seed } from "@/db/seed";
 import type { Deps } from "./deps";
 import { createSession, SESSION_COOKIE, type SessionUser, signSession } from "./session";
