@@ -33,7 +33,7 @@ type SampleConversation = {
   messages: SampleMessage[];
 };
 
-// One conversation for each state and console badge. Ana has none, so the demo starts with her chat empty.
+// One conversation for each state and console badge. First replies take 8 s on average, the number on the login screen. Ana has none, so the demo starts with her chat empty.
 // TODO(design): messages and badges are placeholders until checked against nexo.pen.
 const sampleConversations: SampleConversation[] = [
   {
@@ -53,7 +53,7 @@ const sampleConversations: SampleConversation[] = [
       {
         author: "agent",
         text: "Isso parou a equipe inteira, então é um caso crítico. Abri o chamado INC-20319 e passei para um analista do N2, que entra em contato em até 1 hora.",
-        ago: 40 * MINUTE - 6 * SECOND,
+        ago: 40 * MINUTE - 9 * SECOND,
         decision: {
           understanding: "Sistema de pedidos fora do ar para a equipe de operações",
           action: "Abrir chamado crítico e transferir para o N2",
@@ -81,7 +81,7 @@ const sampleConversations: SampleConversation[] = [
       {
         author: "agent",
         text: "Não tenho segurança sobre a causa disso, então passei sua conversa para um analista do N1. Ele continua por aqui.",
-        ago: 14 * MINUTE - 5 * SECOND,
+        ago: 14 * MINUTE - 7 * SECOND,
         decision: {
           understanding: "Excel fecha ao abrir uma planilha com macros",
           action: "Transferir para o N1",
@@ -111,7 +111,7 @@ const sampleConversations: SampleConversation[] = [
       {
         author: "agent",
         text: "No Windows 11 esse erro precisa de um analista. Abri o chamado INC-20302 com prioridade alta.",
-        ago: 3 * HOUR - 6 * SECOND,
+        ago: 3 * HOUR - 8 * SECOND,
         decision: {
           understanding: "Erro 809 na VPN no Windows 11",
           action: "Abrir chamado de VPN",
@@ -147,7 +147,7 @@ const sampleConversations: SampleConversation[] = [
       {
         author: "agent",
         text: "Seu pedido REQ-10450 está aguardando um analista. O prazo dele é de 5 dias úteis desde a abertura, ontem.",
-        ago: 3 * MINUTE - 5 * SECOND,
+        ago: 3 * MINUTE - 8 * SECOND,
         decision: {
           understanding: "Quer saber a situação do pedido de licença do Power BI",
           action: "Consultar os chamados do funcionário",
@@ -169,7 +169,7 @@ const sampleConversations: SampleConversation[] = [
       {
         author: "agent",
         text: "Reinstale o cliente de VPN pelo portal de softwares e reinicie o computador. No Windows 10 isso resolve o erro 809.",
-        ago: 2 * HOUR + 10 * MINUTE - 4 * SECOND,
+        ago: 2 * HOUR + 10 * MINUTE - 7 * SECOND,
         decision: {
           understanding: "Erro 809 na VPN no Windows 10",
           action: "Responder com o artigo da central de ajuda",
@@ -201,7 +201,7 @@ const sampleConversations: SampleConversation[] = [
       {
         author: "agent",
         text: "Abri o chamado INC-20297 e passei para um analista aumentar sua caixa.",
-        ago: 3 * DAY - 6 * SECOND,
+        ago: 3 * DAY - 9 * SECOND,
         decision: {
           understanding: "Caixa de e-mail cheia mesmo após limpeza",
           action: "Abrir chamado e transferir para o N1",
