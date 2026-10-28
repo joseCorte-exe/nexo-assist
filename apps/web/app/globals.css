@@ -16,6 +16,8 @@
   --color-success: #00bd6c;
   --color-success-text: #00804a;
   --color-warning: #f5a500;
+  /* #f5a500 reads at 2:1 on white, so warning text and icons use the darker tone of the design. */
+  --color-warning-text: #946300;
   --color-danger: #ee343b;
   --color-danger-text: #c4161d;
   --color-field: #1b24311f;
@@ -170,11 +172,72 @@
   }
 }
 
+/* A new message of the chat rises 6 px into place. */
+.message-enter {
+  transition:
+    opacity 200ms var(--ease-out),
+    translate 200ms var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+    translate: 0 6px;
+  }
+}
+
+/* A new item of the action line slides in from the left of its place. */
+.step-enter {
+  transition:
+    opacity 150ms var(--ease-out),
+    translate 150ms var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+    translate: -4px 0;
+  }
+}
+
+/* The decision record opens to its own height; closing is quicker than opening. */
+.decision-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 150ms var(--ease-out);
+
+  &[data-open="true"] {
+    grid-template-rows: 1fr;
+    transition-duration: 200ms;
+  }
+}
+
+/* Only shows up when loading takes long enough to notice. */
+.delayed-appear {
+  animation: appear 150ms var(--ease-out) 300ms both;
+}
+
+@keyframes appear {
+  from {
+    opacity: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .dialog,
   .menu-enter,
   .icon-swap {
     scale: 1 !important;
     filter: none !important;
+  }
+
+  .message-enter,
+  .step-enter {
+    translate: none !important;
+  }
+
+  .decision-panel {
+    transition: none;
+  }
+
+  /* A spinner that stops reads as a hang: it slows down instead. */
+  .animate-spin {
+    animation-duration: 1.5s;
   }
 }
