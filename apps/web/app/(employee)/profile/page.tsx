@@ -48,9 +48,10 @@ export default async function ProfilePage() {
   );
 }
 
+// In nexo.pen the divider sits inside the padding; here it adds to it, so the bottom padding gives back 1 px.
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex items-center gap-4 px-6 py-5 not-last:border-b not-last:border-rule">
+    <div className="flex items-center gap-4 px-6 py-5 not-last:border-b not-last:border-rule not-last:pb-[19px]">
       <span className="w-40 shrink-0 text-13.5 text-ink-3">{label}</span>
       <div className="flex min-w-0 flex-1 items-center gap-3">{children}</div>
     </div>

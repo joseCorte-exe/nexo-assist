@@ -43,7 +43,8 @@ function Showcase() {
       <div className="flex flex-col gap-9">
         <div className="flex flex-col gap-[18px]">
           <p className="text-13.5 font-medium whitespace-nowrap text-[#FFFFFF8C]">Service desk de TI da Nexo</p>
-          <h1 className="font-display text-[54px] leading-[56px] font-normal tracking-[-1.2px] text-white">
+          {/* nexo.pen says -1.2px; Pencil renders this line 8 px narrower than a browser does with that value. */}
+          <h1 className="font-display text-[54px] leading-[56px] font-normal tracking-[-1.48px] text-white">
             Seu problema de TI, resolvido em uma conversa.
           </h1>
           <p className="w-[520px] max-w-full text-16 leading-[25px] text-[#FFFFFFA6]">

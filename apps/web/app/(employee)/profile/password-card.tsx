@@ -53,7 +53,7 @@ export function PasswordCard({ email, age }: { email: string; age: string }) {
           Redefinir senha
         </button>
       </div>
-      <div className="flex items-center gap-2 border-t border-rule bg-desk px-6 py-3 text-13">
+      <div className="flex items-center gap-2 border-t border-rule bg-desk px-6 pt-[11px] pb-3 text-13">
         <StripIcon aria-hidden className={`size-3.5 shrink-0 ${failed ? "text-danger-text" : "text-ink-3"}`} />
         {/* The explanation is plain text; what comes after the click is announced. */}
         <span
