@@ -11,6 +11,7 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "db:migrate": "pnpm -r db:migrate",
-    "db:seed": "pnpm -r db:seed"
+    "db:seed": "pnpm -r db:seed",
+    "test:e2e": "pnpm --filter @nexo/web test:e2e"
   }
 }
