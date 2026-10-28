@@ -21,12 +21,16 @@ export const rafael: Analyst = { ...sampleAnalysts[0] };
 const unavailable = { ok: false, error: { code: "unavailable", status: 503, message: "down" } } as const;
 
 export function fakeTicketService({ down = false } = {}): Deps["ticketService"] {
-  const employees: Employee[] = sampleEmployees.map((employee) => ({ ...employee, passwordChangedAt: ana.passwordChangedAt }));
+  const employees: Employee[] = sampleEmployees.map((employee) => ({
+    ...employee,
+    passwordChangedAt: ana.passwordChangedAt,
+  }));
   const analysts: Analyst[] = sampleAnalysts.map((analyst) => ({ ...analyst }));
   return {
     findEmployeeByEmail: async (email): Promise<TicketServiceResult<Employee | null>> =>
       down ? unavailable : { ok: true, data: employees.find((employee) => employee.email === email) ?? null },
-    listAnalysts: async (): Promise<TicketServiceResult<Analyst[]>> => (down ? unavailable : { ok: true, data: analysts }),
+    listAnalysts: async (): Promise<TicketServiceResult<Analyst[]>> =>
+      down ? unavailable : { ok: true, data: analysts },
   };
 }
 
@@ -34,7 +38,14 @@ export async function testDeps(overrides: Partial<Deps> = {}): Promise<Deps> {
   const db = createDb(":memory:");
   await migrateDb(db);
   await seed(db, NOW);
-  return { db, ticketService: fakeTicketService(), sessionSecret: SECRET, secureCookies: false, now: () => NOW, ...overrides };
+  return {
+    db,
+    ticketService: fakeTicketService(),
+    sessionSecret: SECRET,
+    secureCookies: false,
+    now: () => NOW,
+    ...overrides,
+  };
 }
 
 export async function sessionCookieFor(user: SessionUser) {

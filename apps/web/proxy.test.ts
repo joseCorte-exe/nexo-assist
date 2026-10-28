@@ -8,7 +8,10 @@ beforeEach(() => {
 });
 
 async function cookieFor(role: "employee" | "analyst") {
-  const session = createSession({ role, id: "x", name: "X", email: "x@nexo.com.br" }, { remember: false, now: new Date() });
+  const session = createSession(
+    { role, id: "x", name: "X", email: "x@nexo.com.br" },
+    { remember: false, now: new Date() },
+  );
   return `${SESSION_COOKIE}=${await signSession(session, SECRET)}`;
 }
 

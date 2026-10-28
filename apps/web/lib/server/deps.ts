@@ -28,7 +28,10 @@ export function getDeps(): Deps {
     const config = env.parse(process.env);
     deps = {
       db: createDb(config.CONVERSATIONS_DB_URL, config.CONVERSATIONS_DB_AUTH_TOKEN),
-      ticketService: createTicketServiceClient({ baseUrl: config.TICKET_SERVICE_URL, secret: config.TICKET_SERVICE_SECRET }),
+      ticketService: createTicketServiceClient({
+        baseUrl: config.TICKET_SERVICE_URL,
+        secret: config.TICKET_SERVICE_SECRET,
+      }),
       sessionSecret: config.SESSION_SECRET,
       secureCookies: process.env.NODE_ENV === "production",
       now: () => new Date(),

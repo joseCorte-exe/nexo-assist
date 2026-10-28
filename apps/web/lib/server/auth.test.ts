@@ -19,7 +19,10 @@ describe("authenticate", () => {
   });
 
   it("says the e-mail was not found when nobody has it", async () => {
-    expect(await authenticate("ninguem@nexo.com.br", fakeTicketService())).toEqual({ ok: false, reason: "email_not_found" });
+    expect(await authenticate("ninguem@nexo.com.br", fakeTicketService())).toEqual({
+      ok: false,
+      reason: "email_not_found",
+    });
   });
 
   it("does not say the e-mail was not found when it could not look", async () => {
@@ -43,7 +46,10 @@ describe("POST /api/auth/login", () => {
   const post = (body: unknown) => request("/api/auth/login", { method: "POST", body });
 
   it("returns the role and sets a signed session cookie for 30 days with remember", async () => {
-    const response = await login(post({ email: " Ana.Souza@nexo.com.br", password: "qualquer", remember: true }), await testDeps());
+    const response = await login(
+      post({ email: " Ana.Souza@nexo.com.br", password: "qualquer", remember: true }),
+      await testDeps(),
+    );
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ role: "employee" });
 
@@ -53,13 +59,19 @@ describe("POST /api/auth/login", () => {
   });
 
   it("sets a browser-session cookie without remember", async () => {
-    const response = await login(post({ email: "rafael.lima@nexo.com.br", password: "x", remember: false }), await testDeps());
+    const response = await login(
+      post({ email: "rafael.lima@nexo.com.br", password: "x", remember: false }),
+      await testDeps(),
+    );
     expect(await response.json()).toEqual({ role: "analyst" });
     expect(response.cookies.get(SESSION_COOKIE)?.maxAge).toBeUndefined();
   });
 
   it("answers 401 email_not_found for an e-mail outside the sample data", async () => {
-    const response = await login(post({ email: "ninguem@nexo.com.br", password: "x", remember: false }), await testDeps());
+    const response = await login(
+      post({ email: "ninguem@nexo.com.br", password: "x", remember: false }),
+      await testDeps(),
+    );
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ error: { code: "email_not_found", message: "E-mail não encontrado." } });
     expect(response.cookies.get(SESSION_COOKIE)).toBeUndefined();
@@ -85,10 +97,20 @@ describe("POST /api/auth/login", () => {
 describe("POST /api/auth/logout", () => {
   it("expires the session cookie", async () => {
     const response = await logout(
-      request("/api/auth/logout", { method: "POST", cookie: await sessionCookieFor({ role: "employee", id: "emp-ana", name: "Ana Souza", email: "ana.souza@nexo.com.br" }) }),
+      request("/api/auth/logout", {
+        method: "POST",
+        cookie: await sessionCookieFor({
+          role: "employee",
+          id: "emp-ana",
+          name: "Ana Souza",
+          email: "ana.souza@nexo.com.br",
+        }),
+      }),
       await testDeps(),
     );
     expect(response.status).toBe(204);
-    expect(response.headers.get("set-cookie")).toMatch(new RegExp(`^${SESSION_COOKIE}=;.*Expires=Thu, 01 Jan 1970`, "i"));
+    expect(response.headers.get("set-cookie")).toMatch(
+      new RegExp(`^${SESSION_COOKIE}=;.*Expires=Thu, 01 Jan 1970`, "i"),
+    );
   });
 });

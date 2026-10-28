@@ -34,7 +34,9 @@ describe("signSession and verifySession", () => {
   it("rejects a token whose payload was changed", async () => {
     const token = await signSession(createSession(ana, { remember: true, now }), SECRET);
     const [, signature] = token.split(".");
-    const forged = Buffer.from(JSON.stringify({ ...ana, role: "analyst", sub: "emp-ana", exp: 9e9 })).toString("base64url");
+    const forged = Buffer.from(JSON.stringify({ ...ana, role: "analyst", sub: "emp-ana", exp: 9e9 })).toString(
+      "base64url",
+    );
     expect(await verifySession(`${forged}.${signature}`, SECRET, now)).toBeNull();
   });
 

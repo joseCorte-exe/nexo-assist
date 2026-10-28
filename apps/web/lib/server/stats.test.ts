@@ -58,6 +58,10 @@ describe("GET /api/stats/login", () => {
   it("returns the numbers without a session", async () => {
     const response = await loginStatsHandler(request("/api/stats/login"), await testDeps());
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ firstResponseSeconds: 8, resolvedWithoutQueuePercent: 50, analystsOnline: 2 });
+    expect(await response.json()).toEqual({
+      firstResponseSeconds: 8,
+      resolvedWithoutQueuePercent: 50,
+      analystsOnline: 2,
+    });
   });
 });

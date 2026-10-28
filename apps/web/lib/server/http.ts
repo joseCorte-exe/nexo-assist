@@ -26,6 +26,7 @@ export async function readBody<T>(
   const json: unknown = await request.json().catch(() => undefined);
   const parsed = schema.safeParse(json);
   if (parsed.success) return { ok: true, data: parsed.data };
-  const message = json === undefined ? "Corpo da requisição inválido." : (parsed.error.issues[0]?.message ?? "Dados inválidos.");
+  const message =
+    json === undefined ? "Corpo da requisição inválido." : (parsed.error.issues[0]?.message ?? "Dados inválidos.");
   return { ok: false, response: jsonError(400, "invalid_body", message) };
 }

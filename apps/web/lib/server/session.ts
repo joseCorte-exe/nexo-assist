@@ -58,7 +58,12 @@ export async function verifySession(token: string, secret: string, now: Date): P
   if (!signatureBytes || !payloadBytes) return null;
 
   // crypto.subtle.verify compares in constant time.
-  const valid = await crypto.subtle.verify("HMAC", await hmacKey(secret), signatureBytes, new TextEncoder().encode(payload));
+  const valid = await crypto.subtle.verify(
+    "HMAC",
+    await hmacKey(secret),
+    signatureBytes,
+    new TextEncoder().encode(payload),
+  );
   if (!valid) return null;
 
   let json: unknown;

@@ -12,19 +12,22 @@ const WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
  * Each number is independent: if the ticket-service is down, only the analysts become null.
  */
 export async function getLoginStats(deps: Pick<Deps, "db" | "ticketService" | "now">): Promise<LoginStats> {
-  const since = new Date(deps.now().getTime() - WINDOW_MS);
+  const since = deps.now().getTime() - WINDOW_MS;
   const { createdAt, firstResponseAt, closedAt, outcome } = conversations;
+  const createdInWindow = sql`${createdAt} >= ${since}`;
+  const closedInWindow = sql`${closedAt} >= ${since}`;
+  const responseTime = sql`${firstResponseAt} - ${createdAt}`;
 
   const [[row], analysts] = await Promise.all([
     deps.db
       .select({
-        firstResponseMs: sql<number | null>`avg(case when ${createdAt} >= ${since.getTime()} and ${firstResponseAt} is not null
-          then ${firstResponseAt} - ${createdAt} end)`,
-        closed: sql<number>`count(case when ${closedAt} >= ${since.getTime()} then 1 end)`,
-        resolvedByAgent: sql<number>`count(case when ${closedAt} >= ${since.getTime()} and ${outcome} = 'resolved_by_agent' then 1 end)`,
+        // avg and count skip the nulls the case expressions leave out.
+        firstResponseMs: sql<number | null>`avg(case when ${createdInWindow} then ${responseTime} end)`,
+        closed: sql<number>`count(case when ${closedInWindow} then 1 end)`,
+        resolvedByAgent: sql<number>`count(case when ${closedInWindow} and ${outcome} = 'resolved_by_agent' then 1 end)`,
       })
       .from(conversations)
-      .where(sql`${createdAt} >= ${since.getTime()} or ${closedAt} >= ${since.getTime()}`),
+      .where(sql`${createdInWindow} or ${closedInWindow}`),
     deps.ticketService.listAnalysts(),
   ]);
 

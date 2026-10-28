@@ -24,7 +24,12 @@ describe("GET /api/me", () => {
   });
 
   it("answers 401 when the person in the session no longer exists", async () => {
-    const cookie = await sessionCookieFor({ role: "employee", id: "emp-gone", name: "Gone", email: "gone@nexo.com.br" });
+    const cookie = await sessionCookieFor({
+      role: "employee",
+      id: "emp-gone",
+      name: "Gone",
+      email: "gone@nexo.com.br",
+    });
     expect((await me(request("/api/me", { cookie }), await testDeps())).status).toBe(401);
   });
 
