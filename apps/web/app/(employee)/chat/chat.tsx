@@ -99,7 +99,7 @@ export function Chat({ initial, employeeName }: { initial: ConversationResponse;
         ) : (
           <section
             aria-label="Conversa"
-            className="mx-auto mt-auto flex w-full max-w-[856px] flex-col gap-5 px-6 pt-7 pb-1"
+            className="mx-auto mt-auto flex w-full max-w-[856px] flex-col gap-5 px-6 pt-7 max-md:px-4 pb-1"
           >
             {turns.map((turn, index) =>
               turn.kind === "employee" ? (
@@ -111,7 +111,7 @@ export function Chat({ initial, employeeName }: { initial: ConversationResponse;
           </section>
         )}
       </div>
-      <div className="mx-auto w-full max-w-[856px] px-6 pt-2.5 pb-[18px]">
+      <div className="mx-auto w-full max-w-[856px] px-6 pt-2.5 max-md:px-4 pb-[18px]">
         <Composer count={count} busy={busy} onSend={send} inputRef={inputRef} />
       </div>
       <Announcer turn={live.at(-1)} />

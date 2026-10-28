@@ -2,16 +2,17 @@ import type { ReactNode } from "react";
 import { NexoMark } from "@/components/nexo-mark";
 import { initials } from "@/lib/format";
 import { requireSession } from "@/lib/server/current-session";
+import { SidebarDrawer } from "./sidebar-drawer";
 import { SidebarNav } from "./sidebar-nav";
 import { SignOutButton } from "@/components/sign-out-button";
 
-/** Shell of the employee pages: the sidebar of the design, with the person from the session. */
+/** Shell of the employee pages: the sidebar of the design, with the person from the session (a drawer on a phone). */
 export default async function EmployeeLayout({ children }: { children: ReactNode }) {
   const session = await requireSession("employee");
 
   return (
     <div className="flex h-dvh bg-paper">
-      <aside className="flex w-[232px] shrink-0 flex-col border-r border-rule px-3.5 pt-5 pb-3.5">
+      <SidebarDrawer>
         <div className="flex items-center gap-2.5 px-2">
           <NexoMark size={20} color="var(--color-mark)" />
           <span className="text-16 font-bold tracking-[-0.2px] whitespace-nowrap text-ink">Nexo Assist</span>
@@ -30,7 +31,7 @@ export default async function EmployeeLayout({ children }: { children: ReactNode
           </div>
         </div>
         <SignOutButton />
-      </aside>
+      </SidebarDrawer>
       <div className="flex min-w-0 flex-1 flex-col">{children}</div>
     </div>
   );

@@ -101,3 +101,25 @@ test("when the help center is down, the line says so and the agent explains", as
     })).status(), { timeout: 10_000 })
     .toBe(200);
 });
+
+test.describe("on a phone", () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test("the chat takes the whole width and the sidebar opens as a drawer", async ({ page }) => {
+    await signInAsAna(page);
+    const profile = page.getByRole("link", { name: "Meu perfil" });
+    await expect(profile).not.toBeInViewport();
+
+    await page.getByRole("button", { name: "Abrir menu" }).click();
+    await expect(profile).toBeInViewport();
+    await page.keyboard.press("Escape");
+    await expect(profile).not.toBeInViewport();
+
+    await ask(page, "Qual o horário do service desk?");
+    await expect(replies(page).last()).toContainText("De segunda a sexta");
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(overflow).toBe(0);
+    const bubble = await replies(page).last().locator("div.w-\\[600px\\]").last().boundingBox();
+    expect(bubble!.x + bubble!.width).toBeLessThanOrEqual(390 - 16);
+  });
+});
