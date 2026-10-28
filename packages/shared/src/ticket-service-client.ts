@@ -97,7 +97,9 @@ export function createTicketServiceClient(options: Options) {
    * Who signs in with the e-mail. Employees and analysts are looked up at the same time and an employee wins a tie.
    * It only answers "nobody" (null) when both lookups answered, so an outage never reads as a wrong e-mail.
    */
-  async function findPersonByEmail(email: string): Promise<TicketServiceResult<Person | null>> {
+  async function findPersonByEmail(rawEmail: string): Promise<TicketServiceResult<Person | null>> {
+    // Same normalization as corporateEmail, so both lookups compare the same text.
+    const email = rawEmail.trim().toLowerCase();
     const [employees, analysts] = await Promise.all([
       request(z.array(employeeSchema), "GET", `/employees?${new URLSearchParams({ email })}`),
       listAnalysts(),

@@ -88,6 +88,12 @@ describe("findPersonByEmail", () => {
     expect(await client.findPersonByEmail(rafael.email)).toEqual({ ok: true, data: { role: "analyst", ...rafael } });
   });
 
+  it("finds an analyst whatever the case and spaces of the e-mail", async () => {
+    const { client } = routedClient({ employees: () => json(200, []), analysts: () => json(200, [rafael]) });
+    const result = await client.findPersonByEmail("  Rafael.Lima@NEXO.com.br ");
+    expect(result.ok && result.data?.id).toBe("analyst-rafael");
+  });
+
   it("prefers the employee when both have the e-mail", async () => {
     const twin = { ...rafael, email: ana.email };
     const { client } = routedClient({ employees: () => json(200, [ana]), analysts: () => json(200, [twin]) });
