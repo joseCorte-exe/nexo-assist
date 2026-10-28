@@ -183,6 +183,30 @@ describe("POST /api/chat", () => {
     expect((chunks[0]?.data as { id: string }).id).not.toBe("conv-elisa");
   });
 
+  it("does not save or count again the message the agent failed to answer when it is sent again", async () => {
+    const deps = await testDeps({ agent: testAgent(scriptedModel([new Error("overloaded"), ...vpnScript()])) });
+    await readStream(await chat(await post({ text: "Minha VPN dá erro 809" }), deps));
+    await deps.settled();
+    const chunks = await readStream(await chat(await post({ text: "Minha VPN dá erro 809" }), deps));
+    await deps.settled();
+
+    const conversation = await anaConversation(deps);
+    expect(chunks[0]).toMatchObject({ data: { messageCount: 1 } });
+    expect(conversation?.messageCount).toBe(1);
+    expect((await messagesOf(deps, conversation!.id)).map(({ author }) => author)).toEqual(["employee", "agent"]);
+  });
+
+  it("saves the same text again when the previous one was answered", async () => {
+    const deps = await testDeps({ agent: testAgent(scriptedModel([...vpnScript(), ...vpnScript()])) });
+    await readStream(await chat(await post({ text: "Ainda dá erro 809" }), deps));
+    await deps.settled();
+    deps.now = () => new Date(NOW.getTime() + 60_000);
+    await readStream(await chat(await post({ text: "Ainda dá erro 809" }), deps));
+    await deps.settled();
+
+    expect((await anaConversation(deps))?.messageCount).toBe(2);
+  });
+
   it("ends the stream with a short error and saves nothing of the agent when the model fails", async () => {
     const deps = await testDeps({ agent: testAgent(scriptedModel([new Error("overloaded")])) });
     const chunks = await readStream(await chat(await post({ text: "Minha VPN dá erro 809" }), deps));

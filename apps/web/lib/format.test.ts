@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDuration, formatPasswordAge, formatPercent, initials } from "./format";
+import { firstName, formatConfidence, formatDuration, formatPasswordAge, formatPercent, initials } from "./format";
 
 describe("formatDuration", () => {
   it("shows seconds under a minute, as the login screen does", () => {
@@ -47,5 +47,31 @@ describe("initials", () => {
     expect(initials("Ana Souza")).toBe("AS");
     expect(initials("Maria da Silva Prado")).toBe("MP");
     expect(initials("  rafael  ")).toBe("R");
+  });
+});
+
+describe("formatConfidence", () => {
+  it("names the level and keeps the number, from 0 to 1 as the agent records it", () => {
+    expect(formatConfidence(0.86)).toEqual({ level: "high", text: "Alta · 86%" });
+    expect(formatConfidence(0.8)).toEqual({ level: "high", text: "Alta · 80%" });
+    expect(formatConfidence(0.68)).toEqual({ level: "medium", text: "Média · 68%" });
+    expect(formatConfidence(0.6)).toEqual({ level: "medium", text: "Média · 60%" });
+  });
+
+  it("calls low what is under 0.6, the line of ARQUITETURA.md for an unsure agent", () => {
+    expect(formatConfidence(0.41)).toEqual({ level: "low", text: "Baixa · 41%" });
+    // Rounded down, so a low confidence never reads as 60%.
+    expect(formatConfidence(0.599)).toEqual({ level: "low", text: "Baixa · 59%" });
+  });
+
+  it("says when the reduced record has no confidence", () => {
+    expect(formatConfidence(null)).toEqual({ level: "none", text: "Não registrada" });
+  });
+});
+
+describe("firstName", () => {
+  it("greets by the first name", () => {
+    expect(firstName("Ana Souza")).toBe("Ana");
+    expect(firstName("  Fábio  Nunes ")).toBe("Fábio");
   });
 });

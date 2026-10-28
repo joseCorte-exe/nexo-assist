@@ -33,3 +33,23 @@ export function initials(name: string): string {
   const last = words.length > 1 ? (words.at(-1)?.[0] ?? "") : "";
   return (first + last).toUpperCase();
 }
+
+export type ConfidenceLevel = "high" | "medium" | "low" | "none";
+
+/**
+ * "Alta · 86%": the level in words, so the meaning never depends on color, and the number the agent recorded.
+ * Under 0.6 is low, the line ARQUITETURA.md draws for an unsure agent. The percent rounds down, so a low
+ * confidence never reads as 60%.
+ */
+export function formatConfidence(confidence: number | null): { level: ConfidenceLevel; text: string } {
+  if (confidence === null) return { level: "none", text: "Não registrada" };
+  // Rounded to a tenth first, so float noise (0.29 * 100 = 28.999…) does not drop a point.
+  const percent = Math.floor(Math.round(confidence * 1000) / 10);
+  if (confidence >= 0.8) return { level: "high", text: `Alta · ${percent}%` };
+  if (confidence >= 0.6) return { level: "medium", text: `Média · ${percent}%` };
+  return { level: "low", text: `Baixa · ${percent}%` };
+}
+
+export function firstName(name: string): string {
+  return name.trim().split(/\s+/)[0] ?? "";
+}

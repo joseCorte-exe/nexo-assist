@@ -3,7 +3,7 @@ import { toAISdkStream } from "@mastra/ai-sdk";
 import { streamReply, type TurnResult } from "@nexo/agent";
 import { chatInput, type ConversationPart } from "@nexo/shared";
 import { createUIMessageStream, createUIMessageStreamResponse, type InferUIMessageChunk } from "ai";
-import { eq, sql } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import type { Db } from "@/db";
 import { conversations, decisions, messages } from "@/db/schema";
@@ -19,6 +19,7 @@ type StartedTurn = { ok: true; conversation: ConversationPart; startedAt: Date }
 /**
  * Saves the employee message in the active conversation, or in a new one, and counts it, all in one write
  * transaction: two tabs sending at once cannot open two conversations or lose a count.
+ * The same text sent again after a failed reply is answered without being saved twice.
  * Outside with_agent nothing is saved and the agent is not called (feature 5 handles those messages).
  */
 async function startTurn(db: Db, { employeeId, text, now }: { employeeId: string; text: string; now: Date }) {
@@ -32,6 +33,19 @@ async function startTurn(db: Db, { employeeId, text, now }: { employeeId: string
     )[0];
     if (!conversation) throw new Error("Insert returned no conversation");
     if (conversation.state !== "with_agent") return { ok: false };
+
+    // The same text right after a message the agent did not answer is that message sent again (the employee
+    // pressed "Tentar de novo", or the network dropped the response): it is answered, not saved and counted twice.
+    const [last] = await tx
+      .select({ author: messages.author, text: messages.text })
+      .from(messages)
+      .where(eq(messages.conversationId, conversation.id))
+      .orderBy(desc(messages.createdAt))
+      .limit(1);
+    if (last?.author === "employee" && last.text === text) {
+      const { id, state, messageCount } = conversation;
+      return { ok: true, conversation: { id, state, messageCount }, startedAt: now };
+    }
 
     await tx.insert(messages).values({
       id: `msg-${randomUUID()}`,
