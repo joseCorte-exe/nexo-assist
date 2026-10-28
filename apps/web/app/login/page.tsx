@@ -28,19 +28,23 @@ export default function LoginPage() {
   );
 }
 
-/** Left panel. Shown from 1280 px; below that the form takes the whole screen. */
+/**
+ * Left panel, 800 of the design's 1440 px at any width. The logo and the pitch keep the design's 672 px column, centered;
+ * the numbers at the bottom span the whole panel. Shown from 1280 px; below that the form takes the whole screen.
+ */
 function Showcase() {
+  const column = "mx-auto w-full max-w-[672px]";
   return (
     <section
       aria-label="Nexo Assist"
-      className="hidden min-h-dvh w-[55.5556%] max-w-[800px] shrink-0 flex-col justify-between overflow-hidden bg-ink px-16 pt-10 pb-12 xl:flex"
+      className="hidden min-h-dvh w-5/9 shrink-0 flex-col justify-between overflow-hidden bg-ink px-16 pt-10 pb-12 xl:flex"
     >
-      <div className="flex items-center gap-2.5">
+      <div className={`${column} flex items-center gap-2.5`}>
         <NexoMark size={24} color="#FFFFFF" />
         <span className="text-17 font-bold tracking-[-0.2px] whitespace-nowrap text-white">Nexo Assist</span>
       </div>
 
-      <div className="flex flex-col gap-9">
+      <div className={`${column} flex flex-col gap-9`}>
         <div className="flex flex-col gap-[18px]">
           <p className="text-13.5 font-medium whitespace-nowrap text-[#FFFFFF8C]">Service desk de TI da Nexo</p>
           {/* nexo.pen says -1.2px; Pencil renders this line 8 px narrower than a browser does with that value. */}
