@@ -61,18 +61,23 @@ export const messages = sqliteTable(
   (table) => [index("messages_conversation_created").on(table.conversationId, table.createdAt)],
 );
 
-export const decisions = sqliteTable("decisions", {
-  id: text("id").primaryKey(),
-  messageId: text("message_id")
-    .notNull()
-    .references(() => messages.id),
-  understanding: text("understanding").notNull(),
-  action: text("action").notNull(),
-  toolsUsed: text("tools_used", { mode: "json" }).$type<string[]>().notNull(),
-  /** Missing when the agent skipped recordDecision and the code saved a reduced record. */
-  confidence: real("confidence"),
-  reason: text("reason"),
-});
+export const decisions = sqliteTable(
+  "decisions",
+  {
+    id: text("id").primaryKey(),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => messages.id),
+    understanding: text("understanding").notNull(),
+    action: text("action").notNull(),
+    toolsUsed: text("tools_used", { mode: "json" }).$type<string[]>().notNull(),
+    /** Missing when the agent skipped recordDecision and the code saved a reduced record. */
+    confidence: real("confidence"),
+    reason: text("reason"),
+  },
+  // One decision per agent message; loading a conversation joins on it.
+  (table) => [uniqueIndex("decisions_message_id").on(table.messageId)],
+);
 
 export const drafts = sqliteTable("drafts", {
   id: text("id").primaryKey(),

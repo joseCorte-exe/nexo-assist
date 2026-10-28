@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `decisions_message_id` ON `decisions` (`message_id`);
