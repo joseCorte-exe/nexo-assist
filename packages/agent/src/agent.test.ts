@@ -101,6 +101,15 @@ describe("streamReply", () => {
     expect(model.calls).toHaveLength(5);
   });
 
+  it("marks the instructions for the prompt cache, so the steps of a reply reuse them", async () => {
+    const { agent, model } = setup(hoursScript());
+    await streamReply(agent, turn).finished;
+    const [system] = model.calls[0]!.prompt;
+    expect(system?.role).toBe("system");
+    expect(system?.content).toContain("Você é o Nexo Assist");
+    expect(system?.providerOptions).toEqual({ anthropic: { cacheControl: { type: "ephemeral" } } });
+  });
+
   it("caps the tokens of each step", async () => {
     const { agent, model } = setup(hoursScript());
     await streamReply(agent, turn).finished;

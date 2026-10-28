@@ -40,7 +40,13 @@ export function createNexoAgent({
   return new Agent({
     id: "nexo-assist",
     name: "Nexo Assist",
-    instructions,
+    // The tools and these instructions are the same on every call (about 2.8 thousand tokens): cached, the second
+    // and third steps of a reply, and every later reply within five minutes, read them at a tenth of the price.
+    instructions: {
+      role: "system",
+      content: instructions,
+      providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+    },
     model,
     memory,
     tools: createTools({ helpCenter }),
