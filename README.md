@@ -18,4 +18,6 @@ pnpm dev
 
 O web sobe em http://localhost:3000 e o ticket-service em http://localhost:3001.
 
+O agent usa o Claude Haiku 5.5 e precisa de `ANTHROPIC_API_KEY` no `.env`. Sem chave, `NEXO_AGENT_MODEL=simulated` troca o modelo por regras fixas, as mesmas dos testes no navegador: o resto do agent (ferramentas, memória, registro de decisão) roda igual.
+
 Para entrar, qualquer senha serve. `ana.souza@nexo.com.br` entra como funcionária e `rafael.lima@nexo.com.br` como analista N2.
