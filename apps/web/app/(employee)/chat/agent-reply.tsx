@@ -1,8 +1,9 @@
 "use client";
 
-import { Check, ChevronDown, CircleAlert, LoaderCircle } from "lucide-react";
+import { ChevronDown, CircleAlert, LoaderCircle } from "lucide-react";
 import { useId, useRef, useState } from "react";
 import { Button } from "@/components/button";
+import { CheckIcon } from "@/components/design-icons";
 import { ACTION_LABELS, THINKING_LABEL } from "@/lib/agent-actions";
 import type { AgentTurn, Decision, Step } from "@/lib/chat-turns";
 import { formatConfidence } from "@/lib/format";
@@ -115,7 +116,7 @@ function Action({ label, state }: { label: string; state: Step["state"] }) {
               className="icon-swap absolute inset-0 size-3 animate-spin"
               data-hidden={state !== "running"}
             />
-            <Check aria-hidden className="icon-swap absolute inset-0 size-3" data-hidden={state === "running"} />
+            <CheckIcon aria-hidden className="icon-swap absolute inset-0 size-3" data-hidden={state === "running"} />
           </>
         )}
       </span>

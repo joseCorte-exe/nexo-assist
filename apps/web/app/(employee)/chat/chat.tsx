@@ -4,7 +4,7 @@ import { useChat } from "@ai-sdk/react";
 import type { ConversationResponse } from "@nexo/shared";
 import { DefaultChatTransport } from "ai";
 import { CircleAlert } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ACTION_LABELS, THINKING_LABEL } from "@/lib/agent-actions";
 import type { NexoUIMessage } from "@/lib/chat-message";
 import { type AgentTurn, liveTurns, type Turn, turnsFromHistory } from "@/lib/chat-turns";
@@ -120,9 +120,13 @@ export function Chat({ initial, employeeName }: { initial: ConversationResponse;
 }
 
 function EmployeeMessage({ text, unsent, onRetry }: { text: string; unsent: boolean; onRetry: () => void }) {
+  const bubble = useRef<HTMLDivElement>(null);
+  useWholePixelWidth(bubble, text);
   return (
     <article aria-label="Você" className="message-enter flex flex-col items-end gap-1.5">
-      <div className="max-w-[520px] rounded-[12px_12px_4px_12px] bg-ink px-4 py-[11px] text-14.5 leading-[21px] text-pretty wrap-anywhere whitespace-pre-line text-white">
+      <div
+        ref={bubble}
+        className="max-w-[520px] rounded-[12px_12px_4px_12px] bg-ink px-4 py-[11px] text-14.5 leading-[21px] text-pretty wrap-anywhere whitespace-pre-line text-white">
         {text}
       </div>
       {unsent ? (
@@ -136,6 +140,27 @@ function EmployeeMessage({ text, unsent, onRetry }: { text: string; unsent: bool
       ) : null}
     </article>
   );
+}
+
+/**
+ * The bubble hugs its text and sits against the right edge, so a fractional text width puts its left edge, and the
+ * text, between two pixels, which blurs the glyphs differently from nexo.pen. Rounding the width up to a whole pixel
+ * keeps the text on the pixel grid without changing how it wraps.
+ */
+function useWholePixelWidth(ref: RefObject<HTMLElement | null>, content: string) {
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const snap = () => {
+      element.style.width = "";
+      element.style.width = `${Math.ceil(element.getBoundingClientRect().width)}px`;
+    };
+    snap();
+    // The width depends on the font and the window: measure again once the font is in and on every resize.
+    void document.fonts.ready.then(snap);
+    window.addEventListener("resize", snap);
+    return () => window.removeEventListener("resize", snap);
+  }, [ref, content]);
 }
 
 /**
