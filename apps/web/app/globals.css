@@ -1,1 +1,180 @@
 @import "tailwindcss";
+
+/* Tokens from nexo.pen. Alpha colors keep the exact hex of the design. */
+@theme {
+  --color-paper: #ffffff;
+  --color-desk: #f6f7f9;
+  --color-ink: #1b2431;
+  --color-ink-2: #3d4656;
+  --color-ink-3: #5b6472;
+  --color-rule: #e6e8ec;
+  --color-cta: #0062c4;
+  --color-cta-hover: #0056ad;
+  --color-mark: #037af6;
+  --color-primary-soft: #0285f712;
+  --color-primary-text: #0069c7;
+  --color-success: #00bd6c;
+  --color-success-text: #00804a;
+  --color-warning: #f5a500;
+  --color-danger: #ee343b;
+  --color-danger-text: #c4161d;
+  --color-field: #1b24311f;
+  --color-card-line: #1b243117;
+
+  --font-display: var(--font-newsreader), Georgia, serif;
+  /* nexo.pen renders Newsreader at optical size 24 at every size: "Entrar" is 102 px wide, "72%" 62 px. */
+  --font-display--font-variation-settings: "opsz" 24;
+  --font-ui: var(--font-schibsted), system-ui, sans-serif;
+
+  /* Text sizes of nexo.pen with the line height the design gives each one. */
+  --text-11\.5: 11.5px;
+  --text-11\.5--line-height: 14px;
+  --text-12\.5: 12.5px;
+  --text-12\.5--line-height: 15px;
+  --text-13: 13px;
+  --text-13--line-height: 16px;
+  --text-13\.5: 13.5px;
+  --text-13\.5--line-height: 17px;
+  --text-14\.5: 14.5px;
+  --text-14\.5--line-height: 18px;
+  --text-15\.5: 15.5px;
+  --text-15\.5--line-height: 19px;
+  --text-16: 16px;
+  --text-16--line-height: 20px;
+  --text-17: 17px;
+  --text-17--line-height: 21px;
+  --text-24: 24px;
+  --text-24--line-height: 30px;
+  --text-34: 34px;
+  --text-34--line-height: 34px;
+
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-icon: cubic-bezier(0.2, 0, 0, 1);
+
+  --shadow-field: 0 1px 2px #1b24310a;
+  --shadow-cta: 0 1px 2px #0062c433, 0 6px 16px #0062c426;
+  --shadow-card: 0 1px 2px #1b24310d, 0 6px 18px #1b24310a;
+  --shadow-control: 0 1px 1px #1b24310d;
+  --shadow-menu: 0 1px 2px #1b243114, 0 8px 24px #1b24311f;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-ui);
+    /* The design sets no line height on most text, so it uses the font's own (Tailwind's default is 1.5). */
+    line-height: normal;
+    color: var(--color-ink);
+    background: var(--color-paper);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Keyboard focus only: pointer clicks do not draw a ring. */
+  :where(a, button, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--color-cta);
+    outline-offset: 2px;
+  }
+}
+
+/* Native modal dialog: fades and scales in from the center, closes faster than it opens. */
+.dialog {
+  opacity: 1;
+  scale: 1;
+  transition:
+    opacity 200ms var(--ease-out),
+    scale 200ms var(--ease-out),
+    overlay 200ms allow-discrete,
+    display 200ms allow-discrete;
+
+  @starting-style {
+    opacity: 0;
+    scale: 0.96;
+  }
+
+  &:not([open]) {
+    opacity: 0;
+    scale: 0.98;
+    transition-duration: 120ms;
+  }
+
+  &::backdrop {
+    background: #1b243166;
+    opacity: 1;
+    transition:
+      opacity 200ms var(--ease-out),
+      overlay 200ms allow-discrete,
+      display 200ms allow-discrete;
+  }
+
+  &:not([open])::backdrop {
+    opacity: 0;
+  }
+
+  @starting-style {
+    &[open]::backdrop {
+      opacity: 0;
+    }
+  }
+}
+
+/*
+ * Focus and error ring of the login fields: 1.5 px straddling the edge, as in nexo.pen. A 1x screen cannot draw
+ * half a pixel and would round it to 1 px, so there it is drawn as the design rasterizes it: 2 px at 75%.
+ */
+.field {
+  --ring-width: 1.5px;
+  --ring-strength: 100%;
+
+  @media (max-resolution: 1dppx) {
+    --ring-width: 2px;
+    --ring-strength: 75%;
+  }
+
+  &:focus-within,
+  &[data-invalid="true"] {
+    box-shadow: none;
+    outline-width: var(--ring-width);
+    outline-offset: calc(var(--ring-width) / -2);
+    outline-color: color-mix(in srgb, var(--color-cta) var(--ring-strength), transparent);
+  }
+
+  &[data-invalid="true"] {
+    outline-color: color-mix(in srgb, var(--color-danger) var(--ring-strength), transparent);
+  }
+}
+
+/* Popover menus scale from their trigger. */
+.menu-enter {
+  transform-origin: var(--origin, bottom left);
+  transition:
+    opacity 150ms var(--ease-out),
+    scale 150ms var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+    scale: 0.97;
+  }
+}
+
+/* Two icons in one place: cross-fade with scale and blur. */
+.icon-swap {
+  transition:
+    opacity 200ms var(--ease-icon),
+    scale 200ms var(--ease-icon),
+    filter 200ms var(--ease-icon);
+
+  &[data-hidden="true"] {
+    opacity: 0;
+    scale: 0.25;
+    filter: blur(4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dialog,
+  .menu-enter,
+  .icon-swap {
+    scale: 1 !important;
+    filter: none !important;
+  }
+}
