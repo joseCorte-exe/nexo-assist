@@ -18,7 +18,7 @@ Telas do design: "Chat — Novo chamado (desktop)" e "Chat — Consulta de chama
    - limites explícitos: até 5 passos, até 800 tokens de saída por passo, 45 s no total;
    - modelo `anthropic/claude-haiku-5-5`. Com `NEXO_AGENT_MODEL=simulated` entra um modelo simulado, com regras fixas, usado no Playwright e para rodar sem chave.
 4. `POST /api/chat` (só funcionário):
-   - numa transação, acha a conversa ativa ou cria uma, grava a mensagem do funcionário e soma 1 no contador;
+   - num batch só (uma ida ao banco, sem segurar a trava de escrita entre comandos), acha a conversa ativa ou cria uma, grava a mensagem do funcionário e soma 1 no contador;
    - conversa fora de `with_agent` devolve 409 e o LLM não é chamado (a gravação dessa mensagem e a cópia para a memória entram na feature 5);
    - responde em partes: primeiro `data-conversation` (id, estado e contador), depois o stream do agent no formato do AI SDK v7;
    - no fim, grava a mensagem do agent e a decisão. `toolsUsed` são as ferramentas que rodaram, na ordem, sem repetir e sem as internas da memória. Sem `recordDecision` válido, grava o registro reduzido (sem confiança e sem motivo). A primeira resposta da conversa marca `first_response_at`;
@@ -32,6 +32,7 @@ Telas do design: "Chat — Novo chamado (desktop)" e "Chat — Consulta de chama
    - a linha de ações cresce enquanto as ferramentas rodam, e o detalhe da decisão abre a partir dela (formato definido com o design-engineer, já que o design não desenha o detalhe);
    - caixa "Escreva para o Nexo…" com Enviar e o contador "N/30 mensagens nesta sessão";
    - estados: conversa vazia, carregando a página, agent pensando, resposta chegando, falha do agent, falha de rede e central de ajuda fora do ar.
+   - no celular (abaixo de 768 px), a barra lateral vira uma gaveta aberta pelo menu, e o chat usa a largura toda.
 8. Testes: contratos (shared), busca da central de ajuda e rota nova (ticket-service), resumo da decisão, ferramentas, passo obrigatório e memória com o modelo simulado (agent), as duas rotas com o agent de verdade e o LLM simulado (web), o mapa da tela (web) e o fluxo inteiro no navegador com o modelo simulado (Playwright).
 
 ## Fica de fora
