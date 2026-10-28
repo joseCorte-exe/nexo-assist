@@ -28,37 +28,41 @@ export default function LoginPage() {
   );
 }
 
-/** Left panel, 800 of the design's 1440 px at any width. Shown from 1280 px; below that the form takes the whole screen. */
+/**
+ * Left panel, 800 of the design's 1440 px at any width. Its content keeps the design's size and sits centered in it.
+ * Shown from 1280 px; below that the form takes the whole screen.
+ */
 function Showcase() {
   return (
     <section
       aria-label="Nexo Assist"
-      className="hidden min-h-dvh w-5/9 shrink-0 flex-col justify-between overflow-hidden bg-ink px-16 pt-10 pb-12 xl:flex"
+      className="hidden min-h-dvh w-5/9 shrink-0 justify-center overflow-hidden bg-ink xl:flex"
     >
-      <div className="flex items-center gap-2.5">
-        <NexoMark size={24} color="#FFFFFF" />
-        <span className="text-17 font-bold tracking-[-0.2px] whitespace-nowrap text-white">Nexo Assist</span>
-      </div>
-
-      <div className="flex flex-col gap-9">
-        <div className="flex flex-col gap-[18px]">
-          <p className="text-13.5 font-medium whitespace-nowrap text-[#FFFFFF8C]">Service desk de TI da Nexo</p>
-          {/* nexo.pen says -1.2px; Pencil renders this line 8 px narrower than a browser does with that value.
-              Kept at the design's 672 px so it breaks after "resolvido" on wide screens too. */}
-          <h1 className="max-w-[672px] font-display text-[54px] leading-[56px] font-normal tracking-[-1.48px] text-white">
-            Seu problema de TI, resolvido em uma conversa.
-          </h1>
-          <p className="w-[520px] max-w-full text-16 leading-[25px] text-[#FFFFFFA6]">
-            Descreva o que está acontecendo. O assistente consulta seus chamados, busca na central de ajuda e chama um
-            analista quando precisa.
-          </p>
+      <div className="flex w-full max-w-[800px] flex-col justify-between px-16 pt-10 pb-12">
+        <div className="flex items-center gap-2.5">
+          <NexoMark size={24} color="#FFFFFF" />
+          <span className="text-17 font-bold tracking-[-0.2px] whitespace-nowrap text-white">Nexo Assist</span>
         </div>
-        <ConversationPreview />
-      </div>
 
-      <Suspense fallback={<LoginStatsSkeleton />}>
-        <LoginStats />
-      </Suspense>
+        <div className="flex flex-col gap-9">
+          <div className="flex flex-col gap-[18px]">
+            <p className="text-13.5 font-medium whitespace-nowrap text-[#FFFFFF8C]">Service desk de TI da Nexo</p>
+            {/* nexo.pen says -1.2px; Pencil renders this line 8 px narrower than a browser does with that value. */}
+            <h1 className="font-display text-[54px] leading-[56px] font-normal tracking-[-1.48px] text-white">
+              Seu problema de TI, resolvido em uma conversa.
+            </h1>
+            <p className="w-[520px] max-w-full text-16 leading-[25px] text-[#FFFFFFA6]">
+              Descreva o que está acontecendo. O assistente consulta seus chamados, busca na central de ajuda e chama um
+              analista quando precisa.
+            </p>
+          </div>
+          <ConversationPreview />
+        </div>
+
+        <Suspense fallback={<LoginStatsSkeleton />}>
+          <LoginStats />
+        </Suspense>
+      </div>
     </section>
   );
 }
