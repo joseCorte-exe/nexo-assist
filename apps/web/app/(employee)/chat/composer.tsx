@@ -58,7 +58,7 @@ export function Composer({ count, busy, onSend, inputRef }: Props) {
         <button
           type="submit"
           aria-disabled={busy}
-          className="mb-1.5 flex h-9 shrink-0 items-center gap-1.5 rounded-md bg-cta px-3 text-13.5 font-semibold text-white transition-[background-color,scale,opacity] duration-150 ease-out hover:bg-cta-hover active:scale-[0.96] aria-disabled:cursor-progress aria-disabled:opacity-50 aria-disabled:active:scale-100"
+          className="mb-1.5 flex h-9 shrink-0 appearance-none items-center gap-1.5 rounded-md bg-cta px-3 text-13.5 font-semibold text-white transition-[background-color,scale,opacity] duration-150 ease-out hover:bg-cta-hover active:scale-[0.96] aria-disabled:cursor-progress aria-disabled:opacity-50 aria-disabled:active:scale-100"
         >
           <ArrowUpIcon aria-hidden className="size-3.5" />
           Enviar

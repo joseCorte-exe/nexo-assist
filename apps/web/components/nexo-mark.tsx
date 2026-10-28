@@ -4,9 +4,10 @@ export function NexoMark({ size, color }: { size: number; color: string }) {
   return (
     <span aria-hidden className="relative shrink-0 overflow-hidden" style={{ width: size, height: size }}>
       <svg
-        viewBox="0 0 24.388 20.6386"
-        className="absolute"
-        style={{ left: 1.806, top: 3.6821, width: 24.388, height: 20.6386 }}
+        viewBox="8.344650268554688e-7 0.000003725290298461914 24.387999653816223 20.638622373342514"
+        preserveAspectRatio="none"
+        className="absolute overflow-visible"
+        style={{ left: 1.806, top: 3.682, width: 24.388, height: 20.639 }}
       >
         <path
           fill={color}
