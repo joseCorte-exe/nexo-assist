@@ -2,11 +2,12 @@ import { Lock } from "lucide-react";
 import type { Metadata } from "next";
 import { connection } from "next/server";
 import type { ReactNode } from "react";
+import { Card } from "@/components/card";
 import { TopBar } from "@/components/top-bar";
 import { formatPasswordAge } from "@/lib/format";
 import { requireSession } from "@/lib/server/current-session";
 import { getDeps } from "@/lib/server/deps";
-import { getMe } from "@/lib/server/me";
+import { getEmployee } from "@/lib/server/me";
 import { ProfileError } from "./profile-error";
 import { PasswordCard } from "./password-card";
 import { ProfileLayout } from "./profile-layout";
@@ -17,7 +18,7 @@ export default async function ProfilePage() {
   await connection();
   const session = await requireSession("employee");
   // Same lookup as GET /api/me, done here so the page arrives ready.
-  const result = await getMe(session, getDeps().ticketService);
+  const result = await getEmployee(session, getDeps().ticketService);
 
   return (
     <>
@@ -25,24 +26,27 @@ export default async function ProfilePage() {
       <ProfileLayout>
         {!result.ok ? (
           <ProfileError reason={result.reason} />
-        ) : result.me.role === "employee" ? (
+        ) : (
           <>
-            <section aria-label="Dados de acesso" className="flex flex-col rounded-2xl bg-white shadow-card outline-1 -outline-offset-[0.5px] outline-card-line">
+            <Card as="section" aria-label="Dados de acesso" className="flex flex-col">
               <Row label="Nome">
-                <span className="text-14.5 font-medium text-ink">{result.me.name}</span>
+                <span className="text-14.5 font-medium text-ink">{result.employee.name}</span>
               </Row>
               <Row label="E-mail corporativo">
-                <span className="min-w-0 flex-1 truncate text-14.5 font-medium text-ink">{result.me.email}</span>
+                <span className="min-w-0 flex-1 truncate text-14.5 font-medium text-ink">{result.employee.email}</span>
                 <span className="flex shrink-0 items-center gap-[5px] text-12.5 text-ink-3">
                   <Lock aria-hidden className="size-[13px]" />
                   Gerenciado pela TI
                 </span>
               </Row>
-            </section>
+            </Card>
 
-            <PasswordCard email={result.me.email} age={formatPasswordAge(result.me.passwordChangedAt, new Date())} />
+            <PasswordCard
+              email={result.employee.email}
+              age={formatPasswordAge(result.employee.passwordChangedAt, new Date())}
+            />
           </>
-        ) : null}
+        )}
       </ProfileLayout>
     </>
   );

@@ -3,7 +3,7 @@ import { NexoMark } from "@/components/nexo-mark";
 import { initials } from "@/lib/format";
 import { requireSession } from "@/lib/server/current-session";
 import { SidebarNav } from "./sidebar-nav";
-import { SignOutButton } from "./sign-out-button";
+import { SignOutButton } from "@/components/sign-out-button";
 
 /** Shell of the employee pages: the sidebar of the design, with the person from the session. */
 export default async function EmployeeLayout({ children }: { children: ReactNode }) {

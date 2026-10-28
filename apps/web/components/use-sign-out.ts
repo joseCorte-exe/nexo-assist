@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { z } from "zod";
 import { callApi } from "@/lib/api-client";
 import { LOGIN_PATH } from "@/lib/route-guard";
 
@@ -13,7 +14,7 @@ export function useSignOut() {
   async function signOut() {
     if (pending) return;
     setPending(true);
-    await callApi("POST", "/api/auth/logout", null);
+    await callApi("POST", "/api/auth/logout", z.undefined());
     router.replace(LOGIN_PATH);
     router.refresh();
   }

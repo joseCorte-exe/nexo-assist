@@ -1,9 +1,10 @@
 "use client";
 
-import { corporateEmail, loginInput, loginResponse, resetPasswordResponse } from "@nexo/shared";
+import { loginInput, loginResponse, resetPasswordInput, resetPasswordResponse } from "@nexo/shared";
 import { ArrowRight, Check, CircleAlert, Eye, EyeOff, LoaderCircle, LockKeyhole, Mail } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ComponentType, type FormEvent, type ReactNode, useId, useRef, useState } from "react";
+import { Button } from "@/components/button";
 import { callApi } from "@/lib/api-client";
 import { homeOf } from "@/lib/route-guard";
 
@@ -63,23 +64,26 @@ export function LoginForm() {
   async function onForgotPassword() {
     if (pending) return;
     setFeedback(null);
-    const email = corporateEmail.safeParse(emailRef.current?.value ?? "");
-    if (!email.success) {
-      const message =
-        emailRef.current?.value.trim() === "" ? "Digite seu e-mail corporativo para receber o link." : email.error.issues[0]?.message;
-      setErrors({ email: message });
+    const input = resetPasswordInput.safeParse({ email: emailRef.current?.value });
+    if (!input.success) {
+      setErrors({ email: input.error.issues[0]?.message });
       emailRef.current?.focus();
       return;
     }
     setErrors({});
     setPending("reset");
-    const result = await callApi("POST", "/api/me/reset-password", resetPasswordResponse, { email: email.data });
+    const result = await callApi("POST", "/api/me/reset-password", resetPasswordResponse, input.data);
     setPending(null);
     setFeedback(result.ok ? { kind: "notice", text: result.data.notice } : { kind: "alert", text: result.message });
   }
 
   return (
-    <form noValidate onSubmit={onSubmit} aria-busy={pending !== null} className="flex w-full max-w-[380px] flex-col gap-7">
+    <form
+      noValidate
+      onSubmit={onSubmit}
+      aria-busy={pending !== null}
+      className="flex w-full max-w-[380px] flex-col gap-7"
+    >
       <div className="flex flex-col gap-2">
         <h1 className="font-display text-[40px] leading-[44px] font-normal tracking-[-0.8px] text-ink">Entrar</h1>
         <p className="text-15.5 leading-[23px] text-ink-3">Use seu e-mail corporativo e a senha da rede Nexo.</p>
@@ -124,17 +128,17 @@ export function LoginForm() {
         <Remember />
       </div>
 
-      <button
-        type="submit"
-        className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-cta text-15.5 font-semibold text-white shadow-cta transition-[background-color,scale] duration-150 ease-out hover:bg-cta-hover active:scale-[0.96] aria-disabled:cursor-progress"
-        aria-disabled={pending === "login"}
-      >
+      <Button type="submit" variant="primary" aria-disabled={pending === "login"}>
         <span>{pending === "login" ? "Entrando" : "Entrar"}</span>
         <span className="relative size-4">
           <ArrowRight aria-hidden className="icon-swap absolute inset-0 size-4" data-hidden={pending === "login"} />
-          <LoaderCircle aria-hidden className="icon-swap absolute inset-0 size-4 animate-spin" data-hidden={pending !== "login"} />
+          <LoaderCircle
+            aria-hidden
+            className="icon-swap absolute inset-0 size-4 animate-spin"
+            data-hidden={pending !== "login"}
+          />
         </span>
-      </button>
+      </Button>
 
       <FormFeedback feedback={feedback} />
     </form>
@@ -178,8 +182,7 @@ function Field({
           id,
           "aria-invalid": Boolean(error),
           "aria-describedby": error ? errorId : undefined,
-          className:
-            "h-full min-w-0 flex-1 bg-transparent text-14.5 text-ink outline-none placeholder:text-ink-3/60",
+          className: "h-full min-w-0 flex-1 bg-transparent text-14.5 text-ink outline-none placeholder:text-ink-3/60",
         })}
       </div>
       {error ? (
@@ -255,7 +258,15 @@ function FormFeedback({ feedback }: { feedback: Feedback }) {
   );
 }
 
-function Message({ icon: Icon, text, className }: { icon: ComponentType<{ className?: string }>; text: string; className: string }) {
+function Message({
+  icon: Icon,
+  text,
+  className,
+}: {
+  icon: ComponentType<{ className?: string }>;
+  text: string;
+  className: string;
+}) {
   return (
     <p className={`menu-enter flex items-start gap-2 text-pretty ${className}`}>
       <Icon className="mt-px size-3.5 shrink-0" />

@@ -5,11 +5,11 @@ export type ApiResult<T> = { ok: true; data: T } | { ok: false; status: number; 
 
 const NETWORK_MESSAGE = "Não foi possível falar com o servidor. Confira sua conexão e tente de novo.";
 
-/** Calls a web API route and reads the answer with the contract schema. Never throws. */
+/** Calls a web API route and reads the answer with the contract schema (z.undefined() for a 204). Never throws. */
 export async function callApi<T>(
   method: "GET" | "POST",
   url: string,
-  schema: z.ZodType<T> | null,
+  schema: z.ZodType<T>,
   body?: unknown,
 ): Promise<ApiResult<T>> {
   let response: Response;
@@ -30,7 +30,6 @@ export async function callApi<T>(
       ? { ok: false, status: response.status, ...error.data.error }
       : { ok: false, status: response.status, code: "unexpected", message: "Algo deu errado. Tente de novo." };
   }
-  if (!schema) return { ok: true, data: undefined as T };
   const parsed = schema.safeParse(json);
   return parsed.success
     ? { ok: true, data: parsed.data }

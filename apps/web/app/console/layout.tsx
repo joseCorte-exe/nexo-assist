@@ -13,7 +13,10 @@ export default async function ConsoleLayout({ children }: { children: ReactNode 
 
   return (
     <div className="flex h-dvh bg-paper">
-      <nav aria-label="Console" className="flex w-16 shrink-0 flex-col items-center gap-1.5 border-r border-rule bg-desk py-4">
+      <nav
+        aria-label="Console"
+        className="flex w-16 shrink-0 flex-col items-center gap-1.5 border-r border-rule bg-desk py-4"
+      >
         <span className="grid size-10 place-items-center pb-2">
           <NexoMark size={22} color="var(--color-mark)" />
         </span>

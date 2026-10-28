@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { analystSchema, employeeSchema } from "./people";
+import { person } from "./people";
 
 // Contracts of the web API (ARQUITETURA.md, section 7). The screens and the route handlers use the same schemas.
 
@@ -10,17 +10,13 @@ export type ApiError = z.infer<typeof apiError>;
 export const role = z.enum(["employee", "analyst"]);
 export type Role = z.infer<typeof role>;
 
-/** E-mails are compared trimmed and lowercased everywhere. */
-export const corporateEmail = z
-  .string()
-  .trim()
-  .toLowerCase()
-  .min(1, "Digite seu e-mail corporativo.")
-  .pipe(z.email("Digite um e-mail válido."));
+/** E-mails are compared trimmed and lowercased everywhere. The message for an empty field depends on the form. */
+export const corporateEmail = (emptyMessage = "Digite seu e-mail corporativo.") =>
+  z.string({ error: emptyMessage }).trim().toLowerCase().min(1, emptyMessage).pipe(z.email("Digite um e-mail válido."));
 
 // POST /api/auth/login
 export const loginInput = z.object({
-  email: corporateEmail,
+  email: corporateEmail(),
   // Any password works: the challenge has no real accounts.
   password: z.string().min(1, "Digite sua senha."),
   remember: z.boolean(),
@@ -31,14 +27,13 @@ export const loginResponse = z.object({ role });
 export type LoginResponse = z.infer<typeof loginResponse>;
 
 // GET /api/me
-export const meResponse = z.discriminatedUnion("role", [
-  employeeSchema.extend({ role: z.literal("employee") }),
-  analystSchema.extend({ role: z.literal("analyst") }),
-]);
+export const meResponse = person;
 export type MeResponse = z.infer<typeof meResponse>;
 
-// POST /api/me/reset-password. Logged in, the e-mail comes from the session; on the login screen, from the body.
-export const resetPasswordInput = z.object({ email: corporateEmail.optional() });
+// POST /api/me/reset-password. Only answers the notice, for any e-mail, so it does not reveal who exists.
+export const resetPasswordInput = z.object({
+  email: corporateEmail("Digite seu e-mail corporativo para receber o link."),
+});
 export type ResetPasswordInput = z.infer<typeof resetPasswordInput>;
 
 export const resetPasswordResponse = z.object({ notice: z.string() });

@@ -52,7 +52,7 @@ function clientWith(responses: Array<Response | Error>, timeoutMs?: number) {
   return { client, fetch };
 }
 
-describe("people", () => {
+describe("findPersonByEmail", () => {
   const ana = {
     id: "emp-ana",
     name: "Ana Souza",
@@ -60,24 +60,61 @@ describe("people", () => {
     department: "Financeiro",
     passwordChangedAt: "2026-09-14T13:00:00.000Z",
   };
+  const rafael = { id: "analyst-rafael", name: "Rafael Lima", email: "rafael.lima@nexo.com.br", level: "N2", available: true };
 
-  it("finds an employee by e-mail through the query string", async () => {
-    const { client, fetch } = clientWith([json(200, [ana])]);
-    const result = await client.findEmployeeByEmail("ana.souza@nexo.com.br");
-    expect(result).toEqual({ ok: true, data: ana });
-    expect(String(fetch.mock.calls[0]?.[0])).toBe("http://tickets.test/employees?email=ana.souza%40nexo.com.br");
+  /** A ticket-service that answers by path, so the two parallel lookups never depend on call order. */
+  function routedClient(routes: { employees: () => Response; analysts: () => Response }) {
+    const fetch = vi.fn(async (url: URL) => (url.pathname === "/employees" ? routes.employees() : routes.analysts()));
+    const client = createTicketServiceClient({
+      baseUrl: "http://tickets.test",
+      secret: "s3cret",
+      fetch: fetch as unknown as typeof globalThis.fetch,
+      sleep: async () => {},
+    });
+    return { client, fetch };
+  }
+  const down = () => json(503, {});
+
+  it("finds an employee, looking up the e-mail in the query string", async () => {
+    const { client, fetch } = routedClient({ employees: () => json(200, [ana]), analysts: () => json(200, [rafael]) });
+    expect(await client.findPersonByEmail(ana.email)).toEqual({ ok: true, data: { role: "employee", ...ana } });
+    expect(fetch.mock.calls.map(([url]) => String(url))).toContain(
+      "http://tickets.test/employees?email=ana.souza%40nexo.com.br",
+    );
   });
 
-  it("returns null when no employee has the e-mail", async () => {
-    const { client } = clientWith([json(200, [])]);
-    expect(await client.findEmployeeByEmail("ninguem@nexo.com.br")).toEqual({ ok: true, data: null });
+  it("finds an analyst by e-mail", async () => {
+    const { client } = routedClient({ employees: () => json(200, []), analysts: () => json(200, [rafael]) });
+    expect(await client.findPersonByEmail(rafael.email)).toEqual({ ok: true, data: { role: "analyst", ...rafael } });
+  });
+
+  it("prefers the employee when both have the e-mail", async () => {
+    const twin = { ...rafael, email: ana.email };
+    const { client } = routedClient({ employees: () => json(200, [ana]), analysts: () => json(200, [twin]) });
+    const result = await client.findPersonByEmail(ana.email);
+    expect(result.ok && result.data?.role).toBe("employee");
+  });
+
+  it("says nobody has the e-mail only when both lookups answered", async () => {
+    const { client } = routedClient({ employees: () => json(200, []), analysts: () => json(200, [rafael]) });
+    expect(await client.findPersonByEmail("ninguem@nexo.com.br")).toEqual({ ok: true, data: null });
+  });
+
+  it("fails instead of saying nobody when a lookup failed", async () => {
+    const { client } = routedClient({ employees: down, analysts: () => json(200, [rafael]) });
+    const result = await client.findPersonByEmail("ninguem@nexo.com.br");
+    expect(result.ok).toBe(false);
+  });
+
+  it("still finds the analyst when only the employee lookup failed", async () => {
+    const { client } = routedClient({ employees: down, analysts: () => json(200, [rafael]) });
+    const result = await client.findPersonByEmail(rafael.email);
+    expect(result.ok && result.data?.role).toBe("analyst");
   });
 
   it("lists the analysts", async () => {
-    const rafael = { id: "analyst-rafael", name: "Rafael Lima", email: "rafael.lima@nexo.com.br", level: "N2", available: true };
-    const { client, fetch } = clientWith([json(200, [rafael])]);
+    const { client } = routedClient({ employees: () => json(200, []), analysts: () => json(200, [rafael]) });
     expect(await client.listAnalysts()).toEqual({ ok: true, data: [rafael] });
-    expect(String(fetch.mock.calls[0]?.[0])).toBe("http://tickets.test/analysts");
   });
 });
 

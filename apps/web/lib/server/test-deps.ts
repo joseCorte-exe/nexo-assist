@@ -1,10 +1,10 @@
-import { type Analyst, type Employee, sampleAnalysts, sampleEmployees, type TicketServiceResult } from "@nexo/shared";
+import { type Analyst, createTicketServiceClient, type Employee, sampleAnalysts, sampleEmployees } from "@nexo/shared";
 import { NextRequest } from "next/server";
 import { createDb } from "@/db";
 import { migrateDb } from "@/db/migrate";
 import { seed } from "@/db/seed";
 import type { Deps } from "./deps";
-import { createSession, SESSION_COOKIE, type SessionUser, signSession } from "./session";
+import { createSession, SESSION_COOKIE, type SessionPerson, signSession } from "./session";
 
 // Test helpers: a real in-memory conversations DB and an in-memory ticket-service with the sample people.
 
@@ -18,20 +18,23 @@ export const ana: Employee = {
 };
 export const rafael: Analyst = { ...sampleAnalysts[0] };
 
-const unavailable = { ok: false, error: { code: "unavailable", status: 503, message: "down" } } as const;
-
+/**
+ * The real ticket-service client, answering from the sample people instead of the network,
+ * so tests go through the same lookup rules the app uses.
+ */
 export function fakeTicketService({ down = false } = {}): Deps["ticketService"] {
   const employees: Employee[] = sampleEmployees.map((employee) => ({
     ...employee,
     passwordChangedAt: ana.passwordChangedAt,
   }));
   const analysts: Analyst[] = sampleAnalysts.map((analyst) => ({ ...analyst }));
-  return {
-    findEmployeeByEmail: async (email): Promise<TicketServiceResult<Employee | null>> =>
-      down ? unavailable : { ok: true, data: employees.find((employee) => employee.email === email) ?? null },
-    listAnalysts: async (): Promise<TicketServiceResult<Analyst[]>> =>
-      down ? unavailable : { ok: true, data: analysts },
+  const fetch = async (url: URL | RequestInfo) => {
+    if (down) return Response.json({}, { status: 503 });
+    const { pathname, searchParams } = new URL(String(url));
+    if (pathname === "/analysts") return Response.json(analysts);
+    return Response.json(employees.filter((employee) => employee.email === searchParams.get("email")));
   };
+  return createTicketServiceClient({ baseUrl: "http://tickets.test", secret: "s", fetch, sleep: async () => {} });
 }
 
 export async function testDeps(overrides: Partial<Deps> = {}): Promise<Deps> {
@@ -48,8 +51,8 @@ export async function testDeps(overrides: Partial<Deps> = {}): Promise<Deps> {
   };
 }
 
-export async function sessionCookieFor(user: SessionUser) {
-  return `${SESSION_COOKIE}=${await signSession(createSession(user, { remember: true, now: NOW }), SECRET)}`;
+export async function sessionCookieFor(person: SessionPerson) {
+  return `${SESSION_COOKIE}=${await signSession(createSession(person, { remember: true, now: NOW }), SECRET)}`;
 }
 
 export function request(path: string, init: { method?: string; body?: unknown; cookie?: string } = {}) {

@@ -1,12 +1,12 @@
 import { createTicketServiceClient, type TicketServiceClient } from "@nexo/shared";
 import { z } from "zod";
 import { createDb, type Db } from "@/db";
-import { sessionSecret } from "./session";
+import { getSessionSecret } from "./session";
 
 /** What the server code needs from the outside. Route handlers get the real one; tests build their own. */
 export type Deps = {
   db: Db;
-  ticketService: Pick<TicketServiceClient, "findEmployeeByEmail" | "listAnalysts">;
+  ticketService: Pick<TicketServiceClient, "findPersonByEmail" | "listAnalysts">;
   sessionSecret: string;
   secureCookies: boolean;
   now: () => Date;
@@ -17,7 +17,6 @@ const env = z.object({
   CONVERSATIONS_DB_AUTH_TOKEN: z.string().optional(),
   TICKET_SERVICE_URL: z.url(),
   TICKET_SERVICE_SECRET: z.string().min(1),
-  SESSION_SECRET: sessionSecret,
 });
 
 let deps: Deps | undefined;
@@ -32,7 +31,7 @@ export function getDeps(): Deps {
         baseUrl: config.TICKET_SERVICE_URL,
         secret: config.TICKET_SERVICE_SECRET,
       }),
-      sessionSecret: config.SESSION_SECRET,
+      sessionSecret: getSessionSecret(),
       secureCookies: process.env.NODE_ENV === "production",
       now: () => new Date(),
     };

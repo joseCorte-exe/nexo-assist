@@ -3,6 +3,8 @@
 import { resetPasswordResponse } from "@nexo/shared";
 import { CircleAlert, KeyRound, LoaderCircle, Mail, RotateCcwKey } from "lucide-react";
 import { useState } from "react";
+import { Button } from "@/components/button";
+import { Card } from "@/components/card";
 import { callApi } from "@/lib/api-client";
 
 type Strip = { kind: "info" | "sent" | "failed"; text: string };
@@ -18,7 +20,7 @@ export function PasswordCard({ email, age }: { email: string; age: string }) {
   async function resetPassword() {
     if (pending) return;
     setPending(true);
-    const result = await callApi("POST", "/api/me/reset-password", resetPasswordResponse, {});
+    const result = await callApi("POST", "/api/me/reset-password", resetPasswordResponse, { email });
     setPending(false);
     setStrip(result.ok ? { kind: "sent", text: result.data.notice } : { kind: "failed", text: result.message });
   }
@@ -26,10 +28,7 @@ export function PasswordCard({ email, age }: { email: string; age: string }) {
   const failed = strip.kind === "failed";
   const StripIcon = failed ? CircleAlert : Mail;
   return (
-    <section
-      aria-labelledby="password-title"
-      className="flex flex-col overflow-hidden rounded-2xl bg-white shadow-card outline-1 -outline-offset-[0.5px] outline-card-line"
-    >
+    <Card as="section" aria-labelledby="password-title" className="flex flex-col overflow-hidden">
       <div className="flex items-center gap-4 p-6">
         <span aria-hidden className="grid size-10 shrink-0 place-items-center rounded-full bg-desk text-ink-2">
           <KeyRound className="size-[18px]" />
@@ -40,18 +39,17 @@ export function PasswordCard({ email, age }: { email: string; age: string }) {
           </h2>
           <p className="text-13.5 text-ink-3">{age}</p>
         </div>
-        <button
-          type="button"
-          onClick={resetPassword}
-          aria-disabled={pending}
-          className="flex h-9 shrink-0 items-center gap-[7px] rounded-lg bg-white pr-3.5 pl-3 text-13.5 font-medium whitespace-nowrap text-ink-2 shadow-control outline-1 -outline-offset-[0.5px] outline-field transition-[background-color,scale] duration-150 ease-out hover:bg-desk active:scale-[0.96] aria-disabled:cursor-progress"
-        >
+        <Button variant="secondary" onClick={resetPassword} aria-disabled={pending} className="pr-3.5 pl-3">
           <span className="relative size-[15px]">
             <RotateCcwKey aria-hidden className="icon-swap absolute inset-0 size-[15px]" data-hidden={pending} />
-            <LoaderCircle aria-hidden className="icon-swap absolute inset-0 size-[15px] animate-spin" data-hidden={!pending} />
+            <LoaderCircle
+              aria-hidden
+              className="icon-swap absolute inset-0 size-[15px] animate-spin"
+              data-hidden={!pending}
+            />
           </span>
           Redefinir senha
-        </button>
+        </Button>
       </div>
       <div className="flex items-center gap-2 border-t border-rule bg-desk px-6 pt-[11px] pb-3 text-13">
         <StripIcon aria-hidden className={`size-3.5 shrink-0 ${failed ? "text-danger-text" : "text-ink-3"}`} />
@@ -64,6 +62,6 @@ export function PasswordCard({ email, age }: { email: string; age: string }) {
           {strip.text}
         </span>
       </div>
-    </section>
+    </Card>
   );
 }

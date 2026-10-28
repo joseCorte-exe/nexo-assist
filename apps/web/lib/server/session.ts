@@ -1,4 +1,4 @@
-import { role } from "@nexo/shared";
+import { type Person, role } from "@nexo/shared";
 import { z } from "zod";
 
 // The session lives only in a signed cookie (ARQUITETURA.md, section 6): no table, nothing to clean up.
@@ -13,7 +13,7 @@ const REMEMBER_S = 30 * 24 * HOUR_S;
 const BROWSER_SESSION_S = 12 * HOUR_S;
 
 const sessionSchema = z.object({
-  sub: z.string().min(1),
+  id: z.string().min(1),
   role,
   name: z.string(),
   email: z.string(),
@@ -22,24 +22,20 @@ const sessionSchema = z.object({
 });
 export type Session = z.infer<typeof sessionSchema>;
 
-export const sessionSecret = z.string().min(16, "SESSION_SECRET must have at least 16 characters");
+const sessionSecret = z.string().min(16, "SESSION_SECRET must have at least 16 characters");
 
-/** Read on its own so the proxy does not load the rest of the server dependencies. */
+/** The one place that reads the secret. It lives here so the proxy does not load the other server dependencies. */
 export function getSessionSecret(): string {
   return sessionSecret.parse(process.env.SESSION_SECRET);
 }
 
-export type SessionUser = { role: Session["role"]; id: string; name: string; email: string };
+/** The part of a person the session carries: enough for the sidebar and to find them again. */
+export type SessionPerson = Pick<Person, "id" | "role" | "name" | "email">;
 
-export function createSession(user: SessionUser, { remember, now }: { remember: boolean; now: Date }): Session {
+export function createSession(person: SessionPerson, { remember, now }: { remember: boolean; now: Date }): Session {
   const lifetime = remember ? REMEMBER_S : BROWSER_SESSION_S;
-  return {
-    sub: user.id,
-    role: user.role,
-    name: user.name,
-    email: user.email,
-    exp: Math.floor(now.getTime() / 1000) + lifetime,
-  };
+  const { id, role, name, email } = person;
+  return { id, role, name, email, exp: Math.floor(now.getTime() / 1000) + lifetime };
 }
 
 export async function signSession(session: Session, secret: string): Promise<string> {
@@ -75,6 +71,11 @@ export async function verifySession(token: string, secret: string, now: Date): P
   const parsed = sessionSchema.safeParse(json);
   if (!parsed.success || parsed.data.exp * 1000 <= now.getTime()) return null;
   return parsed.data;
+}
+
+/** The session in a cookie value that may be missing. Proxy, pages and API routes all read it through here. */
+export function sessionFrom(token: string | undefined, secret: string, now: Date): Promise<Session | null> {
+  return token ? verifySession(token, secret, now) : Promise.resolve(null);
 }
 
 export function sessionCookieOptions({ remember, secure }: { remember: boolean; secure: boolean }) {

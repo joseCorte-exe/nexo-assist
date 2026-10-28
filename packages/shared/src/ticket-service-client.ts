@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { analystSchema, type Employee, employeeSchema } from "./people";
+import { analystSchema, employeeSchema, type Person } from "./people";
 import { type CreateTicketInput, ticketSchema } from "./tickets";
 
 export const SERVICE_SECRET_HEADER = "x-service-secret";
@@ -91,13 +91,30 @@ export function createTicketServiceClient(options: Options) {
     return { ok: false, error: lastError };
   }
 
+  const listAnalysts = () => request(z.array(analystSchema), "GET", "/analysts");
+
+  /**
+   * Who signs in with the e-mail. Employees and analysts are looked up at the same time and an employee wins a tie.
+   * It only answers "nobody" (null) when both lookups answered, so an outage never reads as a wrong e-mail.
+   */
+  async function findPersonByEmail(email: string): Promise<TicketServiceResult<Person | null>> {
+    const [employees, analysts] = await Promise.all([
+      request(z.array(employeeSchema), "GET", `/employees?${new URLSearchParams({ email })}`),
+      listAnalysts(),
+    ]);
+    const employee = employees.ok ? employees.data[0] : undefined;
+    if (employee) return { ok: true, data: { role: "employee", ...employee } };
+    const analyst = analysts.ok ? analysts.data.find((candidate) => candidate.email === email) : undefined;
+    if (analyst) return { ok: true, data: { role: "analyst", ...analyst } };
+    if (!employees.ok) return employees;
+    if (!analysts.ok) return analysts;
+    return { ok: true, data: null };
+  }
+
   return {
     request,
-    findEmployeeByEmail: async (email: string): Promise<TicketServiceResult<Employee | null>> => {
-      const result = await request(z.array(employeeSchema), "GET", `/employees?${new URLSearchParams({ email })}`);
-      return result.ok ? { ok: true, data: result.data[0] ?? null } : result;
-    },
-    listAnalysts: () => request(z.array(analystSchema), "GET", "/analysts"),
+    findPersonByEmail,
+    listAnalysts,
     createTicket: (input: CreateTicketInput, idempotencyKey: string) =>
       request(ticketSchema, "POST", "/tickets", { body: input, idempotencyKey }),
   };

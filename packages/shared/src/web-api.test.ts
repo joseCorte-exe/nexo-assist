@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { loginInput, meResponse, resetPasswordInput } from "./web-api";
+import { person } from "./people";
+import { loginInput, resetPasswordInput } from "./web-api";
 
 describe("loginInput", () => {
   it("trims and lowercases the e-mail", () => {
@@ -19,14 +20,17 @@ describe("loginInput", () => {
 });
 
 describe("resetPasswordInput", () => {
-  it("allows no body e-mail, for a logged-in user", () => {
-    expect(resetPasswordInput.parse({})).toEqual({});
+  it("needs the e-mail, and says what the link is for", () => {
+    const parsed = resetPasswordInput.safeParse({ email: " " });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues[0]?.message).toBe("Digite seu e-mail corporativo para receber o link.");
+    expect(resetPasswordInput.parse({ email: "Ana.Souza@nexo.com.br" })).toEqual({ email: "ana.souza@nexo.com.br" });
   });
 });
 
-describe("meResponse", () => {
+describe("person", () => {
   it("tells employees and analysts apart by role", () => {
-    const employee = meResponse.parse({
+    const employee = person.parse({
       role: "employee",
       id: "emp-ana",
       name: "Ana Souza",
@@ -36,7 +40,7 @@ describe("meResponse", () => {
     });
     expect(employee.role).toBe("employee");
 
-    const analyst = meResponse.safeParse({ role: "analyst", id: "a", name: "R", email: "r@nexo.com.br", department: "x" });
+    const analyst = person.safeParse({ role: "analyst", id: "a", name: "R", email: "r@nexo.com.br", department: "x" });
     expect(analyst.success).toBe(false);
   });
 });

@@ -2,7 +2,7 @@ import type { ApiError } from "@nexo/shared";
 import { type NextRequest, NextResponse } from "next/server";
 import type { z } from "zod";
 import type { Deps } from "./deps";
-import { type Session, SESSION_COOKIE, verifySession } from "./session";
+import { type Session, SESSION_COOKIE, sessionFrom } from "./session";
 
 export function jsonError(status: number, code: string, message: string) {
   return NextResponse.json<ApiError>({ error: { code, message } }, { status });
@@ -14,8 +14,7 @@ export const serviceUnavailable = () =>
   jsonError(503, "service_unavailable", "O serviço de chamados não respondeu. Tente de novo em instantes.");
 
 export function readSession(request: NextRequest, deps: Deps): Promise<Session | null> {
-  const token = request.cookies.get(SESSION_COOKIE)?.value;
-  return token ? verifySession(token, deps.sessionSecret, deps.now()) : Promise.resolve(null);
+  return sessionFrom(request.cookies.get(SESSION_COOKIE)?.value, deps.sessionSecret, deps.now());
 }
 
 /** Parses the JSON body with the contract schema. On failure, the response carries the first problem found. */

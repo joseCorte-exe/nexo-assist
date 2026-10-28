@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { createSession, SESSION_COOKIE, sessionCookieOptions, signSession, verifySession } from "./session";
+import {
+  createSession,
+  SESSION_COOKIE,
+  sessionCookieOptions,
+  sessionFrom,
+  signSession,
+  verifySession,
+} from "./session";
 
 const SECRET = "test-session-secret-0123456789";
 const now = new Date("2026-10-26T13:00:00Z");
@@ -34,9 +41,7 @@ describe("signSession and verifySession", () => {
   it("rejects a token whose payload was changed", async () => {
     const token = await signSession(createSession(ana, { remember: true, now }), SECRET);
     const [, signature] = token.split(".");
-    const forged = Buffer.from(JSON.stringify({ ...ana, role: "analyst", sub: "emp-ana", exp: 9e9 })).toString(
-      "base64url",
-    );
+    const forged = Buffer.from(JSON.stringify({ ...ana, role: "analyst", exp: 9e9 })).toString("base64url");
     expect(await verifySession(`${forged}.${signature}`, SECRET, now)).toBeNull();
   });
 
@@ -66,5 +71,13 @@ describe("sessionCookieOptions", () => {
   it("keeps the cookie for 30 days with remember, and only while the browser is open without it", () => {
     expect(sessionCookieOptions({ remember: true, secure: false }).maxAge).toBe(30 * 24 * 60 * 60);
     expect(sessionCookieOptions({ remember: false, secure: false })).not.toHaveProperty("maxAge");
+  });
+});
+
+describe("sessionFrom", () => {
+  it("reads a cookie value, and treats a missing one as no session", async () => {
+    const session = createSession(ana, { remember: true, now });
+    expect(await sessionFrom(await signSession(session, SECRET), SECRET, now)).toEqual(session);
+    expect(await sessionFrom(undefined, SECRET, now)).toBeNull();
   });
 });

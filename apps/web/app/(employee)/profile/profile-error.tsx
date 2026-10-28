@@ -3,6 +3,8 @@
 import { CircleAlert, LoaderCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
+import { Button } from "@/components/button";
+import { Card } from "@/components/card";
 import { useSignOut } from "@/components/use-sign-out";
 
 const copy = {
@@ -27,26 +29,26 @@ export function ProfileError({ reason }: { reason: keyof typeof copy }) {
   const pending = retrying || signingOut;
 
   return (
-    <section
-      role="alert"
-      className="flex items-start gap-4 rounded-2xl bg-white p-6 shadow-card outline-1 -outline-offset-[0.5px] outline-card-line"
-    >
-      <span aria-hidden className="grid size-10 shrink-0 place-items-center rounded-full bg-[#EE343B12] text-danger-text">
+    <Card as="section" role="alert" className="flex items-start gap-4 p-6">
+      <span
+        aria-hidden
+        className="grid size-10 shrink-0 place-items-center rounded-full bg-[#EE343B12] text-danger-text"
+      >
         <CircleAlert className="size-[18px]" />
       </span>
       <div className="flex flex-1 flex-col gap-[3px]">
         <h2 className="text-14.5 font-semibold text-ink">{title}</h2>
         <p className="text-13.5 text-pretty text-ink-3">{text}</p>
       </div>
-      <button
-        type="button"
+      <Button
+        variant="secondary"
         aria-disabled={pending}
         onClick={() => (reason === "not_found" ? signOut() : startRetry(() => router.refresh()))}
-        className="flex h-9 shrink-0 items-center gap-[7px] rounded-lg bg-white px-3.5 text-13.5 font-medium whitespace-nowrap text-ink-2 shadow-control outline-1 -outline-offset-[0.5px] outline-field transition-[background-color,scale] duration-150 ease-out hover:bg-desk active:scale-[0.96]"
+        className="px-3.5"
       >
         {pending ? <LoaderCircle aria-hidden className="size-[15px] animate-spin" /> : null}
         {action}
-      </button>
-    </section>
+      </Button>
+    </Card>
   );
 }

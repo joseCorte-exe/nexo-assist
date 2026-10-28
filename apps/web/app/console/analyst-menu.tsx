@@ -1,14 +1,12 @@
 "use client";
 
-import { LogOut } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
-import { useSignOut } from "@/components/use-sign-out";
+import { SignOutButton } from "@/components/sign-out-button";
 import { initials } from "@/lib/format";
 
 /** The analyst's avatar at the bottom of the rail. It opens a small menu with who is signed in and "Sair". */
 export function AnalystMenu({ name, email }: { name: string; email: string }) {
   const [open, setOpen] = useState(false);
-  const { signOut, pending } = useSignOut();
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const itemRef = useRef<HTMLButtonElement>(null);
@@ -58,17 +56,7 @@ export function AnalystMenu({ name, email }: { name: string; email: string }) {
             <span className="truncate text-13.5 font-semibold text-ink">{name}</span>
             <span className="truncate text-11.5 text-ink-3">{email}</span>
           </div>
-          <button
-            ref={itemRef}
-            type="button"
-            role="menuitem"
-            onClick={signOut}
-            aria-disabled={pending}
-            className="flex h-[34px] w-full items-center gap-2.5 rounded-lg px-2.5 text-13.5 font-medium text-ink-2 transition-colors duration-150 outline-none hover:bg-desk focus-visible:bg-desk"
-          >
-            <LogOut aria-hidden className="size-4 text-ink-3" />
-            Sair
-          </button>
+          <SignOutButton ref={itemRef} role="menuitem" className="outline-none focus-visible:bg-desk" />
         </div>
       ) : null}
     </div>

@@ -1,46 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { authenticate, login, logout } from "./auth";
+import { login, logout } from "./auth";
 import { SESSION_COOKIE, verifySession } from "./session";
 import { fakeTicketService, NOW, request, SECRET, sessionCookieFor, testDeps } from "./test-deps";
-
-describe("authenticate", () => {
-  it("finds an employee", async () => {
-    expect(await authenticate("ana.souza@nexo.com.br", fakeTicketService())).toEqual({
-      ok: true,
-      user: { role: "employee", id: "emp-ana", name: "Ana Souza", email: "ana.souza@nexo.com.br" },
-    });
-  });
-
-  it("finds an analyst", async () => {
-    expect(await authenticate("rafael.lima@nexo.com.br", fakeTicketService())).toEqual({
-      ok: true,
-      user: { role: "analyst", id: "analyst-rafael", name: "Rafael Lima", email: "rafael.lima@nexo.com.br" },
-    });
-  });
-
-  it("says the e-mail was not found when nobody has it", async () => {
-    expect(await authenticate("ninguem@nexo.com.br", fakeTicketService())).toEqual({
-      ok: false,
-      reason: "email_not_found",
-    });
-  });
-
-  it("does not say the e-mail was not found when it could not look", async () => {
-    expect(await authenticate("ninguem@nexo.com.br", fakeTicketService({ down: true }))).toEqual({
-      ok: false,
-      reason: "service_unavailable",
-    });
-  });
-
-  it("still signs in an analyst when only the employee lookup fails", async () => {
-    const service = fakeTicketService();
-    const result = await authenticate("rafael.lima@nexo.com.br", {
-      ...service,
-      findEmployeeByEmail: fakeTicketService({ down: true }).findEmployeeByEmail,
-    });
-    expect(result.ok && result.user.role).toBe("analyst");
-  });
-});
 
 describe("POST /api/auth/login", () => {
   const post = (body: unknown) => request("/api/auth/login", { method: "POST", body });
@@ -55,7 +16,7 @@ describe("POST /api/auth/login", () => {
 
     const cookie = response.cookies.get(SESSION_COOKIE);
     expect(cookie).toMatchObject({ httpOnly: true, sameSite: "lax", path: "/", maxAge: 30 * 24 * 60 * 60 });
-    expect(await verifySession(cookie?.value ?? "", SECRET, NOW)).toMatchObject({ sub: "emp-ana", role: "employee" });
+    expect(await verifySession(cookie?.value ?? "", SECRET, NOW)).toMatchObject({ id: "emp-ana", role: "employee" });
   });
 
   it("sets a browser-session cookie without remember", async () => {

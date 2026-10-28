@@ -6,7 +6,7 @@ import type { Deps } from "../app";
 import { errorBody } from "../errors";
 import { analysts, employees } from "../db/schema";
 
-const employeesQuery = z.object({ email: corporateEmail });
+const employeesQuery = z.object({ email: corporateEmail() });
 
 export function employeeRoutes(deps: Deps) {
   // A filter over the collection, so it answers a list: empty when nobody has the e-mail.
