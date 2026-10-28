@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { kbArticleSchema } from "./help-center";
 import { analystSchema, employeeSchema, type Person } from "./people";
 import { type CreateTicketInput, ticketSchema } from "./tickets";
 
@@ -117,6 +118,8 @@ export function createTicketServiceClient(options: Options) {
     request,
     findPersonByEmail,
     listAnalysts,
+    searchArticles: (query: string) =>
+      request(z.array(kbArticleSchema), "GET", `/kb/search?${new URLSearchParams({ q: query })}`),
     createTicket: (input: CreateTicketInput, idempotencyKey: string) =>
       request(ticketSchema, "POST", "/tickets", { body: input, idempotencyKey }),
   };
