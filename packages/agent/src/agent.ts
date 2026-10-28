@@ -25,12 +25,15 @@ export function createMemory({ url, authToken }: { url: string; authToken?: stri
   });
 }
 
+/** Any model Mastra takes: a "provider/model" id, or a model object such as the simulated one. */
+export type AgentModel = MastraModelConfig;
+
 export function createNexoAgent({
   model,
   memory,
   helpCenter,
 }: {
-  model: MastraModelConfig;
+  model: AgentModel;
   memory: Memory;
   helpCenter: HelpCenter;
 }) {

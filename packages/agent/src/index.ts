@@ -1,5 +1,5 @@
 // Mastra: agent, tools, instructions and the models that stand in for the LLM.
-export { createMemory, createNexoAgent, type NexoAgent, streamReply, type Turn, type TurnResult } from "./agent";
+export { type AgentModel, createMemory, createNexoAgent, type NexoAgent, streamReply, type Turn, type TurnResult } from "./agent";
 export type { HelpCenter } from "./tools";
 export { simulatedModel } from "./models/simulated";
 
