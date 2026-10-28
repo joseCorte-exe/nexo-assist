@@ -274,7 +274,8 @@ export async function seed(db: Db, now: Date = new Date()) {
     await tx.delete(analysts);
     await tx.delete(serviceState);
 
-    await tx.insert(employees).values(sampleEmployees.map((employee) => ({ ...employee, passwordChangedAt: ago(40 * DAY) })));
+    // 42 days, as the profile screen of the design shows.
+    await tx.insert(employees).values(sampleEmployees.map((employee) => ({ ...employee, passwordChangedAt: ago(42 * DAY) })));
     await tx.insert(analysts).values([...sampleAnalysts]);
     await tx.insert(kbArticles).values(sampleArticles.map((article) => ({ ...article, keywords: [...article.keywords] })));
 

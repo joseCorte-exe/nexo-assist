@@ -52,6 +52,35 @@ function clientWith(responses: Array<Response | Error>, timeoutMs?: number) {
   return { client, fetch };
 }
 
+describe("people", () => {
+  const ana = {
+    id: "emp-ana",
+    name: "Ana Souza",
+    email: "ana.souza@nexo.com.br",
+    department: "Financeiro",
+    passwordChangedAt: "2026-09-14T13:00:00.000Z",
+  };
+
+  it("finds an employee by e-mail through the query string", async () => {
+    const { client, fetch } = clientWith([json(200, [ana])]);
+    const result = await client.findEmployeeByEmail("ana.souza@nexo.com.br");
+    expect(result).toEqual({ ok: true, data: ana });
+    expect(String(fetch.mock.calls[0]?.[0])).toBe("http://tickets.test/employees?email=ana.souza%40nexo.com.br");
+  });
+
+  it("returns null when no employee has the e-mail", async () => {
+    const { client } = clientWith([json(200, [])]);
+    expect(await client.findEmployeeByEmail("ninguem@nexo.com.br")).toEqual({ ok: true, data: null });
+  });
+
+  it("lists the analysts", async () => {
+    const rafael = { id: "analyst-rafael", name: "Rafael Lima", email: "rafael.lima@nexo.com.br", level: "N2", available: true };
+    const { client, fetch } = clientWith([json(200, [rafael])]);
+    expect(await client.listAnalysts()).toEqual({ ok: true, data: [rafael] });
+    expect(String(fetch.mock.calls[0]?.[0])).toBe("http://tickets.test/analysts");
+  });
+});
+
 describe("ticket-service client", () => {
   it("sends the service secret", async () => {
     const { client, fetch } = clientWith([json(200, { ok: true })]);

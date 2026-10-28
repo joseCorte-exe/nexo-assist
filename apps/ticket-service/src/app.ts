@@ -4,6 +4,7 @@ import type { Db } from "./db";
 import { errorBody } from "./errors";
 import { outage } from "./outage";
 import { adminRoutes } from "./routes/admin";
+import { analystRoutes, employeeRoutes } from "./routes/people";
 import { ticketRoutes } from "./routes/tickets";
 
 export type Deps = {
@@ -37,6 +38,8 @@ export function createApp(deps: Deps) {
   app.use("*", outage(deps));
 
   app.route("/admin", adminRoutes(deps));
+  app.route("/employees", employeeRoutes(deps));
+  app.route("/analysts", analystRoutes(deps));
   app.route("/tickets", ticketRoutes(deps));
 
   app.notFound((c) => c.json(errorBody("not_found", "Route not found"), 404));

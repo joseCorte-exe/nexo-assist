@@ -1,4 +1,5 @@
-import type { z } from "zod";
+import { z } from "zod";
+import { analystSchema, type Employee, employeeSchema } from "./people";
 import { type CreateTicketInput, ticketSchema } from "./tickets";
 
 export const SERVICE_SECRET_HEADER = "x-service-secret";
@@ -92,6 +93,11 @@ export function createTicketServiceClient(options: Options) {
 
   return {
     request,
+    findEmployeeByEmail: async (email: string): Promise<TicketServiceResult<Employee | null>> => {
+      const result = await request(z.array(employeeSchema), "GET", `/employees?${new URLSearchParams({ email })}`);
+      return result.ok ? { ok: true, data: result.data[0] ?? null } : result;
+    },
+    listAnalysts: () => request(z.array(analystSchema), "GET", "/analysts"),
     createTicket: (input: CreateTicketInput, idempotencyKey: string) =>
       request(ticketSchema, "POST", "/tickets", { body: input, idempotencyKey }),
   };
