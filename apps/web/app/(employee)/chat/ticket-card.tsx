@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { CATEGORY_LABEL, PRIORITY_LABEL, statusText, type TicketCard as Ticket } from "@nexo/shared";
+import { WholePixel } from "@/components/whole-pixel";
 import { firstName, formatDayTime, formatTimeAgo } from "@/lib/format";
 import { PRIORITY_DOT, STATUS_DOT, STATUS_TONE } from "@/lib/ticket-look";
 
@@ -26,12 +27,12 @@ export function TicketCard({ ticket }: { ticket: Ticket }) {
           <span aria-hidden className="size-[3px] shrink-0 rounded-full bg-rule" />
           <span className="text-12.5 whitespace-nowrap text-ink-3">{ticket.id}</span>
           <span className="flex-1" />
-          <span className="flex items-center gap-1.5 @max-[560px]:basis-full">
+          <WholePixel text={statusText(ticket.status, assignee)} className="flex items-center gap-1.5 @max-[560px]:basis-full">
             <span aria-hidden className={`${dot} ${STATUS_DOT[ticket.status]}`} />
             <span className={`text-12.5 font-medium ${STATUS_TONE[ticket.status]}`}>
               {statusText(ticket.status, assignee)}
             </span>
-          </span>
+          </WholePixel>
         </div>
         <h3 className="text-18 font-semibold tracking-[-0.2px] text-balance text-ink">{ticket.title}</h3>
         <p className="text-13.5 leading-5 text-pretty text-ink-2">{ticket.description}</p>

@@ -1,4 +1,5 @@
 import { TICKET_STATUS_LABEL, type TicketSummary } from "@nexo/shared";
+import { WholePixel } from "@/components/whole-pixel";
 import { formatDay } from "@/lib/format";
 import { STATUS_DOT } from "@/lib/ticket-look";
 import { ticketChoiceText } from "@/lib/chat-turns";
@@ -81,10 +82,10 @@ function Row({ ticket, chosen }: { ticket: TicketSummary; chosen: boolean }) {
       <span className="min-w-0 flex-1 truncate text-14.5 font-medium text-ink @max-[560px]:col-span-2 @max-[560px]:col-start-2 @max-[560px]:row-start-2 @max-[560px]:whitespace-normal">
         {ticket.title}
       </span>
-      <span className="flex items-center gap-1.5 justify-self-end">
+      <WholePixel text={ticket.status} className="flex items-center gap-1.5 justify-self-end">
         <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${STATUS_DOT[ticket.status]}`} />
         <span className="text-12.5 whitespace-nowrap text-ink-3">{TICKET_STATUS_LABEL[ticket.status]}</span>
-      </span>
+      </WholePixel>
       <span className="w-11 shrink-0 text-right text-12.5 text-ink-3 @max-[560px]:hidden">
         {formatDay(ticket.createdAt)}
       </span>
