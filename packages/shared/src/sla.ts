@@ -15,6 +15,14 @@ export const SLA = {
   low: { hours: 50, businessHours: true },
 } as const satisfies Record<Priority, { hours: number; businessHours: boolean }>;
 
+/** The deadline of each priority in words, as Annex A writes it: the same text for the agent and the screen. */
+export function slaText(priority: Priority): string {
+  const { hours, businessHours } = SLA[priority];
+  if (!businessHours) return hours === 1 ? "1 hora" : `${hours} horas`;
+  // A business day has 10 business hours (ARQUITETURA.md, section 2).
+  return hours % 10 === 0 && hours >= 10 ? `${hours / 10} dias úteis` : `${hours} horas úteis`;
+}
+
 /**
  * Adds business hours (Monday to Friday, 8h to 18h, São Paulo time, no holidays).
  * A start outside business hours begins counting at the next opening.

@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { chatInput, decisionRecord, MESSAGE_LIMIT, storedDecision } from "./chat";
+import {
+  chatInput,
+  decisionRecord,
+  getTicketInput,
+  getTicketOutput,
+  listMyTicketsInput,
+  MESSAGE_LIMIT,
+  offerRepliesInput,
+  offerTicketChoiceInput,
+  storedDecision,
+} from "./chat";
 
 const id = "msg-5f0c1a2e-8d3b-4c7e-9a10-2b6f4e8d1c3a";
 
@@ -66,4 +76,63 @@ describe("storedDecision", () => {
 
 it("limits a conversation to 30 employee messages", () => {
   expect(MESSAGE_LIMIT).toBe(30);
+});
+
+describe("listMyTicketsInput", () => {
+  it("lists the open tickets unless the agent asks for all of them", () => {
+    expect(listMyTicketsInput.parse({})).toEqual({ scope: "open" });
+    expect(listMyTicketsInput.parse({ scope: "all" })).toEqual({ scope: "all" });
+    expect(listMyTicketsInput.safeParse({ scope: "others" }).success).toBe(false);
+  });
+
+  it("has no employee field: whose tickets they are comes from the session", () => {
+    expect(listMyTicketsInput.parse({ scope: "open", employeeId: "emp-carla" })).toEqual({ scope: "open" });
+  });
+});
+
+describe("getTicketInput", () => {
+  it("normalizes the number the agent read in the message", () => {
+    expect(getTicketInput.parse({ ticketId: "inc-20311" })).toEqual({ ticketId: "INC-20311" });
+  });
+
+  it("rejects what is not a ticket number", () => {
+    expect(getTicketInput.safeParse({ ticketId: "o do notebook" }).success).toBe(false);
+  });
+});
+
+describe("getTicketOutput", () => {
+  it("says why it has no ticket: not found or the service is down", () => {
+    expect(getTicketOutput.parse({ ok: false, reason: "not_found", message: "Não achei." }).ok).toBe(false);
+    expect(getTicketOutput.safeParse({ ok: false, reason: "forbidden", message: "?" }).success).toBe(false);
+  });
+});
+
+describe("offerTicketChoiceInput", () => {
+  it("offers a choice of 2 to 8 tickets", () => {
+    expect(offerTicketChoiceInput.safeParse({ ticketIds: ["INC-20311"] }).success).toBe(false);
+    expect(offerTicketChoiceInput.parse({ ticketIds: ["inc-20311", "REQ-10442"] })).toEqual({
+      ticketIds: ["INC-20311", "REQ-10442"],
+    });
+    const nine = Array.from({ length: 9 }, (_, index) => `INC-2030${index}`);
+    expect(offerTicketChoiceInput.safeParse({ ticketIds: nine }).success).toBe(false);
+  });
+});
+
+describe("offerRepliesInput", () => {
+  const replies = ["Falar com um analista", "Adicionar informação", "Não, obrigado"];
+
+  it("offers from 2 to 4 short replies", () => {
+    expect(offerRepliesInput.parse({ options: replies })).toEqual({ options: replies });
+    expect(offerRepliesInput.safeParse({ options: ["Sim"] }).success).toBe(false);
+    expect(offerRepliesInput.safeParse({ options: [...replies, "Talvez", "Depois"] }).success).toBe(false);
+  });
+
+  it("keeps each reply to a button: filled and up to 40 characters", () => {
+    expect(offerRepliesInput.safeParse({ options: ["Sim", " "] }).success).toBe(false);
+    expect(offerRepliesInput.safeParse({ options: ["Sim", "a".repeat(41)] }).success).toBe(false);
+  });
+
+  it("refuses the same reply twice, which the employee could not tell apart", () => {
+    expect(offerRepliesInput.safeParse({ options: ["Sim", "sim "] }).success).toBe(false);
+  });
 });
