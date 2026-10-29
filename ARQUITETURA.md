@@ -181,7 +181,7 @@ As datas são relativas ao momento em que o seed roda ("há 6 dias" é sempre h�
 - Analistas: Rafael Lima (N2) e pelo menos um analista N1.
 - Artigos (de 5 a 10): o da VPN com erro 809 (só Windows 10), o do horário do service desk e os canais fictícios de RH, financeiro e facilities.
 - Chamados do Anexo B com os dados exatos: INC-20311 (Notebook lento após atualização do Windows, Hardware › Notebook, Média, Aguardando analista, há 6 dias), REQ-10442 (Segundo monitor para home office, Hardware, Baixa, Aprovado, há 1 semana) e INC-20150 (Senha do SAP bloqueada, Acesso, Média, Resolvido há 4 dias).
-- Chamados do design: INC-20288 (Acesso à pasta Financeiro no SharePoint, Em andamento), INC-19877 e INC-19410 (resolvidos há mais de 7 dias), além de chamados de outros funcionários.
+- Chamados do design: INC-20298 (Acesso à pasta Financeiro no SharePoint, Em andamento), INC-19877 e INC-19410 (resolvidos há mais de 7 dias), além de chamados de outros funcionários.
 - Conversas em cada estado e com cada selo do console: transferida com chamado, transferida com "contato em X min", "Agent pediu ajuda · confiança 41%", "Agent atendendo" e "Resolvido pelo agent".
 
 ## 7. Contratos

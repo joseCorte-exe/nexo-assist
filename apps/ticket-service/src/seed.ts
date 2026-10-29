@@ -40,7 +40,8 @@ const sampleTickets: SampleTicket[] = [
     id: "INC-20311",
     type: "INC",
     title: "Notebook lento após atualização do Windows",
-    description: "Depois da última atualização do Windows o notebook ficou muito lento para abrir os programas.",
+    // The description of the design, without its fixed date.
+    description: "Lentidão geral desde a atualização do Windows. Reiniciar e rodar o diagnóstico da central não resolveu.",
     category: "hardware",
     subcategory: "Notebook",
     priority: "medium",
@@ -64,7 +65,8 @@ const sampleTickets: SampleTicket[] = [
     status: "approved",
     openedBy: "emp-ana",
     assignedTo: "analyst-juliana",
-    openedAgo: 9 * DAY,
+    // Opened 7 days before INC-20311, as the dates of the design (16 out and 09 out) are apart.
+    openedAgo: 13 * DAY,
     itAnsweredAgo: 7 * DAY,
     resolvedAgo: null,
   },
@@ -85,7 +87,8 @@ const sampleTickets: SampleTicket[] = [
     resolvedAgo: 4 * DAY,
   },
   {
-    id: "INC-20288",
+    // INC-20298 is the number the design shows in the chat and in the console.
+    id: "INC-20298",
     type: "INC",
     title: "Acesso à pasta Financeiro no SharePoint",
     description: "Não consigo abrir a pasta Financeiro no SharePoint, aparece acesso negado.",
@@ -96,7 +99,8 @@ const sampleTickets: SampleTicket[] = [
     status: "in_progress",
     openedBy: "emp-ana",
     assignedTo: "analyst-juliana",
-    openedAgo: 2 * DAY,
+    // Two days before INC-20311, as in the design (14 out and 16 out).
+    openedAgo: 8 * DAY,
     itAnsweredAgo: 1 * DAY,
     resolvedAgo: null,
   },
@@ -201,7 +205,7 @@ const sampleTickets: SampleTicket[] = [
 const sampleUpdates = [
   { ticketId: "REQ-10442", author: "analyst", text: "Pedido aprovado pelo gestor. O monitor será enviado.", ago: 7 * DAY },
   { ticketId: "INC-20150", author: "analyst", text: "Senha desbloqueada. Use a senha temporária enviada por e-mail.", ago: 4 * DAY },
-  { ticketId: "INC-20288", author: "analyst", text: "Pedimos a liberação ao dono da pasta e aguardamos a resposta.", ago: 1 * DAY },
+  { ticketId: "INC-20298", author: "analyst", text: "Pedimos a liberação ao dono da pasta e aguardamos a resposta.", ago: 1 * DAY },
   { ticketId: "INC-20302", author: "analyst", text: "Estou verificando o cliente de VPN da sua máquina.", ago: 1 * HOUR },
 ] as const;
 

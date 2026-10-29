@@ -1,12 +1,14 @@
-import { type Analyst, corporateEmail, type Employee } from "@nexo/shared";
-import { asc, eq } from "drizzle-orm";
+import { type Analyst, corporateEmail, type Employee, employeeTicketsStatus } from "@nexo/shared";
+import { and, asc, desc, eq, ne } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { Deps } from "../app";
 import { errorBody } from "../errors";
-import { analysts, employees } from "../db/schema";
+import { analysts, employees, tickets } from "../db/schema";
+import { toTicket } from "./tickets";
 
 const employeesQuery = z.object({ email: corporateEmail() });
+const ticketsQuery = z.object({ status: employeeTicketsStatus.optional() });
 
 export function employeeRoutes(deps: Deps) {
   // A filter over the collection, so it answers a list: empty when nobody has the e-mail.
@@ -17,7 +19,30 @@ export function employeeRoutes(deps: Deps) {
     // Seeded e-mails are lowercase and the column is unique, so this is an index lookup.
     const rows = await deps.db.select().from(employees).where(eq(employees.email, parsed.data.email));
     return c.json(rows.map(toEmployee));
-  });
+  })
+    // The tickets of the employee, most recent first. The index on (opened_by, created_at) answers it in order.
+    .get("/:id/tickets", async (c) => {
+      const parsed = ticketsQuery.safeParse(c.req.query());
+      if (!parsed.success) return c.json(errorBody("invalid_query", "status must be open or absent"), 400);
+      const employeeId = c.req.param("id");
+
+      const mine = eq(tickets.openedBy, employeeId);
+      const rows = await deps.db
+        .select()
+        .from(tickets)
+        .where(parsed.data.status === "open" ? and(mine, ne(tickets.status, "resolved")) : mine)
+        .orderBy(desc(tickets.createdAt), desc(tickets.id));
+      // Only an empty answer needs to tell an employee without tickets from one that does not exist.
+      if (rows.length === 0 && !(await employeeExists(deps, employeeId))) {
+        return c.json(errorBody("employee_not_found", "Employee not found"), 404);
+      }
+      return c.json(rows.map(toTicket));
+    });
+}
+
+async function employeeExists(deps: Deps, id: string) {
+  const [row] = await deps.db.select({ id: employees.id }).from(employees).where(eq(employees.id, id));
+  return row !== undefined;
 }
 
 export function analystRoutes(deps: Deps) {

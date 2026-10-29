@@ -1,15 +1,34 @@
-import { createTicketInput, dueAt, IDEMPOTENCY_KEY_HEADER, type Ticket, type TicketType } from "@nexo/shared";
-import { eq, sql } from "drizzle-orm";
+import {
+  createTicketInput,
+  dueAt,
+  IDEMPOTENCY_KEY_HEADER,
+  type Ticket,
+  type TicketDetail,
+  type TicketType,
+  ticketId,
+} from "@nexo/shared";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
+import { z } from "zod";
 import type { Deps } from "../app";
 import { errorBody } from "../errors";
 import type { Db } from "../db";
-import { employees, idempotencyKeys, tickets } from "../db/schema";
+import { analysts, employees, idempotencyKeys, tickets, ticketUpdates } from "../db/schema";
 
 type Transaction = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
+const detailParams = z.object({ id: ticketId, employeeId: z.string().min(1) });
+
 export function ticketRoutes(deps: Deps) {
-  return new Hono().post("/", async (c) => {
+  return new Hono()
+    .get("/:id", async (c) => {
+      const parsed = detailParams.safeParse({ id: c.req.param("id"), employeeId: c.req.query("employeeId") });
+      if (!parsed.success) return c.json(errorBody("invalid_query", "a ticket number and employeeId are required"), 400);
+      const detail = await ticketDetail(deps.db, parsed.data.id, parsed.data.employeeId);
+      // Somebody else's ticket answers exactly like a missing one, so the error never tells that a number exists.
+      return detail ? c.json(detail) : c.json(errorBody("ticket_not_found", "Ticket not found"), 404);
+    })
+    .post("/", async (c) => {
     const key = c.req.header(IDEMPOTENCY_KEY_HEADER);
     if (!key) return c.json(errorBody("missing_idempotency_key", `${IDEMPOTENCY_KEY_HEADER} header is required`), 400);
 
@@ -61,6 +80,33 @@ export function ticketRoutes(deps: Deps) {
       throw error;
     }
   });
+}
+
+/**
+ * The ticket of this employee with the analyst's name and the updates, in one round trip. Both queries are scoped to
+ * the employee, so the updates of somebody else's ticket never leave the database either.
+ */
+async function ticketDetail(db: Db, id: string, employeeId: string): Promise<TicketDetail | null> {
+  const ofEmployee = and(eq(tickets.id, id), eq(tickets.openedBy, employeeId));
+  const [[found], updates] = await db.batch([
+    db
+      .select({ ticket: tickets, assigneeName: analysts.name })
+      .from(tickets)
+      .leftJoin(analysts, eq(analysts.id, tickets.assignedTo))
+      .where(ofEmployee),
+    db
+      .select({ author: ticketUpdates.author, text: ticketUpdates.text, createdAt: ticketUpdates.createdAt })
+      .from(ticketUpdates)
+      .innerJoin(tickets, eq(tickets.id, ticketUpdates.ticketId))
+      .where(ofEmployee)
+      .orderBy(asc(ticketUpdates.createdAt)),
+  ]);
+  if (!found) return null;
+  return {
+    ...toTicket(found.ticket),
+    assigneeName: found.assigneeName,
+    updates: updates.map((update) => ({ ...update, createdAt: update.createdAt.toISOString() })),
+  };
 }
 
 async function savedResponse(db: Db, key: string) {
