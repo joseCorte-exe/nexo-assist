@@ -10,3 +10,5 @@ next-env.d.ts
 *.tsbuildinfo
 .DS_Store
 .e2e
+*.db-shm
+*.db-wal

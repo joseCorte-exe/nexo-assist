@@ -1,4 +1,13 @@
-import { type Analyst, createTicketServiceClient, type Employee, sampleAnalysts, sampleEmployees } from "@nexo/shared";
+import { type AgentModel, createMemory, createNexoAgent, type NexoAgent, simulatedModel } from "@nexo/agent";
+import {
+  type Analyst,
+  createTicketServiceClient,
+  type Employee,
+  type KbArticle,
+  sampleAnalysts,
+  sampleEmployees,
+  type TicketServiceClient,
+} from "@nexo/shared";
 import { NextRequest } from "next/server";
 import { createDb } from "@/db";
 import { migrateDb } from "@/db/migrate";
@@ -18,11 +27,19 @@ export const ana: Employee = {
 };
 export const rafael: Analyst = { ...sampleAnalysts[0] };
 
+export const vpnArticle: KbArticle = {
+  id: "kb-vpn-809",
+  title: "VPN com erro 809",
+  content:
+    "Reinstale o cliente de VPN pelo portal de softwares e reinicie o computador. Vale apenas para Windows 10; no Windows 11, abra um chamado.",
+  category: "network_vpn",
+};
+
 /**
  * The real ticket-service client, answering from the sample people instead of the network,
  * so tests go through the same lookup rules the app uses.
  */
-export function fakeTicketService({ down = false } = {}): Deps["ticketService"] {
+export function fakeTicketService({ down = false } = {}): TicketServiceClient {
   const employees: Employee[] = sampleEmployees.map((employee) => ({
     ...employee,
     passwordChangedAt: ana.passwordChangedAt,
@@ -32,23 +49,50 @@ export function fakeTicketService({ down = false } = {}): Deps["ticketService"] 
     if (down) return Response.json({}, { status: 503 });
     const { pathname, searchParams } = new URL(String(url));
     if (pathname === "/analysts") return Response.json(analysts);
+    // The help center only knows the VPN article here; its ranking is tested in the ticket-service.
+    if (pathname === "/kb/search") return Response.json(/vpn|809/i.test(searchParams.get("q") ?? "") ? [vpnArticle] : []);
     return Response.json(employees.filter((employee) => employee.email === searchParams.get("email")));
   };
   return createTicketServiceClient({ baseUrl: "http://tickets.test", secret: "s", fetch, sleep: async () => {} });
 }
 
-export async function testDeps(overrides: Partial<Deps> = {}): Promise<Deps> {
+/** The real agent with its own in-memory memory, on the given model (the simulated one by default). */
+export function testAgent(model: AgentModel = simulatedModel(), helpCenter = fakeTicketService()): NexoAgent {
+  return createNexoAgent({ model, memory: createMemory({ url: ":memory:" }), helpCenter });
+}
+
+export type TestDeps = Deps & {
+  /** Waits for the work the routes left running after the response, such as saving the agent reply. */
+  settled: () => Promise<void>;
+};
+
+export async function testDeps(overrides: Partial<Deps> = {}): Promise<TestDeps> {
   const db = createDb(":memory:");
   await migrateDb(db);
   await seed(db, NOW);
+  const pending: Promise<unknown>[] = [];
   return {
     db,
     ticketService: fakeTicketService(),
+    agent: testAgent(),
+    waitUntil: (task) => pending.push(task),
     sessionSecret: SECRET,
     secureCookies: false,
     now: () => NOW,
     ...overrides,
+    settled: async () => {
+      await Promise.all(pending);
+    },
   };
+}
+
+/** The chunks of an AI SDK UI message stream (server-sent events), in order. */
+export async function readStream(response: Response): Promise<Array<{ type: string } & Record<string, unknown>>> {
+  const text = await response.text();
+  return text
+    .split("\n")
+    .filter((line) => line.startsWith("data: ") && line !== "data: [DONE]")
+    .map((line) => JSON.parse(line.slice("data: ".length)));
 }
 
 export async function sessionCookieFor(person: SessionPerson) {

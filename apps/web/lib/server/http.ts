@@ -13,8 +13,21 @@ export const unauthorized = () => jsonError(401, "unauthorized", "Sua sessão te
 export const serviceUnavailable = () =>
   jsonError(503, "service_unavailable", "O serviço de chamados não respondeu. Tente de novo em instantes.");
 
+export const forbidden = () => jsonError(403, "forbidden", "Esta área é só para funcionários.");
+
 export function readSession(request: NextRequest, deps: Deps): Promise<Session | null> {
   return sessionFrom(request.cookies.get(SESSION_COOKIE)?.value, deps.sessionSecret, deps.now());
+}
+
+/** For the routes of the chat: the session of an employee, or the 401 or 403 to answer. */
+export async function readEmployeeSession(
+  request: NextRequest,
+  deps: Deps,
+): Promise<{ ok: true; session: Session } | { ok: false; response: NextResponse }> {
+  const session = await readSession(request, deps);
+  if (!session) return { ok: false, response: unauthorized() };
+  if (session.role !== "employee") return { ok: false, response: forbidden() };
+  return { ok: true, session };
 }
 
 /** Parses the JSON body with the contract schema. On failure, the response carries the first problem found. */

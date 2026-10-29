@@ -1,12 +1,12 @@
 "use client";
 
-import { MessageSquare, UserRound } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { MessageSquareIcon, UserRoundIcon } from "@/components/design-icons";
 
 const items = [
-  { href: "/", label: "Atendimento", icon: MessageSquare },
-  { href: "/profile", label: "Meu perfil", icon: UserRound },
+  { href: "/", label: "Atendimento", icon: MessageSquareIcon },
+  { href: "/profile", label: "Meu perfil", icon: UserRoundIcon },
 ] as const;
 
 export function SidebarNav() {

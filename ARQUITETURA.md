@@ -146,7 +146,7 @@ Status do chamado e o que muda cada um (só o que o design mostra):
 | Tabela | Campos principais |
 |---|---|
 | conversations | id, employee_id, state, outcome, target_level (N1, N2), transfer_reason, transfer_summary, analyst_id, ticket_id, message_count, wait_until, created_at, first_response_at, closed_at |
-| messages | id, conversation_id, author (employee, agent, analyst, system), text, parts (cards, opções, rascunho, com um resumo dos ids para o agent lembrar no turno seguinte), created_at |
+| messages | id, conversation_id, author (employee, agent, analyst, system), text, parts (as partes da resposta do agent como saíram no stream: decisão, ferramentas, texto e, depois, cards, opções e rascunho, com um resumo dos ids para o agent lembrar no turno seguinte), created_at |
 | decisions | id, message_id, understanding, action, tools_used, confidence, reason |
 | drafts | id, conversation_id, operation (create, update, reopen), title, description, type, category, subcategory, impact, urgency, priority, affected, ticket_id, status (pending, confirmed, cancelled) |
 | usage_counters | key (ip + dia, ou global + dia), count (atualizada de forma atômica) |
@@ -198,7 +198,7 @@ Os contratos ficam em `packages/shared` como schemas Zod, inclusive o formato da
 | POST /api/me/reset-password | só devolve o aviso (também usado por "Esqueci minha senha") |
 | GET /api/stats/login | os três números da tela de login |
 | GET /api/conversation | conversa ativa do funcionário, com mensagens, decisões e estado. O chat consulta a cada 3 s enquanto a conversa não está com o agent, e também ao reabrir a página |
-| POST /api/chat | mensagem do funcionário; responde em partes |
+| POST /api/chat | mensagem do funcionário, com o id que o chat deu a ela (reenviada com o mesmo id, é respondida sem contar de novo); responde em partes |
 | PATCH /api/drafts/:id | salva o que foi editado no card (título, descrição, categoria) |
 | POST /api/drafts/:id/confirm | cria, atualiza ou reabre o chamado no ticket-service, sem passar pelo LLM |
 | POST /api/drafts/:id/cancel | descarta o rascunho |
@@ -252,7 +252,7 @@ Ferramentas:
 | transferToAnalyst | Muda o estado da conversa, escolhe N1 ou N2 pela regra, calcula a espera e grava o resumo do caso |
 | redirectOutOfScope | Responde a assuntos de RH, financeiro e facilities indicando o canal |
 
-Como o registro de decisão aparece em toda resposta: no primeiro passo, o `prepareStep` obriga o modelo a chamar `recordDecision`; nos passos seguintes, ele escolhe à vontade. A tela recebe essa chamada pelo próprio stream, como a parte `tool-recordDecision`, e com ela monta o detalhe da decisão. A linha de ações acima da resposta ("consultou seus chamados", "classificou a prioridade") sai das partes `tool-*`, com um mapa de nome para rótulo. No fim da resposta, o código completa `tools_used` com os passos que rodaram. Se por algum motivo o registro não vier, o código grava um registro reduzido, sem confiança. Se a confiança vier abaixo de 0,6 e não for caso de pedir informação, o passo seguinte obriga `transferToAnalyst`. Ao recarregar a página, `GET /api/conversation` devolve as mesmas decisões, lidas da tabela.
+Como o registro de decisão aparece em toda resposta: no primeiro passo, o `prepareStep` obriga o modelo a chamar `recordDecision`; nos passos seguintes, ele escolhe à vontade. A tela recebe essa chamada pelo próprio stream, como a parte `tool-recordDecision`, e com ela monta o detalhe da decisão. A linha de ações acima da resposta ("consultou seus chamados", "classificou a prioridade") sai das partes `tool-*`, com um mapa de nome para rótulo. No fim da resposta, o código completa `tools_used` com os passos que rodaram. Se por algum motivo o registro não vier, o código grava um registro reduzido, sem confiança. Se a confiança vier abaixo de 0,6 e não for caso de pedir informação, o passo seguinte obriga `transferToAnalyst`. A resposta é gravada com as mesmas partes do stream, em `messages.parts`, e ao recarregar a página `GET /api/conversation` devolve essas partes: a tela desenha a resposta do mesmo jeito que desenhou ao vivo. A tabela `decisions` guarda o registro para o console.
 
 Memória: cada conversa é uma thread do Mastra (`thread` = id da conversa, `resource` = id do funcionário), configurada com as últimas mensagens e com a memória de trabalho. Cinco coisas acontecem fora do agent e precisam ser copiadas para a thread pela API de memória: mensagem do analista, mensagem do funcionário enquanto o agent está pausado, confirmação de rascunho (com id e prazo do chamado criado), aviso de limite e notas de sistema (transferido, assumido, devolvido). Elas são gravadas primeiro na nossa tabela, depois na memória. A mensagem do agent é gravada no fim da resposta, mesmo que a aba seja fechada.
 

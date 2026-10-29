@@ -8,6 +8,7 @@ import type {
   DraftStatus,
   Impact,
   MessageAuthor,
+  NexoUIMessage,
   Priority,
   TicketType,
   TransferReason,
@@ -54,25 +55,33 @@ export const messages = sqliteTable(
       .references(() => conversations.id),
     author: text("author").$type<MessageAuthor>().notNull(),
     text: text("text").notNull(),
-    /** Cards, options and drafts shown with the message, plus the ids the agent must remember next turn. */
-    parts: text("parts", { mode: "json" }),
+    /**
+     * The parts of an agent reply as it streamed (decision, tools, text), so the chat draws it the same way after a
+     * reload. Later also the cards, options and drafts, plus the ids the agent must remember next turn.
+     */
+    parts: text("parts", { mode: "json" }).$type<NexoUIMessage["parts"]>(),
     createdAt: timestamp("created_at").notNull(),
   },
   (table) => [index("messages_conversation_created").on(table.conversationId, table.createdAt)],
 );
 
-export const decisions = sqliteTable("decisions", {
-  id: text("id").primaryKey(),
-  messageId: text("message_id")
-    .notNull()
-    .references(() => messages.id),
-  understanding: text("understanding").notNull(),
-  action: text("action").notNull(),
-  toolsUsed: text("tools_used", { mode: "json" }).$type<string[]>().notNull(),
-  /** Missing when the agent skipped recordDecision and the code saved a reduced record. */
-  confidence: real("confidence"),
-  reason: text("reason"),
-});
+export const decisions = sqliteTable(
+  "decisions",
+  {
+    id: text("id").primaryKey(),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => messages.id),
+    toolsUsed: text("tools_used", { mode: "json" }).$type<string[]>().notNull(),
+    // The four below are missing together in the reduced record, when the agent skipped recordDecision.
+    understanding: text("understanding"),
+    action: text("action"),
+    confidence: real("confidence"),
+    reason: text("reason"),
+  },
+  // One decision per agent message; loading a conversation joins on it.
+  (table) => [uniqueIndex("decisions_message_id").on(table.messageId)],
+);
 
 export const drafts = sqliteTable("drafts", {
   id: text("id").primaryKey(),

@@ -3,7 +3,7 @@ import { defineConfig, devices } from "@playwright/test";
 import { e2eEnv, TICKETS_PORT, WEB_PORT } from "./e2e/env";
 
 // The whole stack runs for real: the ticket-service and the web, each with its own fresh database.
-// Only the LLM is out of the picture, and this feature does not use it.
+// Only the LLM is out of the picture: the agent runs on the simulated model (NEXO_AGENT_MODEL in env.ts).
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 // Each server deletes and recreates its own database when it starts. This file is loaded again by the

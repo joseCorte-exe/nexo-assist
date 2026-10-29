@@ -8,4 +8,6 @@ export const e2eEnv = {
   ADMIN_KEY: "e2e-admin-key",
   SESSION_SECRET: "e2e-session-secret-0123456789",
   OUTAGE_RATE: "0",
+  // The real agent with fixed rules instead of the LLM: no key, same reply every run.
+  NEXO_AGENT_MODEL: "simulated",
 };

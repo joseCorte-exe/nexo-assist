@@ -1,4 +1,4 @@
-import { dueAt, type Priority } from "@nexo/shared";
+import { dueAt, type NexoUIMessage, type Priority } from "@nexo/shared";
 import type { Db } from ".";
 import { conversations, decisions, drafts, messages, usageCounters } from "./schema";
 
@@ -273,6 +273,19 @@ const pastConversations: SampleConversation[] = pastCases.map(([employeeId, ques
   };
 });
 
+/**
+ * The parts an agent reply would have streamed: its decision, then its text. The tools of later features are only in
+ * the decision's toolsUsed, since the chat has no parts for them yet.
+ */
+function agentParts(messageId: string, { text, decision }: SampleMessage): NexoUIMessage["parts"] | null {
+  if (!decision) return null;
+  const { toolsUsed: _toolsUsed, ...record } = decision;
+  return [
+    { type: "tool-recordDecision", toolCallId: `${messageId}-decision`, state: "output-available", input: record, output: { recorded: true } },
+    { type: "text", text },
+  ];
+}
+
 /** Recreates the sample conversations with dates relative to `now`. Keeps the Mastra memory tables untouched. */
 export async function seed(db: Db, now: Date = new Date()) {
   const ago = (ms: number) => new Date(now.getTime() - ms);
@@ -319,7 +332,7 @@ export async function seed(db: Db, now: Date = new Date()) {
           conversationId: conversation.id,
           author: message.author,
           text: message.text,
-          parts: null,
+          parts: agentParts(messageId, message),
           createdAt: ago(message.ago),
         });
         if (message.decision) {

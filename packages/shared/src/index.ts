@@ -6,3 +6,6 @@ export * from "./ticket-service-client";
 export * from "./sample-people";
 export * from "./people";
 export * from "./web-api";
+export * from "./help-center";
+export * from "./chat";
+export * from "./chat-parts";

@@ -124,6 +124,23 @@ describe("findPersonByEmail", () => {
   });
 });
 
+describe("searchArticles", () => {
+  const article = { id: "kb-vpn-809", title: "VPN com erro 809", content: "Reinstale o cliente de VPN.", category: "network_vpn" };
+
+  it("sends the question in the query string and returns the articles", async () => {
+    const { client, fetch } = clientWith([json(200, [article])]);
+    expect(await client.searchArticles("VPN erro 809?")).toEqual({ ok: true, data: [article] });
+    const url = fetch.mock.calls[0]?.[0] as URL;
+    expect(url.pathname).toBe("/kb/search");
+    expect(url.searchParams.get("q")).toBe("VPN erro 809?");
+  });
+
+  it("retries the search, since it is a read", async () => {
+    const { client } = clientWith([json(503, {}), json(200, [])]);
+    expect(await client.searchArticles("vpn")).toEqual({ ok: true, data: [] });
+  });
+});
+
 describe("ticket-service client", () => {
   it("sends the service secret", async () => {
     const { client, fetch } = clientWith([json(200, { ok: true })]);
