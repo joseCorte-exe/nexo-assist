@@ -52,3 +52,33 @@ export function formatConfidence(confidence: number): { level: ConfidenceLevel; 
 export function firstName(name: string): string {
   return name.trim().split(/\s+/)[0] ?? "";
 }
+
+// Dates of the tickets, in São Paulo time: it has had a fixed UTC-3 since 2019, and the server runs in UTC.
+const SAO_PAULO_OFFSET_MS = -3 * 60 * 60 * 1000;
+const MONTHS = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+const HOUR_MS = 60 * 60 * 1000;
+
+const inSaoPaulo = (iso: string) => new Date(new Date(iso).getTime() + SAO_PAULO_OFFSET_MS);
+const twoDigits = (value: number) => String(value).padStart(2, "0");
+
+/** "16 out": the opening date in the list of tickets. */
+export function formatDay(iso: string): string {
+  const local = inSaoPaulo(iso);
+  return `${twoDigits(local.getUTCDate())} ${MONTHS[local.getUTCMonth()]}`;
+}
+
+/** "16 out, 14:20": when the ticket was opened, on its card. */
+export function formatDayTime(iso: string): string {
+  const local = inSaoPaulo(iso);
+  return `${formatDay(iso)}, ${twoDigits(local.getUTCHours())}:${twoDigits(local.getUTCMinutes())}`;
+}
+
+/** "há 6 dias", counted from when the agent looked the ticket up, so the card says what the agent said. */
+export function formatTimeAgo(iso: string, since: string): string {
+  const elapsed = new Date(since).getTime() - new Date(iso).getTime();
+  const days = Math.floor(elapsed / DAY_MS);
+  if (days >= 1) return days === 1 ? "há 1 dia" : `há ${days} dias`;
+  const hours = Math.floor(elapsed / HOUR_MS);
+  if (hours >= 1) return hours === 1 ? "há 1 hora" : `há ${hours} horas`;
+  return "agora há pouco";
+}

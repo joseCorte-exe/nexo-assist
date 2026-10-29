@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { firstName, formatConfidence, formatDuration, formatPasswordAge, formatPercent, initials } from "./format";
+import {
+  firstName,
+  formatConfidence,
+  formatDay,
+  formatDayTime,
+  formatDuration,
+  formatPasswordAge,
+  formatPercent,
+  formatTimeAgo,
+  initials,
+} from "./format";
 
 describe("formatDuration", () => {
   it("shows seconds under a minute, as the login screen does", () => {
@@ -69,5 +79,41 @@ describe("firstName", () => {
   it("greets by the first name", () => {
     expect(firstName("Ana Souza")).toBe("Ana");
     expect(firstName("  Fábio  Nunes ")).toBe("Fábio");
+  });
+});
+
+describe("formatDay and formatDayTime", () => {
+  it("shows the day and the month as the design writes them, in São Paulo time", () => {
+    // 17:20 UTC is 14:20 in São Paulo.
+    expect(formatDay("2026-10-16T17:20:00.000Z")).toBe("16 out");
+    expect(formatDayTime("2026-10-16T17:20:00.000Z")).toBe("16 out, 14:20");
+  });
+
+  it("keeps two digits in the day, and the day of São Paulo even when UTC is already the next one", () => {
+    expect(formatDay("2026-10-09T13:00:00.000Z")).toBe("09 out");
+    expect(formatDayTime("2026-10-10T02:05:00.000Z")).toBe("09 out, 23:05");
+  });
+
+  it("writes every month in three letters", () => {
+    const months = Array.from({ length: 12 }, (_, month) => formatDay(new Date(Date.UTC(2026, month, 15, 15)).toISOString()));
+    expect(months).toEqual(["15 jan", "15 fev", "15 mar", "15 abr", "15 mai", "15 jun", "15 jul", "15 ago", "15 set", "15 out", "15 nov", "15 dez"]);
+  });
+});
+
+describe("formatTimeAgo", () => {
+  const checkedAt = "2026-10-26T13:00:00.000Z";
+  const ago = (ms: number) => new Date(new Date(checkedAt).getTime() - ms).toISOString();
+  const HOUR = 60 * 60 * 1000;
+
+  it("counts whole days from when the agent looked it up", () => {
+    expect(formatTimeAgo(ago(6 * 24 * HOUR), checkedAt)).toBe("há 6 dias");
+    expect(formatTimeAgo(ago(30 * HOUR), checkedAt)).toBe("há 1 dia");
+  });
+
+  it("counts hours within a day, and says just now under an hour", () => {
+    expect(formatTimeAgo(ago(3 * HOUR + 10 * 60 * 1000), checkedAt)).toBe("há 3 horas");
+    expect(formatTimeAgo(ago(HOUR), checkedAt)).toBe("há 1 hora");
+    expect(formatTimeAgo(ago(20 * 60 * 1000), checkedAt)).toBe("agora há pouco");
+    expect(formatTimeAgo(checkedAt, checkedAt)).toBe("agora há pouco");
   });
 });
