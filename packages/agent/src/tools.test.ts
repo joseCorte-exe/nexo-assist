@@ -300,7 +300,7 @@ describe("getTicket", () => {
 describe("offerTicketChoice", () => {
   it("shows the chosen tickets of the employee, in the order of the service", async () => {
     const { desk, calls } = ticketDesk();
-    const result = await runAs("emp-ana", tools(desk).offerTicketChoice, { ticketIds: ["REQ-10442", "INC-20311"] });
+    const result = await runAs("emp-ana", tools(desk).offerTicketChoice, { question: "Sobre qual deles quer saber?", ticketIds: ["REQ-10442", "INC-20311"] });
     expect(result).toEqual({
       ok: true,
       tickets: [
@@ -314,13 +314,13 @@ describe("offerTicketChoice", () => {
 
   it("drops a number that is not the employee's, so the model can never show it", async () => {
     const { desk } = ticketDesk();
-    const result = await runAs("emp-ana", tools(desk).offerTicketChoice, { ticketIds: ["INC-20311", "INC-20319"] });
+    const result = await runAs("emp-ana", tools(desk).offerTicketChoice, { question: "Sobre qual deles quer saber?", ticketIds: ["INC-20311", "INC-20319"] });
     expect(result).toMatchObject({ ok: true, tickets: [{ id: "INC-20311" }] });
   });
 
   it("has nothing to show when none of the numbers is the employee's", async () => {
     const { desk } = ticketDesk();
-    expect(await runAs("emp-carla", tools(desk).offerTicketChoice, { ticketIds: ["INC-20311", "REQ-10442"] })).toEqual({
+    expect(await runAs("emp-carla", tools(desk).offerTicketChoice, { question: "Sobre qual deles quer saber?", ticketIds: ["INC-20311", "REQ-10442"] })).toEqual({
       ok: false,
       message: "Nenhum desses chamados é seu.",
     });
@@ -328,7 +328,7 @@ describe("offerTicketChoice", () => {
 
   it("says the service did not answer", async () => {
     const { desk } = ticketDesk({ state: "down" });
-    expect(await runAs("emp-ana", tools(desk).offerTicketChoice, { ticketIds: ["INC-20311", "REQ-10442"] })).toEqual({
+    expect(await runAs("emp-ana", tools(desk).offerTicketChoice, { question: "Sobre qual deles quer saber?", ticketIds: ["INC-20311", "REQ-10442"] })).toEqual({
       ok: false,
       message: "O serviço de chamados não respondeu.",
     });
@@ -338,6 +338,6 @@ describe("offerTicketChoice", () => {
 describe("offerReplies", () => {
   it("only shows the replies, which the screen draws from its input", async () => {
     const { desk } = ticketDesk();
-    expect(await run(tools(desk).offerReplies, { options: ["Falar com um analista", "Não, obrigado"] })).toEqual({ shown: true });
+    expect(await run(tools(desk).offerReplies, { question: "Quer ajuda?", options: ["Falar com um analista", "Não, obrigado"] })).toEqual({ shown: true });
   });
 });

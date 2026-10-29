@@ -108,31 +108,45 @@ describe("getTicketOutput", () => {
 });
 
 describe("offerTicketChoiceInput", () => {
+  const question = "Você tem 2 chamados abertos. Sobre qual deles quer saber?";
+
   it("offers a choice of 2 to 8 tickets", () => {
-    expect(offerTicketChoiceInput.safeParse({ ticketIds: ["INC-20311"] }).success).toBe(false);
-    expect(offerTicketChoiceInput.parse({ ticketIds: ["inc-20311", "REQ-10442"] })).toEqual({
+    expect(offerTicketChoiceInput.safeParse({ question, ticketIds: ["INC-20311"] }).success).toBe(false);
+    expect(offerTicketChoiceInput.parse({ question, ticketIds: ["inc-20311", "REQ-10442"] })).toEqual({
+      question,
       ticketIds: ["INC-20311", "REQ-10442"],
     });
     const nine = Array.from({ length: 9 }, (_, index) => `INC-2030${index}`);
-    expect(offerTicketChoiceInput.safeParse({ ticketIds: nine }).success).toBe(false);
+    expect(offerTicketChoiceInput.safeParse({ question, ticketIds: nine }).success).toBe(false);
+  });
+
+  it("always comes with its question, so the list never shows up without one", () => {
+    expect(offerTicketChoiceInput.safeParse({ ticketIds: ["INC-20311", "REQ-10442"] }).success).toBe(false);
+    expect(offerTicketChoiceInput.safeParse({ question: "  ", ticketIds: ["INC-20311", "REQ-10442"] }).success).toBe(false);
   });
 });
 
 describe("offerRepliesInput", () => {
   const replies = ["Falar com um analista", "Adicionar informação", "Não, obrigado"];
+  const question = "Quer que eu chame um analista?";
 
-  it("offers from 2 to 4 short replies", () => {
-    expect(offerRepliesInput.parse({ options: replies })).toEqual({ options: replies });
-    expect(offerRepliesInput.safeParse({ options: ["Sim"] }).success).toBe(false);
-    expect(offerRepliesInput.safeParse({ options: [...replies, "Talvez", "Depois"] }).success).toBe(false);
+  it("offers from 2 to 4 short replies, with their question", () => {
+    expect(offerRepliesInput.parse({ question, options: replies })).toEqual({ question, options: replies });
+    expect(offerRepliesInput.safeParse({ question, options: ["Sim"] }).success).toBe(false);
+    expect(offerRepliesInput.safeParse({ question, options: [...replies, "Talvez", "Depois"] }).success).toBe(false);
+  });
+
+  it("always comes with its question, so the buttons never show up without one", () => {
+    expect(offerRepliesInput.safeParse({ options: replies }).success).toBe(false);
+    expect(offerRepliesInput.safeParse({ question: " ", options: replies }).success).toBe(false);
   });
 
   it("keeps each reply to a button: filled and up to 40 characters", () => {
-    expect(offerRepliesInput.safeParse({ options: ["Sim", " "] }).success).toBe(false);
-    expect(offerRepliesInput.safeParse({ options: ["Sim", "a".repeat(41)] }).success).toBe(false);
+    expect(offerRepliesInput.safeParse({ question, options: ["Sim", " "] }).success).toBe(false);
+    expect(offerRepliesInput.safeParse({ question, options: ["Sim", "a".repeat(41)] }).success).toBe(false);
   });
 
   it("refuses the same reply twice, which the employee could not tell apart", () => {
-    expect(offerRepliesInput.safeParse({ options: ["Sim", "sim "] }).success).toBe(false);
+    expect(offerRepliesInput.safeParse({ question, options: ["Sim", "sim "] }).success).toBe(false);
   });
 });

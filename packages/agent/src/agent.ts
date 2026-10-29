@@ -42,8 +42,8 @@ export function createNexoAgent({
   return new Agent({
     id: "nexo-assist",
     name: "Nexo Assist",
-    // The tools and these instructions are the same on every call (about 2.8 thousand tokens): cached, the second
-    // and third steps of a reply, and every later reply within five minutes, read them at a tenth of the price.
+    // The tools and these instructions are the same on every call (3.5 thousand tokens, measured on Haiku 5.5):
+    // cached, the next steps of a reply, and every later reply within five minutes, read them at a tenth of the price.
     instructions: {
       role: "system",
       content: instructions,

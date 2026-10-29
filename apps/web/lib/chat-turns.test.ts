@@ -163,17 +163,17 @@ const card: TicketCard = {
 };
 const replies = ["Falar com um analista", "Adicionar informação", "Não, obrigado"];
 
+const question = "Você tem 2 chamados abertos. Sobre qual deles quer saber?";
 const listReply = agent([
   recordDecision("output-available"),
   tool("listMyTickets", "c2", { scope: "open" }, { ok: true, tickets: [notebook, sharepoint] }),
-  text("Você tem 2 chamados abertos. Sobre qual deles quer saber?"),
-  tool("offerTicketChoice", "c3", { ticketIds: ["INC-20311", "INC-20298"] }, { ok: true, tickets: [notebook, sharepoint] }),
+  tool("offerTicketChoice", "c3", { question, ticketIds: ["INC-20311", "INC-20298"] }, { ok: true, tickets: [notebook, sharepoint] }),
 ]);
+const offer = "Está sem atualização há 6 dias. Quer que eu chame um analista?";
 const ticketReply = agent([
   recordDecision("output-available"),
   tool("getTicket", "c2", { ticketId: "INC-20311" }, { ok: true, ticket: card }),
-  text("Está sem atualização há 6 dias. Quer que eu chame um analista?"),
-  tool("offerReplies", "c3", { options: replies }, { shown: true }),
+  tool("offerReplies", "c3", { question: offer, options: replies }, { shown: true }),
 ]);
 
 describe("liveTurns, looking up tickets", () => {
@@ -208,12 +208,19 @@ describe("liveTurns, looking up tickets", () => {
     expect(turn).toMatchObject({ steps: [{ label: "consultou seus chamados" }] });
   });
 
-  it("asks with the text and offers the list after it, open while nobody chose", () => {
+  it("asks with the question of the list and offers it, open while nobody chose", () => {
     const turn = liveTurns([user("u1", "Meu chamado?"), listReply], "ready").at(-1);
     expect(turn).toMatchObject({
-      blocks: [{ kind: "text", text: "Você tem 2 chamados abertos. Sobre qual deles quer saber?" }],
-      offer: { kind: "tickets", tickets: [notebook, sharepoint], chosen: null, open: true },
+      blocks: [],
+      offer: { kind: "tickets", question, tickets: [notebook, sharepoint], chosen: null, open: true },
     });
+  });
+
+  it("does not ask twice when the text already has the question", () => {
+    const parts = listReply.parts;
+    const both = agent([...parts.slice(0, 2), text(`Vi seus chamados. ${question}`), parts[2]!]);
+    const turn = liveTurns([user("u1", "Meu chamado?"), both], "ready").at(-1);
+    expect(turn).toMatchObject({ offer: { kind: "tickets", question: null } });
   });
 
   it("marks the ticket the next message chose, and closes the list", () => {
@@ -225,15 +232,20 @@ describe("liveTurns, looking up tickets", () => {
     expect(ticketChoiceText(notebook)).toBe("INC-20311 · Notebook lento após atualização do Windows");
   });
 
-  it("draws the card of the ticket where it came, before the text, with the replies in the last bubble", () => {
+  it("draws the card of the ticket where it came, then the question with its replies", () => {
     const turn = liveTurns([user("u1", "INC-20311"), ticketReply], "ready").at(-1);
     expect(turn).toMatchObject({
-      blocks: [
-        { kind: "ticket", key: "c2", ticket: card },
-        { kind: "text", text: "Está sem atualização há 6 dias. Quer que eu chame um analista?" },
-      ],
-      offer: { kind: "replies", options: replies, chosen: null, open: true },
+      blocks: [{ kind: "ticket", key: "c2", ticket: card }],
+      offer: { kind: "replies", question: offer, options: replies, chosen: null, open: true },
     });
+  });
+
+  it("keeps the question of the replies apart from a text that does not say it, and drops it when the text does", () => {
+    const parts = ticketReply.parts;
+    const apart = liveTurns([user("u1", "INC-20311"), agent([...parts.slice(0, 2), text("Vi o chamado."), parts[2]!])], "ready");
+    expect(apart.at(-1)).toMatchObject({ offer: { question: offer } });
+    const said = liveTurns([user("u1", "INC-20311"), agent([...parts.slice(0, 2), text(offer), parts[2]!])], "ready");
+    expect(said.at(-1)).toMatchObject({ offer: { question: null } });
   });
 
   it("marks the reply the next message chose, whatever its case, or what started with it", () => {
@@ -253,7 +265,7 @@ describe("liveTurns, looking up tickets", () => {
         user("u1", "INC-99999"),
         agent([
           tool("getTicket", "c2", { ticketId: "INC-99999" }, { ok: false, reason: "not_found", message: "?" }),
-          { type: "tool-offerReplies", toolCallId: "c3", state: "input-streaming", input: { options: ["Fal"] } } as Part,
+          { type: "tool-offerReplies", toolCallId: "c3", state: "input-streaming", input: { question: "Quer", options: ["Fal"] } } as Part,
         ]),
       ],
       "streaming",

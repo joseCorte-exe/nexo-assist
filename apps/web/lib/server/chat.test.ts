@@ -309,16 +309,11 @@ describe("POST /api/chat looking up tickets (feature 3)", () => {
     return { chunks, reply: reply!, parts };
   }
 
-  it("lists Ana's open tickets and offers the choice, saved with the rows the screen draws", async () => {
+  it("lists Ana's open tickets and offers the choice, saved with the question and the rows the screen draws", async () => {
     const { parts, reply } = await ask("Qual o status do meu chamado?");
-    expect(parts.map((part) => part.type)).toEqual([
-      "tool-recordDecision",
-      "tool-listMyTickets",
-      "text",
-      "tool-offerTicketChoice",
-    ]);
-    expect(reply.text).toBe("Você tem 3 chamados abertos. Sobre qual deles quer saber?");
-    const choice = parts[3] as { state: string; output: { ok: boolean; tickets: Array<{ id: string }> } };
+    expect(parts.map((part) => part.type)).toEqual(["tool-recordDecision", "tool-listMyTickets", "tool-offerTicketChoice"]);
+    const choice = parts[2] as { state: string; input: { question: string }; output: { ok: boolean; tickets: Array<{ id: string }> } };
+    expect(choice.input.question).toBe("Você tem 3 chamados abertos. Sobre qual deles quer saber?");
     expect(choice.state).toBe("output-available");
     expect(choice.output.tickets.map((ticket) => ticket.id)).toEqual(["INC-20311", "INC-20298", "REQ-10442"]);
     expect(reply.decision?.toolsUsed).toEqual(["recordDecision", "listMyTickets", "offerTicketChoice"]);
@@ -326,12 +321,17 @@ describe("POST /api/chat looking up tickets (feature 3)", () => {
 
   it("looks the ticket up by its number and saves the card and the offer of an analyst", async () => {
     const { parts } = await ask("INC-20311 · Notebook lento após atualização do Windows");
-    expect(parts.map((part) => part.type)).toEqual(["tool-recordDecision", "tool-getTicket", "text", "tool-offerReplies"]);
+    expect(parts.map((part) => part.type)).toEqual(["tool-recordDecision", "tool-getTicket", "tool-offerReplies"]);
     expect(parts[1]).toMatchObject({
       state: "output-available",
       output: { ok: true, ticket: { id: "INC-20311", overdue: true, daysSinceUpdate: 6, deadline: "3 dias úteis" } },
     });
-    expect(parts[3]).toMatchObject({ input: { options: ["Falar com um analista", "Adicionar informação", "Não, obrigado"] } });
+    expect(parts[2]).toMatchObject({
+      input: {
+        question: expect.stringContaining("Quer que eu chame um analista?"),
+        options: ["Falar com um analista", "Adicionar informação", "Não, obrigado"],
+      },
+    });
   });
 
   it("never shows Ana a ticket of somebody else, even with its number", async () => {
@@ -348,7 +348,7 @@ describe("POST /api/chat looking up tickets (feature 3)", () => {
     await deps.settled();
     const { messages: saved } = await loadConversation(deps.db, ana.id);
     const types = saved.at(-1)?.parts.map((part) => part.type).filter((type) => type !== "step-start");
-    expect(types).toEqual(["tool-recordDecision", "tool-listMyTickets", "text", "tool-offerTicketChoice"]);
+    expect(types).toEqual(["tool-recordDecision", "tool-listMyTickets", "tool-offerTicketChoice"]);
   });
 });
 

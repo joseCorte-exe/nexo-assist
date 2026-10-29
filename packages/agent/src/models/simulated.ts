@@ -180,10 +180,8 @@ function answerFromTicket(value: unknown): ModelStep {
   if (ticket.overdue) {
     const days = ticket.daysSinceUpdate === 1 ? "1 dia" : `${ticket.daysSinceUpdate} dias`;
     const priority = PRIORITY_LABEL[ticket.priority].toLowerCase();
-    return {
-      text: `Está sem atualização há ${days}, acima do prazo de ${ticket.deadline} para prioridade ${priority}. Quer que eu chame um analista?`,
-      toolCalls: [{ toolName: "offerReplies", input: { options: OVERDUE_REPLIES } }],
-    };
+    const question = `Está sem atualização há ${days}, acima do prazo de ${ticket.deadline} para prioridade ${priority}. Quer que eu chame um analista?`;
+    return { toolCalls: [{ toolName: "offerReplies", input: { question, options: OVERDUE_REPLIES } }] };
   }
   const status = TICKET_STATUS_LABEL[ticket.status].toLowerCase();
   const situation = ticket.status === "resolved" ? `O ${ticket.id} foi resolvido.` : `O ${ticket.id} está ${status}, dentro do prazo.`;
@@ -199,10 +197,8 @@ function stepFromList(value: unknown): ModelStep {
   const [only] = tickets;
   if (!only) return { text: "Você não tem chamados abertos agora." };
   if (tickets.length === 1) return { toolCalls: [{ toolName: "getTicket", input: { ticketId: only.id } }] };
-  return {
-    text: `Você tem ${tickets.length} chamados abertos. Sobre qual deles quer saber?`,
-    toolCalls: [{ toolName: "offerTicketChoice", input: { ticketIds: tickets.map((ticket) => ticket.id) } }],
-  };
+  const question = `Você tem ${tickets.length} chamados abertos. Sobre qual deles quer saber?`;
+  return { toolCalls: [{ toolName: "offerTicketChoice", input: { question, ticketIds: tickets.map((ticket) => ticket.id) } }] };
 }
 
 function nextStep({ prompt }: LanguageModelV4CallOptions): ModelStep {

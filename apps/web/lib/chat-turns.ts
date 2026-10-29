@@ -29,8 +29,10 @@ export type Block = { kind: "text"; key: string; text: string } | { kind: "ticke
  * last bubble. chosen is what the next message of the employee picked; open while nobody answered yet.
  */
 export type Offer =
-  | { kind: "tickets"; tickets: TicketSummary[]; chosen: string | null; open: boolean }
-  | { kind: "replies"; options: string[]; chosen: string | null; open: boolean };
+  /** question: the bubble above the list, null when the text of the reply already asked it. */
+  | { kind: "tickets"; question: string | null; tickets: TicketSummary[]; chosen: string | null; open: boolean }
+  /** question: null when the text of the reply already asked it. */
+  | { kind: "replies"; question: string | null; options: string[]; chosen: string | null; open: boolean };
 
 /** unsent: the message never reached the server (nothing of the reply came back). */
 export type EmployeeTurn = { kind: "employee"; id: string; text: string; unsent: boolean };
@@ -60,17 +62,19 @@ function chosenReply(options: string[], answer: string): string | null {
   );
 }
 
-function offerOf(part: NexoUIMessage["parts"][number], answer: string | null): Offer | null {
+function offerOf(part: NexoUIMessage["parts"][number], answer: string | null, said: string): Offer | null {
   if (part.type === "tool-offerTicketChoice" && part.state === "output-available" && part.output.ok) {
     const { tickets } = part.output;
+    const question = part.input.question.trim();
     const chosen = answer === null ? null : (findTicketIds(answer).find((id) => tickets.some((ticket) => ticket.id === id)) ?? null);
-    return { kind: "tickets", tickets, chosen, open: answer === null };
+    return { kind: "tickets", question: said.includes(question) ? null : question, tickets, chosen, open: answer === null };
   }
   if (part.type === "tool-offerReplies" && part.state !== "input-streaming") {
     const input = offerRepliesInput.safeParse(part.input);
     if (!input.success) return null;
     const { options } = input.data;
-    return { kind: "replies", options, chosen: answer === null ? null : chosenReply(options, answer), open: answer === null };
+    const question = said.includes(input.data.question) ? null : input.data.question;
+    return { kind: "replies", question, options, chosen: answer === null ? null : chosenReply(options, answer), open: answer === null };
   }
   return null;
 }
@@ -91,7 +95,7 @@ function agentTurn(message: NexoUIMessage, answer: string | null): AgentTurn {
     } else if (part.type === "tool-getTicket" && part.state === "output-available" && part.output.ok) {
       blocks.push({ kind: "ticket", key: part.toolCallId, ticket: part.output.ticket });
     } else {
-      offer = offerOf(part, answer) ?? offer;
+      offer = offerOf(part, answer, textOf(message.parts)) ?? offer;
     }
   });
 

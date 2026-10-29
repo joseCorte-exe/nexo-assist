@@ -167,12 +167,15 @@ describe("streamReply", () => {
       { toolCalls: [{ toolName: "recordDecision", input: decision }] },
       { toolCalls: [{ toolName: "listMyTickets", input: { scope: "open" } }] },
       {
-        text: "Você tem 2 chamados abertos. Sobre qual deles quer saber?",
-        toolCalls: [{ toolName: "offerTicketChoice", input: { ticketIds: ["INC-20311", "REQ-10442"] } }],
+        toolCalls: [
+          {
+            toolName: "offerTicketChoice",
+            input: { question: "Você tem 2 chamados abertos. Sobre qual deles quer saber?", ticketIds: ["INC-20311", "REQ-10442"] },
+          },
+        ],
       },
     ]);
     const reply = await replyOf(agent, { ...turn, text: "Qual o status do meu chamado?" });
-    expect(reply.text).toBe("Você tem 2 chamados abertos. Sobre qual deles quer saber?");
     expect(reply.toolCalls.map((call) => call.toolName)).toEqual(["recordDecision", "listMyTickets", "offerTicketChoice"]);
     expect(model.calls).toHaveLength(3);
   });
@@ -181,11 +184,15 @@ describe("streamReply", () => {
     const { agent, model } = setup([
       { toolCalls: [{ toolName: "recordDecision", input: decision }] },
       {
-        text: "Quer que eu chame um analista?",
-        toolCalls: [{ toolName: "offerReplies", input: { options: ["Falar com um analista", "Não, obrigado"] } }],
+        toolCalls: [
+          {
+            toolName: "offerReplies",
+            input: { question: "Quer que eu chame um analista?", options: ["Falar com um analista", "Não, obrigado"] },
+          },
+        ],
       },
     ]);
-    expect((await replyOf(agent, turn)).text).toBe("Quer que eu chame um analista?");
+    await replyOf(agent, turn);
     expect(model.calls).toHaveLength(2);
   });
 

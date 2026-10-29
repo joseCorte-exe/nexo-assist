@@ -135,6 +135,13 @@ export const getTicketOutput = z.discriminatedUnion("ok", [
 export type GetTicketOutput = z.infer<typeof getTicketOutput>;
 
 export const offerTicketChoiceInput = z.object({
+  // In the input, not in the text: a model that skips the text still never shows the list without its question.
+  question: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .describe("A pergunta que aparece acima da lista, como \"Você tem 3 chamados abertos. Sobre qual deles quer saber?\"."),
   ticketIds: z.array(ticketId).min(2).max(8).describe("Os números dos chamados que o funcionário pode escolher."),
 });
 export type OfferTicketChoiceInput = z.infer<typeof offerTicketChoiceInput>;
@@ -145,6 +152,12 @@ export const offerTicketChoiceOutput = z.discriminatedUnion("ok", [
 export type OfferTicketChoiceOutput = z.infer<typeof offerTicketChoiceOutput>;
 
 export const offerRepliesInput = z.object({
+  question: z
+    .string()
+    .trim()
+    .min(1)
+    .max(400)
+    .describe("O texto da pergunta que aparece acima dos botões, como \"Quer que eu chame um analista?\"."),
   options: z
     .array(z.string().trim().min(1).max(40))
     .min(2)

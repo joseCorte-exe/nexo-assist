@@ -139,7 +139,7 @@ export function createTools({ ticketService, now }: { ticketService: TicketDesk;
   const offerTicketChoice = createTool({
     id: "offerTicketChoice",
     description:
-      "Mostra ao funcionário uma lista dos chamados dele para ele escolher um. Escreva a pergunta no texto da mesma resposta. Encerra a sua resposta.",
+      "Mostra ao funcionário a pergunta e uma lista dos chamados dele para ele escolher um. A pergunta vai em question, não no texto. Encerra a sua resposta.",
     ...nexoToolSchemas.offerTicketChoice,
     requestContextSchema: employeeContext,
     execute: async ({ ticketIds }, context) => {
@@ -158,7 +158,7 @@ export function createTools({ ticketService, now }: { ticketService: TicketDesk;
   const offerReplies = createTool({
     id: "offerReplies",
     description:
-      "Mostra de 2 a 4 respostas rápidas como botões abaixo do seu texto, para o funcionário responder com um clique. Encerra a sua resposta.",
+      "Mostra a pergunta e de 2 a 4 respostas rápidas como botões, para o funcionário responder com um clique. A pergunta vai em question, não no texto. Encerra a sua resposta.",
     ...nexoToolSchemas.offerReplies,
     execute: async () => ({ shown: true as const }),
   });

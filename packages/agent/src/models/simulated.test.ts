@@ -125,8 +125,12 @@ describe("simulatedModel", () => {
       record: { action: "Consultar os chamados do funcionário" },
       toolsUsed: ["recordDecision", "listMyTickets", "offerTicketChoice"],
     });
-    expect(result.text).toBe("Você tem 3 chamados abertos. Sobre qual deles quer saber?");
-    expect(result.toolCalls.at(-1)?.args).toEqual({ ticketIds: ["INC-20311", "INC-20298", "REQ-10442"] });
+    // The question goes with the list, in the tool, as the instructions ask of the real model.
+    expect(result.text).toBe("");
+    expect(result.toolCalls.at(-1)?.args).toEqual({
+      question: "Você tem 3 chamados abertos. Sobre qual deles quer saber?",
+      ticketIds: ["INC-20311", "INC-20298", "REQ-10442"],
+    });
   });
 
   it("looks the only open ticket up at once", async () => {
@@ -146,10 +150,11 @@ describe("simulatedModel", () => {
       record: { action: "Consultar o INC-20311 e calcular o prazo" },
       toolsUsed: ["recordDecision", "getTicket", "offerReplies"],
     });
-    expect(result.text).toBe(
-      "Está sem atualização há 6 dias, acima do prazo de 3 dias úteis para prioridade média. Quer que eu chame um analista?",
-    );
-    expect(result.toolCalls.at(-1)?.args).toEqual({ options: ["Falar com um analista", "Adicionar informação", "Não, obrigado"] });
+    expect(result.text).toBe("");
+    expect(result.toolCalls.at(-1)?.args).toEqual({
+      question: "Está sem atualização há 6 dias, acima do prazo de 3 dias úteis para prioridade média. Quer que eu chame um analista?",
+      options: ["Falar com um analista", "Adicionar informação", "Não, obrigado"],
+    });
   });
 
   it("tells a ticket on time with what IT wrote last", async () => {
