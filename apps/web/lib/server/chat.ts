@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { toAISdkStream } from "@mastra/ai-sdk";
 import { streamReply } from "@nexo/agent";
-import { chatInput, type ConversationPart, type NexoUIMessage, replyText, summarizeTurn } from "@nexo/shared";
+import { chatInput, type ConversationPart, type NexoUIMessage, textOf, summarizeTurn } from "@nexo/shared";
 import { consumeStream, createUIMessageStream, createUIMessageStreamResponse, type InferUIMessageChunk } from "ai";
 import { eq, sql } from "drizzle-orm";
 import type { NextRequest } from "next/server";
@@ -96,7 +96,7 @@ async function saveReply(
   const { record, toolsUsed } = summarizeTurn(parts);
   const at = new Date(Math.max(now.getTime(), startedAt.getTime() + 1));
   await db.batch([
-    db.insert(messages).values({ id: reply.id, conversationId, author: "agent", text: replyText(parts), parts, createdAt: at }),
+    db.insert(messages).values({ id: reply.id, conversationId, author: "agent", text: textOf(parts), parts, createdAt: at }),
     db.insert(decisions).values({ id: `dec-${randomUUID()}`, messageId: reply.id, toolsUsed, ...record }),
     db
       .update(conversations)

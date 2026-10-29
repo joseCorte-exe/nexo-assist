@@ -1,7 +1,7 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import { apiError, type ConversationResponse, type NexoUIMessage, replyText } from "@nexo/shared";
+import { apiError, type ConversationResponse, type NexoUIMessage, textOf } from "@nexo/shared";
 import { DefaultChatTransport } from "ai";
 import { CircleAlert } from "lucide-react";
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -24,13 +24,16 @@ const transport = new DefaultChatTransport<NexoUIMessage>({
     let last = messages.length - 1;
     while (last > 0 && messages[last]?.role !== "user") last--;
     const message = messages[last];
-    return { body: { id: message?.id, text: message ? replyText(message.parts) : "" } };
+    return { body: { id: message?.id, text: message ? textOf(message.parts) : "" } };
   },
 });
 
 const newMessageId = () => `msg-${crypto.randomUUID()}`;
 
-/** The route refused a message sent again because its reply was saved: the network only lost the response. */
+/**
+ * The route refused a message sent again because its reply was saved: the network only lost the response.
+ * DefaultChatTransport puts the body of a refused request in the error message, so the code is read from there.
+ */
 function wasAlreadyAnswered(error: Error) {
   try {
     return apiError.safeParse(JSON.parse(error.message)).data?.error.code === "already_answered";
@@ -60,8 +63,8 @@ export function Chat({ initial, employeeName }: { initial: ConversationResponse;
   });
 
   async function showSavedConversation() {
-    const response = await fetch("/api/conversation", { cache: "no-store" });
-    if (!response.ok) return setFailures((count) => count + 1);
+    const response = await fetch("/api/conversation", { cache: "no-store" }).catch(() => null);
+    if (!response?.ok) return setFailures((count) => count + 1);
     const saved = (await response.json()) as ConversationResponse;
     setSavedCount(saved.conversation?.messageCount ?? 0);
     setMessages(saved.messages);

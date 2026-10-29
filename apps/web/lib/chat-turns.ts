@@ -1,4 +1,4 @@
-import { type DecisionRecord, decisionOf, type NexoUIMessage, replyText } from "@nexo/shared";
+import { type DecisionRecord, decisionOf, type NexoUIMessage, textOf } from "@nexo/shared";
 import type { ChatStatus } from "ai";
 import { type ActionTool, isActionTool } from "./agent-actions";
 
@@ -27,7 +27,7 @@ function agentTurn(message: NexoUIMessage): AgentTurn {
       steps.push({ tool, state: failed ? "failed" : part.state === "output-available" ? "done" : "running" });
     }
   }
-  const text = replyText(message.parts);
+  const text = textOf(message.parts);
   const decision = decisionOf(message.parts);
   const phase: Phase = text ? "writing" : decision ? "working" : "thinking";
   return { kind: "agent", id: message.id, text, decision, steps, phase };
@@ -47,7 +47,7 @@ function settle(turn: AgentTurn, status: ChatStatus): AgentTurn {
 export function liveTurns(messages: readonly NexoUIMessage[], status: ChatStatus): Turn[] {
   const turns: Turn[] = messages.map((message) =>
     message.role === "user"
-      ? { kind: "employee", id: message.id, text: replyText(message.parts), unsent: false }
+      ? { kind: "employee", id: message.id, text: textOf(message.parts), unsent: false }
       : { ...agentTurn(message), phase: "done" },
   );
 

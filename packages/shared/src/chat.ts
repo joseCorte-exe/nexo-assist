@@ -83,11 +83,12 @@ export const conversationPart = z.object({
 });
 export type ConversationPart = z.infer<typeof conversationPart>;
 
-/** The tools of the agent as the stream carries them, with the schemas above. */
+/** The tools of the agent as the stream carries them, typed by the schemas above. */
 export type NexoTools = {
-  recordDecision: { input: DecisionRecord; output: z.infer<typeof recordDecisionOutput> };
-  searchArticles: { input: SearchArticlesInput; output: SearchArticlesOutput };
-  redirectOutOfScope: { input: RedirectOutOfScopeInput; output: RedirectOutOfScopeOutput };
+  [Name in keyof typeof nexoToolSchemas]: {
+    input: z.infer<(typeof nexoToolSchemas)[Name]["inputSchema"]>;
+    output: z.infer<(typeof nexoToolSchemas)[Name]["outputSchema"]>;
+  };
 };
 
 /**

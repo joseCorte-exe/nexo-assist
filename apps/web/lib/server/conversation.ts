@@ -52,8 +52,9 @@ async function savedReply(message: NexoUIMessage, asText: NexoUIMessage): Promis
     dataSchemas: { conversation: conversationPart },
     tools: nexoToolSchemas,
   });
-  if (checked.success) return checked.data[0] ?? asText;
-  console.error("saved reply does not match the chat format", { messageId: message.id, error: checked.error });
+  if (checked.success) return checked.data[0]!;
+  // Only the kind of error: its details can quote what the employee wrote.
+  console.error("saved reply does not match the chat format", { messageId: message.id, error: checked.error.name });
   return asText;
 }
 

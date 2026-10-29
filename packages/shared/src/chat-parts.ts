@@ -8,8 +8,8 @@ type Parts = NexoUIMessage["parts"];
 /** Tools the memory adds on its own. They keep context, they are not an action the employee should see. */
 const INTERNAL_TOOLS = new Set(["updateWorkingMemory"]);
 
-/** The text of the message: every text part, in order. */
-export function replyText(parts: Parts): string {
+/** The text of a message, the employee's or the agent's: every text part, in order. */
+export function textOf(parts: Parts): string {
   return parts.map((part) => (part.type === "text" ? part.text : "")).join("");
 }
 

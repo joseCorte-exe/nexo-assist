@@ -41,4 +41,5 @@ Telas do design: "Chat — Novo chamado (desktop)" e "Chat — Consulta de chama
 - Transferência, inclusive a transferência obrigatória com confiança abaixo de 0,6, e o que acontece com mensagens enquanto a conversa não está com o agent (feature 5).
 - O limite de 30 em si (aviso, transferência ou encerramento) e encerrar a conversa como "resolvida pelo agent" (feature 6). Aqui o contador só conta.
 - Os tetos de uso por IP e global (deploy).
+- Um "Tentar de novo" enquanto o servidor ainda escreve a resposta (a rede caiu no meio dela) roda o agent outra vez para a mesma mensagem, e ficam duas respostas gravadas. Fechar isso pede marcar a mensagem como "sendo respondida" no batch do início, com validade igual ao tempo máximo da resposta.
 - Os testes do agent com o modelo real (`pnpm eval`), que entram nos testes de ponta a ponta da seção 10.

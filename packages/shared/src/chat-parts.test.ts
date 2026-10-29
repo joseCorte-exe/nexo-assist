@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { NexoUIMessage } from "./chat";
-import { decisionOf, replyText, summarizeTurn } from "./chat-parts";
+import { decisionOf, textOf, summarizeTurn } from "./chat-parts";
 
 const decision = {
   understanding: "Quer saber o horário do service desk",
@@ -65,9 +65,9 @@ describe("summarizeTurn", () => {
   });
 });
 
-describe("replyText", () => {
+describe("textOf", () => {
   it("joins the text of every step, leaving the tools out", () => {
-    expect(replyText([tool("recordDecision", decision), text("Das 8h "), tool("searchArticles", {}), text("às 18h.")])).toBe(
+    expect(textOf([tool("recordDecision", decision), text("Das 8h "), tool("searchArticles", {}), text("às 18h.")])).toBe(
       "Das 8h às 18h.",
     );
   });
