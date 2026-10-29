@@ -36,6 +36,16 @@ Referência: o PNG que o Pencil exporta da tela "Chat — Consulta e transferên
 
 Os pixels que sobram não somem: dois programas diferentes nunca desenham o mesmo texto com os mesmos tons nas bordas das letras. Para medir esse piso, foram usadas três peças que a feature 2 provou idênticas ao HTML do próprio design no Chrome (caminho da página, "Assistente online" e contador). Contra o PNG do Pencil, elas têm de 0,99 a 1,48 pixel diferente por pixel de texto. A lista, o card e a bolha com as respostas rápidas têm de 0,53 a 0,99, no piso ou abaixo dele.
 
+O teste decisivo usa o próprio código do design. O HTML que o Pencil exporta para essas peças foi desenhado no mesmo Chrome, por cima das peças do app, com os dois defeitos conhecidos da exportação corrigidos (larguras fixas que estouram o padding e a altura de linha). Comparado com o PNG do design, o HTML do Pencil fica mais longe dele do que o app:
+
+| Peça | App contra o PNG do design | HTML do Pencil no Chrome contra o PNG do design |
+|---|---|---|
+| Lista selecionável | 5,24% | 7,98% |
+| Card do chamado | 3,46% | 4,38% |
+| Bolha com as respostas rápidas | 5,21% | 5,78% |
+
+Nenhum código desenhado no Chrome chega a zero contra o PNG do Pencil, nem o que o próprio Pencil gera. O app chega mais perto do que ele.
+
 ## Modelo real (Claude Haiku 5.5)
 
 | Turno | Tempo | Custo |
