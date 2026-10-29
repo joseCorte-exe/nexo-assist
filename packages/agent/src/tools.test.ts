@@ -14,6 +14,13 @@ const hr: KbArticle = {
   content: "Férias e holerite são tratados pelo RH: rh@nexo.com.br ou ramal 4100.",
   category: "other",
 };
+// Another "other" article that also talks about the RH: not the channel.
+const hours: KbArticle = {
+  id: "kb-service-desk-hours",
+  title: "Horário do service desk",
+  content: "De segunda a sexta, das 8h às 18h. Dúvidas de RH vão para o canal do RH.",
+  category: "other",
+};
 
 function helpCenter(articles: KbArticle[] | "down"): HelpCenter & { queries: string[] } {
   const queries: string[] = [];
@@ -82,8 +89,13 @@ describe("redirectOutOfScope", () => {
     expect(center.queries).toEqual(["financeiro", "facilities"]);
   });
 
-  it("only takes a channel article, never an IT article that happens to match", async () => {
-    const { redirectOutOfScope } = createTools({ helpCenter: helpCenter([vpn]) });
+  it("takes the channel article of the area, even when another article comes first", async () => {
+    const { redirectOutOfScope } = createTools({ helpCenter: helpCenter([hours, hr]) });
+    expect(await run(redirectOutOfScope, { area: "hr" })).toMatchObject({ ok: true, channel: { title: hr.title } });
+  });
+
+  it("never takes another article as the channel", async () => {
+    const { redirectOutOfScope } = createTools({ helpCenter: helpCenter([hours, vpn]) });
     expect(await run(redirectOutOfScope, { area: "hr" })).toEqual({
       ok: false,
       area: "hr",

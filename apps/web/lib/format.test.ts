@@ -63,10 +63,6 @@ describe("formatConfidence", () => {
     // Rounded down, so a low confidence never reads as 60%.
     expect(formatConfidence(0.599)).toEqual({ level: "low", text: "Baixa · 59%", percent: 59 });
   });
-
-  it("says when the reduced record has no confidence", () => {
-    expect(formatConfidence(null)).toEqual({ level: "none", text: "Não registrada", percent: null });
-  });
 });
 
 describe("firstName", () => {

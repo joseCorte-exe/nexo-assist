@@ -1,6 +1,7 @@
 import { createTool } from "@mastra/core/tools";
 import {
   decisionRecord,
+  recordDecisionOutput,
   type OutOfScopeArea,
   redirectOutOfScopeInput,
   redirectOutOfScopeOutput,
@@ -8,15 +9,18 @@ import {
   searchArticlesOutput,
   type TicketServiceClient,
 } from "@nexo/shared";
-import { z } from "zod";
 
 /** The part of the ticket-service the tools of this feature use. */
 export type HelpCenter = Pick<TicketServiceClient, "searchArticles">;
 
 const HELP_CENTER_DOWN = "A central de ajuda não respondeu.";
 
-/** The word each channel article of the help center is found by (they live in the sample data). */
-const AREA_QUERY: Record<OutOfScopeArea, string> = { hr: "rh", finance: "financeiro", facilities: "facilities" };
+/** The channel article of each area in the help center (they live in the sample data), and the word that finds it. */
+const AREA_CHANNEL: Record<OutOfScopeArea, { query: string; articleId: string }> = {
+  hr: { query: "rh", articleId: "kb-hr-channel" },
+  finance: { query: "financeiro", articleId: "kb-finance-channel" },
+  facilities: { query: "facilities", articleId: "kb-facilities-channel" },
+};
 
 export function createTools({ helpCenter }: { helpCenter: HelpCenter }) {
   const recordDecision = createTool({
@@ -24,7 +28,7 @@ export function createTools({ helpCenter }: { helpCenter: HelpCenter }) {
     description:
       "Registra o que você entendeu, a ação que vai tomar, sua segurança (0 a 1) e o motivo. É sempre o primeiro passo da resposta.",
     inputSchema: decisionRecord,
-    outputSchema: z.object({ recorded: z.literal(true) }),
+    outputSchema: recordDecisionOutput,
     // The route saves the decision when the reply ends, together with the tools that ran.
     execute: async () => ({ recorded: true as const }),
   });
@@ -47,10 +51,10 @@ export function createTools({ helpCenter }: { helpCenter: HelpCenter }) {
     inputSchema: redirectOutOfScopeInput,
     outputSchema: redirectOutOfScopeOutput,
     execute: async ({ area }) => {
-      const result = await helpCenter.searchArticles(AREA_QUERY[area]);
+      const { query, articleId } = AREA_CHANNEL[area];
+      const result = await helpCenter.searchArticles(query);
       if (!result.ok) return { ok: false as const, area, message: HELP_CENTER_DOWN };
-      // Channel articles are the "other" ones; an IT article that happens to match is not a channel.
-      const channel = result.data.find((article) => article.category === "other");
+      const channel = result.data.find((article) => article.id === articleId);
       return channel
         ? { ok: true as const, area, channel: { title: channel.title, content: channel.content } }
         : { ok: false as const, area, message: "Não achei o canal na central de ajuda." };

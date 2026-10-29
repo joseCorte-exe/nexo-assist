@@ -94,12 +94,36 @@ test("when the help center is down, the line says so and the agent explains", as
   await expect(reply).toContainText("não acessou a central de ajuda");
   await expect(reply).toContainText("A central de ajuda não respondeu agora");
 
+  // After a reload the reply is drawn from the parts it saved: the failed search still reads as failed.
+  await page.reload();
+  await expect(replies(page).last()).toContainText("não acessou a central de ajuda");
+
   // The next files need the ticket-service back.
   await expect
     .poll(async () => (await request.get(`${e2eEnv.TICKET_SERVICE_URL}/analysts`, {
       headers: { "x-service-secret": e2eEnv.TICKET_SERVICE_SECRET },
     })).status(), { timeout: 10_000 })
     .toBe(200);
+});
+
+test("a message the network dropped is marked as not sent and goes on the retry, counted once", async ({ page }) => {
+  await signInAsAna(page);
+  await expect(counter(page)).toHaveText("4/30 mensagens nesta sessão");
+  await page.route("**/api/chat", (route) => route.abort("internetdisconnected"), { times: 1 });
+
+  await composer(page).fill("Qual o horário do service desk?");
+  await composer(page).press("Enter");
+  const mine = page.getByRole("article", { name: "Você" }).last();
+  await expect(mine).toContainText("Não enviada.");
+  await expect(counter(page)).toHaveText("4/30 mensagens nesta sessão");
+
+  await mine.getByRole("button", { name: "Tentar de novo" }).click();
+  await expect(replies(page).last()).toHaveAttribute("aria-busy", "false", { timeout: 20_000 });
+  await expect(replies(page).last()).toContainText("De segunda a sexta");
+  await expect(mine).not.toContainText("Não enviada.");
+  await expect(counter(page)).toHaveText("5/30 mensagens nesta sessão");
+  await page.reload();
+  await expect(counter(page)).toHaveText("5/30 mensagens nesta sessão");
 });
 
 test.describe("on a phone", () => {

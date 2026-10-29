@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,7 +11,19 @@ import { migrateDb } from "@/db/migrate";
 import { conversations, decisions, messages } from "@/db/schema";
 import { seed } from "@/db/seed";
 import { chat } from "./chat";
-import { ana, fakeTicketService, NOW, rafael, readStream, request, sessionCookieFor, testAgent, testDeps, type TestDeps } from "./test-deps";
+import {
+  ana,
+  fakeTicketService,
+  NOW,
+  rafael,
+  readStream,
+  request,
+  sessionCookieFor,
+  testAgent,
+  testDeps,
+  type TestDeps,
+  vpnArticle,
+} from "./test-deps";
 
 // With the clock frozen, the reply falls in the same millisecond as the message, so it is dated 1 ms later.
 const REPLY_AT = new Date(NOW.getTime() + 1);
@@ -18,6 +31,8 @@ const REPLY_AT = new Date(NOW.getTime() + 1);
 const anaCookie = () => sessionCookieFor({ role: "employee", ...ana });
 const post = async (body: unknown, cookie?: string) =>
   request("/api/chat", { method: "POST", body, cookie: cookie ?? (await anaCookie()) });
+/** A new message, with the id the chat gives it. */
+const say = (text: string, cookie?: string) => post({ id: `msg-${randomUUID()}`, text }, cookie);
 
 const decision = {
   understanding: "Erro 809 na VPN",
@@ -42,7 +57,7 @@ async function anaConversation(deps: TestDeps) {
 
 async function messagesOf(deps: TestDeps, conversationId: string) {
   return deps.db
-    .select({ author: messages.author, text: messages.text, decision: decisions })
+    .select({ id: messages.id, author: messages.author, text: messages.text, parts: messages.parts, decision: decisions })
     .from(messages)
     .leftJoin(decisions, eq(decisions.messageId, messages.id))
     .where(eq(messages.conversationId, conversationId))
@@ -52,20 +67,20 @@ async function messagesOf(deps: TestDeps, conversationId: string) {
 describe("POST /api/chat", () => {
   it("answers 401 without a session and 403 for an analyst", async () => {
     const deps = await testDeps();
-    expect((await chat(request("/api/chat", { method: "POST", body: { text: "Oi" } }), deps)).status).toBe(401);
+    expect((await chat(request("/api/chat", { method: "POST", body: { id: "msg-1", text: "Oi" } }), deps)).status).toBe(401);
     const rafaelCookie = await sessionCookieFor({ role: "analyst", ...rafael });
-    expect((await chat(await post({ text: "Oi" }, rafaelCookie), deps)).status).toBe(403);
+    expect((await chat(await say("Oi", rafaelCookie), deps)).status).toBe(403);
   });
 
   it("asks for the message when it is empty", async () => {
-    const response = await chat(await post({ text: "  " }), await testDeps());
+    const response = await chat(await say("  "), await testDeps());
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: { code: "invalid_body", message: "Escreva sua mensagem." } });
   });
 
-  it("opens the first conversation of the employee and saves the message with the counter at 1", async () => {
+  it("opens the first conversation of the employee and saves the message, under its id, with the counter at 1", async () => {
     const deps = await testDeps({ agent: testAgent(scriptedModel(vpnScript())) });
-    const response = await chat(await post({ text: "Minha VPN dá erro 809" }), deps);
+    const response = await chat(await post({ id: "msg-ana-1", text: "Minha VPN dá erro 809" }), deps);
     expect(response.status).toBe(200);
     await readStream(response);
     await deps.settled();
@@ -73,23 +88,22 @@ describe("POST /api/chat", () => {
     const conversation = await anaConversation(deps);
     expect(conversation).toMatchObject({ state: "with_agent", messageCount: 1, createdAt: NOW });
     const [first] = await messagesOf(deps, conversation!.id);
-    expect(first).toEqual({ author: "employee", text: "Minha VPN dá erro 809", decision: null });
+    expect(first).toEqual({ id: "msg-ana-1", author: "employee", text: "Minha VPN dá erro 809", parts: null, decision: null });
   });
 
   it("starts the stream with the conversation and its counter", async () => {
     const deps = await testDeps({ agent: testAgent(scriptedModel(vpnScript())) });
-    const chunks = await readStream(await chat(await post({ text: "Minha VPN dá erro 809" }), deps));
+    const chunks = await readStream(await chat(await say("Minha VPN dá erro 809"), deps));
     const conversation = await anaConversation(deps);
     expect(chunks[0]).toEqual({
       type: "data-conversation",
       data: { id: conversation!.id, state: "with_agent", messageCount: 1 },
-      transient: true,
     });
   });
 
   it("streams the decision first, then the tools and the text in parts", async () => {
     const deps = await testDeps({ agent: testAgent(scriptedModel(vpnScript())) });
-    const chunks = await readStream(await chat(await post({ text: "Minha VPN dá erro 809" }), deps));
+    const chunks = await readStream(await chat(await say("Minha VPN dá erro 809"), deps));
 
     const toolInputs = chunks.filter((chunk) => chunk.type === "tool-input-available");
     expect(toolInputs.map((chunk) => [chunk.toolName, chunk.input])).toEqual([
@@ -101,9 +115,9 @@ describe("POST /api/chat", () => {
     expect(deltas.map((chunk) => chunk.delta).join("")).toBe(answer);
   });
 
-  it("saves the agent reply with its decision and the tools that ran, and marks the first response", async () => {
+  it("saves the agent reply with the parts it streamed, its decision and the tools that ran, and marks the first response", async () => {
     const deps = await testDeps({ agent: testAgent(scriptedModel(vpnScript())) });
-    await readStream(await chat(await post({ text: "Minha VPN dá erro 809" }), deps));
+    await readStream(await chat(await say("Minha VPN dá erro 809"), deps));
     await deps.settled();
 
     const conversation = await anaConversation(deps);
@@ -113,12 +127,28 @@ describe("POST /api/chat", () => {
       text: answer,
       decision: { ...decision, toolsUsed: ["recordDecision", "searchArticles"] },
     });
+    // The same parts the screen drew, without the counter, which only belongs to that moment.
+    const parts = reply!.parts!.filter((part) => part.type !== "step-start");
+    expect(parts.map((part) => part.type)).toEqual(["tool-recordDecision", "tool-searchArticles", "text"]);
+    expect(parts[1]).toMatchObject({ state: "output-available", output: { ok: true, articles: [vpnArticle] } });
+    expect(parts[2]).toMatchObject({ text: answer });
     expect(conversation?.firstResponseAt).toEqual(REPLY_AT);
+  });
+
+  it("saves a search the help center did not answer as failed, as the screen showed it", async () => {
+    const deps = await testDeps({ agent: testAgent(scriptedModel(vpnScript()), fakeTicketService({ down: true })) });
+    await readStream(await chat(await say("Minha VPN dá erro 809"), deps));
+    await deps.settled();
+
+    const [, reply] = await messagesOf(deps, (await anaConversation(deps))!.id);
+    expect(reply!.parts!.find((part) => part.type === "tool-searchArticles")).toMatchObject({
+      output: { ok: false, message: "A central de ajuda não respondeu." },
+    });
   });
 
   it("saves the reply even when the employee closes the tab in the middle of it", async () => {
     const deps = await testDeps({ agent: testAgent(scriptedModel(vpnScript())) });
-    const response = await chat(await post({ text: "Minha VPN dá erro 809" }), deps);
+    const response = await chat(await say("Minha VPN dá erro 809"), deps);
     const reader = response.body!.getReader();
     await reader.read();
     await reader.cancel();
@@ -138,11 +168,11 @@ describe("POST /api/chat", () => {
         ]),
       ),
     });
-    await readStream(await chat(await post({ text: "Minha VPN dá erro 809" }), deps));
+    await readStream(await chat(await say("Minha VPN dá erro 809"), deps));
     await deps.settled();
     const later = new Date(NOW.getTime() + 60_000);
     deps.now = () => later;
-    const chunks = await readStream(await chat(await post({ text: "Obrigada" }), deps));
+    const chunks = await readStream(await chat(await say("Obrigada"), deps));
     await deps.settled();
 
     const conversation = await anaConversation(deps);
@@ -157,13 +187,13 @@ describe("POST /api/chat", () => {
   });
 
   it("saves the reduced record when the agent did not record its decision", async () => {
-    // A model that ignores the forced first step: the code still saves a record, without confidence.
+    // A model that ignores the forced first step: the code still saves a record, with only the tools that ran.
     const deps = await testDeps({ agent: testAgent(scriptedModel([{ text: "Oi!" }])) });
-    await readStream(await chat(await post({ text: "Oi" }), deps));
+    await readStream(await chat(await say("Oi"), deps));
     await deps.settled();
 
     const [, reply] = await messagesOf(deps, (await anaConversation(deps))!.id);
-    expect(reply?.decision).toMatchObject({ understanding: "", confidence: null, reason: null, toolsUsed: [] });
+    expect(reply?.decision).toMatchObject({ understanding: null, action: null, confidence: null, reason: null, toolsUsed: [] });
   });
 
   it("does not call the agent when the conversation is not with it", async () => {
@@ -171,7 +201,7 @@ describe("POST /api/chat", () => {
     const model = scriptedModel(vpnScript());
     const deps = await testDeps({ agent: testAgent(model) });
     const carla = await sessionCookieFor({ role: "employee", id: "emp-carla", name: "Carla Mendes", email: "carla.mendes@nexo.com.br" });
-    const response = await chat(await post({ text: "Alguma novidade?" }, carla), deps);
+    const response = await chat(await say("Alguma novidade?", carla), deps);
 
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({
@@ -185,16 +215,17 @@ describe("POST /api/chat", () => {
     // Elisa only has closed conversations in the sample data.
     const deps = await testDeps();
     const elisa = await sessionCookieFor({ role: "employee", id: "emp-elisa", name: "Elisa Prado", email: "elisa.prado@nexo.com.br" });
-    const chunks = await readStream(await chat(await post({ text: "Oi" }, elisa), deps));
+    const chunks = await readStream(await chat(await say("Oi", elisa), deps));
     expect(chunks[0]).toMatchObject({ data: { state: "with_agent", messageCount: 1 } });
     expect((chunks[0]?.data as { id: string }).id).not.toBe("conv-elisa");
   });
 
-  it("does not save or count again the message the agent failed to answer when it is sent again", async () => {
+  it("answers a message sent again under the same id without saving or counting it twice", async () => {
     const deps = await testDeps({ agent: testAgent(scriptedModel([new Error("overloaded"), ...vpnScript()])) });
-    await readStream(await chat(await post({ text: "Minha VPN dá erro 809" }), deps));
+    const message = { id: "msg-ana-1", text: "Minha VPN dá erro 809" };
+    await readStream(await chat(await post(message), deps));
     await deps.settled();
-    const chunks = await readStream(await chat(await post({ text: "Minha VPN dá erro 809" }), deps));
+    const chunks = await readStream(await chat(await post(message), deps));
     await deps.settled();
 
     const conversation = await anaConversation(deps);
@@ -203,20 +234,32 @@ describe("POST /api/chat", () => {
     expect((await messagesOf(deps, conversation!.id)).map(({ author }) => author)).toEqual(["employee", "agent"]);
   });
 
-  it("saves the same text again when the previous one was answered", async () => {
+  it("saves the same text again under a new id: it is a new message", async () => {
     const deps = await testDeps({ agent: testAgent(scriptedModel([...vpnScript(), ...vpnScript()])) });
-    await readStream(await chat(await post({ text: "Ainda dá erro 809" }), deps));
+    await readStream(await chat(await say("Ainda dá erro 809"), deps));
     await deps.settled();
     deps.now = () => new Date(NOW.getTime() + 60_000);
-    await readStream(await chat(await post({ text: "Ainda dá erro 809" }), deps));
+    await readStream(await chat(await say("Ainda dá erro 809"), deps));
     await deps.settled();
 
     expect((await anaConversation(deps))?.messageCount).toBe(2);
   });
 
+  it("refuses the id of a message of another conversation, without answering or counting", async () => {
+    // Bruno's first message in the sample data.
+    const model = scriptedModel(vpnScript());
+    const deps = await testDeps({ agent: testAgent(model) });
+    const response = await chat(await post({ id: "conv-bruno-msg-1", text: "Oi" }), deps);
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).error.code).toBe("message_conflict");
+    expect(model.calls).toHaveLength(0);
+    expect((await anaConversation(deps))?.messageCount).toBe(0);
+  });
+
   it("ends the stream with a short error and saves nothing of the agent when the model fails", async () => {
     const deps = await testDeps({ agent: testAgent(scriptedModel([new Error("overloaded")])) });
-    const chunks = await readStream(await chat(await post({ text: "Minha VPN dá erro 809" }), deps));
+    const chunks = await readStream(await chat(await say("Minha VPN dá erro 809"), deps));
     await deps.settled();
 
     expect(chunks).toContainEqual({ type: "error", errorText: "O Nexo não conseguiu responder. Tente de novo." });
@@ -247,14 +290,14 @@ describe("POST /api/chat under concurrent messages", () => {
       { role: "employee" as const, id: "emp-elisa", name: "Elisa Prado", email: "elisa.prado@nexo.com.br" },
     ];
     // Warm up: the memory creates its tables on first use.
-    await readStream(await chat(await post({ text: "Oi" }, await sessionCookieFor(employees[0]!)), deps));
+    await readStream(await chat(await say("Oi", await sessionCookieFor(employees[0]!)), deps));
     await deps.settled();
 
     const started = performance.now();
     const firstChunks = await Promise.all(
       employees.flatMap((employee) =>
         [1, 2, 3, 4].map(async (n) => {
-          const response = await chat(await post({ text: `Qual o horário? ${n}` }, await sessionCookieFor(employee)), deps);
+          const response = await chat(await say(`Qual o horário? ${n}`, await sessionCookieFor(employee)), deps);
           const reader = response.body!.getReader();
           await reader.read();
           const at = performance.now() - started;

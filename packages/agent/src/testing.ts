@@ -1,3 +1,4 @@
+import { type NexoAgent, streamReply, type Turn } from "./agent";
 import { codedModel, type ModelStep } from "./models/stream";
 
 export type { ModelStep };
@@ -18,4 +19,14 @@ export function scriptedModel(steps: Array<ModelStep | Error>) {
 /** Text of the prompt a model call received, flattened, to assert on what the model saw. */
 export function promptText(options: { prompt: Array<{ content: unknown }> }) {
   return JSON.stringify(options.prompt.map((message) => message.content));
+}
+
+/** Runs one reply to the end: its text and the tools it called, in order. Rejects when the model failed. */
+export async function replyOf(agent: NexoAgent, turn: Turn) {
+  const full = await (await streamReply(agent, turn)).getFullOutput();
+  if (full.error) throw full.error;
+  const toolCalls = full.steps.flatMap((step) =>
+    step.toolCalls.map(({ payload }) => ({ toolName: payload.toolName, args: payload.args })),
+  );
+  return { text: full.text, toolCalls };
 }

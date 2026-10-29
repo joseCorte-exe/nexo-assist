@@ -1,11 +1,12 @@
 "use client";
 
+import type { DecisionRecord } from "@nexo/shared";
 import { ChevronDown, CircleAlert, LoaderCircle } from "lucide-react";
 import { useId, useRef, useState } from "react";
 import { Button } from "@/components/button";
 import { CheckIcon } from "@/components/design-icons";
 import { ACTION_LABELS, THINKING_LABEL } from "@/lib/agent-actions";
-import type { AgentTurn, Decision, Step } from "@/lib/chat-turns";
+import type { AgentTurn, Step } from "@/lib/chat-turns";
 import { formatConfidence } from "@/lib/format";
 
 /** The 600 px agent bubble of nexo.pen: square top-left corner, hairline instead of a shadow. */
@@ -125,28 +126,26 @@ function Action({ label, state }: { label: string; state: Step["state"] }) {
   );
 }
 
-/** The record of the decision, opened from the action line. Rows without a value (the reduced record) are left out. */
-function DecisionDetail({ id, open, decision }: { id: string; open: boolean; decision: Decision }) {
+/** The record of the decision, opened from the action line. */
+function DecisionDetail({ id, open, decision }: { id: string; open: boolean; decision: DecisionRecord }) {
   const confidence = formatConfidence(decision.confidence);
   const rows: Array<[string, string, string?]> = [
     ["Entendimento", decision.understanding],
     ["Ação", decision.action],
-    ["Confiança", confidence.text, confidence.level === "low" ? "text-warning-text" : confidence.level === "none" ? "text-ink-3" : undefined],
-    ["Motivo", decision.reason ?? ""],
+    ["Confiança", confidence.text, confidence.level === "low" ? "text-warning-text" : undefined],
+    ["Motivo", decision.reason],
   ];
 
   return (
     <div id={id} data-open={open} className="decision-panel" inert={!open}>
       <div className="overflow-hidden">
         <dl className="mt-1.5 grid w-[600px] max-w-full grid-cols-[88px_1fr] gap-x-3 gap-y-2 rounded-lg bg-desk px-4 py-3">
-          {rows
-            .filter(([, value]) => value)
-            .map(([label, value, tone]) => (
-              <div key={label} className="contents">
-                <dt className="text-12.5 leading-5 text-ink-3">{label}</dt>
-                <dd className={`text-13.5 leading-5 text-pretty ${tone ?? "text-ink"}`}>{value}</dd>
-              </div>
-            ))}
+          {rows.map(([label, value, tone]) => (
+            <div key={label} className="contents">
+              <dt className="text-12.5 leading-5 text-ink-3">{label}</dt>
+              <dd className={`text-13.5 leading-5 text-pretty ${tone ?? "text-ink"}`}>{value}</dd>
+            </div>
+          ))}
         </dl>
       </div>
     </div>

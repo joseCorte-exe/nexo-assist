@@ -1,8 +1,8 @@
-import type { ChatMessage, ConversationResponse } from "@nexo/shared";
-import { and, asc, eq, ne } from "drizzle-orm";
+import type { ConversationResponse, NexoUIMessage } from "@nexo/shared";
+import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import type { Db } from "@/db";
-import { conversations, decisions, messages } from "@/db/schema";
+import { conversations, messages } from "@/db/schema";
 import type { Deps } from "./deps";
 import { readEmployeeSession } from "./http";
 
@@ -11,8 +11,9 @@ export const activeConversationOf = (employeeId: string) =>
   and(eq(conversations.employeeId, employeeId), ne(conversations.state, "closed"));
 
 /**
- * The active conversation of the employee with every message and the decision of each agent reply,
- * in two queries. The chat page and GET /api/conversation both read it from here.
+ * The active conversation of the employee with its messages, in two queries. An agent reply comes with the parts it
+ * streamed, decision included, so the chat draws it as it did live. The chat page and GET /api/conversation both
+ * read it from here.
  */
 export async function loadConversation(db: Db, employeeId: string): Promise<ConversationResponse> {
   const [conversation] = await db
@@ -23,35 +24,19 @@ export async function loadConversation(db: Db, employeeId: string): Promise<Conv
   if (!conversation) return { conversation: null, messages: [] };
 
   const rows = await db
-    .select({
-      id: messages.id,
-      author: messages.author,
-      text: messages.text,
-      createdAt: messages.createdAt,
-      decisionId: decisions.id,
-      understanding: decisions.understanding,
-      action: decisions.action,
-      confidence: decisions.confidence,
-      reason: decisions.reason,
-      toolsUsed: decisions.toolsUsed,
-    })
+    .select({ id: messages.id, author: messages.author, text: messages.text, parts: messages.parts })
     .from(messages)
-    .leftJoin(decisions, eq(decisions.messageId, messages.id))
-    .where(eq(messages.conversationId, conversation.id))
+    .where(and(eq(messages.conversationId, conversation.id), inArray(messages.author, ["employee", "agent"])))
     .orderBy(asc(messages.createdAt));
 
+  // Analyst and system messages come with the console, in feature 5.
   return {
     conversation,
     messages: rows.map(
-      ({ id, author, text, createdAt, decisionId, understanding, action, confidence, reason, toolsUsed }): ChatMessage => ({
+      ({ id, author, text, parts }): NexoUIMessage => ({
         id,
-        author,
-        text,
-        createdAt: createdAt.toISOString(),
-        decision:
-          decisionId === null
-            ? null
-            : { understanding: understanding ?? "", action: action ?? "", confidence, reason, toolsUsed: toolsUsed ?? [] },
+        role: author === "employee" ? "user" : "assistant",
+        parts: parts ?? [{ type: "text", text }],
       }),
     ),
   };

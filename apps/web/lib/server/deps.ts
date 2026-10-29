@@ -8,7 +8,7 @@ import { getSessionSecret } from "./session";
 /** What the server code needs from the outside. Route handlers get the real one; tests build their own. */
 export type Deps = {
   db: Db;
-  ticketService: Pick<TicketServiceClient, "findPersonByEmail" | "listAnalysts" | "searchArticles">;
+  ticketService: Pick<TicketServiceClient, "findPersonByEmail" | "listAnalysts">;
   agent: NexoAgent;
   /** Keeps the server running for work that ends after the response, like saving the agent reply. */
   waitUntil: (task: Promise<unknown>) => void;

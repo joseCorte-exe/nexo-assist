@@ -1,11 +1,9 @@
-import { type ChatMessage, decisionRecord } from "@nexo/shared";
+import { type DecisionRecord, decisionRecord, type NexoUIMessage } from "@nexo/shared";
 import type { ChatStatus } from "ai";
 import { type ActionTool, isActionTool } from "./agent-actions";
-import type { NexoUIMessage } from "./chat-message";
 
-// What the chat draws, whether the message came saved from GET /api/conversation or is arriving in the stream.
+// What the chat draws. Saved messages and the ones arriving in the stream are the same UI messages, read here once.
 
-export type Decision = { understanding: string; action: string; confidence: number | null; reason: string | null };
 export type Step = { tool: ActionTool; state: "running" | "done" | "failed" };
 
 /**
@@ -14,50 +12,29 @@ export type Step = { tool: ActionTool; state: "running" | "done" | "failed" };
  */
 export type Phase = "thinking" | "working" | "writing" | "done" | "failed" | "interrupted";
 
-export type EmployeeTurn = { kind: "employee"; id: string; text: string };
-export type AgentTurn = { kind: "agent"; id: string; text: string; decision: Decision | null; steps: Step[]; phase: Phase };
+/** unsent: the message never reached the server (nothing of the reply came back). */
+export type EmployeeTurn = { kind: "employee"; id: string; text: string; unsent: boolean };
+export type AgentTurn = { kind: "agent"; id: string; text: string; decision: DecisionRecord | null; steps: Step[]; phase: Phase };
 export type Turn = EmployeeTurn | AgentTurn;
 
-/** The saved conversation. Analyst and system messages come with the console, in feature 5. */
-export function turnsFromHistory(messages: readonly ChatMessage[]): Turn[] {
-  return messages.flatMap((message): Turn[] => {
-    if (message.author === "employee") return [{ kind: "employee", id: message.id, text: message.text }];
-    if (message.author !== "agent") return [];
-    const { toolsUsed = [], ...decision } = message.decision ?? {};
-    return [
-      {
-        kind: "agent",
-        id: message.id,
-        text: message.text,
-        decision: message.decision ? (decision as Decision) : null,
-        steps: toolsUsed.filter(isActionTool).map((tool) => ({ tool, state: "done" })),
-        phase: "done",
-      },
-    ];
-  });
-}
+const textOf = (message: NexoUIMessage) => message.parts.map((part) => (part.type === "text" ? part.text : "")).join("");
 
 function agentTurn(message: NexoUIMessage): AgentTurn {
-  let decision: Decision | null = null;
-  let text = "";
+  let decision: DecisionRecord | null = null;
   const steps: Step[] = [];
   for (const part of message.parts) {
-    if (part.type === "text") {
-      text += part.text;
-    } else if (part.type === "tool-recordDecision") {
+    if (part.type === "tool-recordDecision") {
       // The input is complete from input-available on; while it streams it may be partial.
       const parsed = part.state === "input-streaming" ? null : decisionRecord.safeParse(part.input);
-      if (parsed?.success) decision = parsed.data;
-    } else if (part.type.startsWith("tool-") && "state" in part) {
+      if (parsed?.success) decision ??= parsed.data;
+    } else if (part.type === "tool-searchArticles" || part.type === "tool-redirectOutOfScope") {
       const tool = part.type.slice("tool-".length);
       if (!isActionTool(tool)) continue;
-      const failed =
-        part.state === "output-error" ||
-        (part.state === "output-available" && (part.output as { ok?: boolean } | undefined)?.ok === false);
-      const state = failed ? "failed" : part.state === "output-available" ? "done" : "running";
-      steps.push({ tool, state });
+      const failed = part.state === "output-error" || (part.state === "output-available" && !part.output.ok);
+      steps.push({ tool, state: failed ? "failed" : part.state === "output-available" ? "done" : "running" });
     }
   }
+  const text = textOf(message);
   const phase: Phase = text ? "writing" : decision ? "working" : "thinking";
   return { kind: "agent", id: message.id, text, decision, steps, phase };
 }
@@ -69,26 +46,35 @@ function settle(turn: AgentTurn, status: ChatStatus): AgentTurn {
 }
 
 /**
- * The messages of the chat as they stream. Only the last reply follows the status of the chat; the ones before
- * it are done. A message without a reply yet gets one at once: thinking, or failed.
+ * The messages of the chat, saved or streaming. Only the last reply follows the status of the chat; the ones before
+ * it are done. A message without a reply yet gets one at once, thinking; if the request failed before any of the
+ * reply came back, the message is marked as not sent instead.
  */
 export function liveTurns(messages: readonly NexoUIMessage[], status: ChatStatus): Turn[] {
   const turns: Turn[] = messages.map((message) =>
     message.role === "user"
-      ? {
-          kind: "employee",
-          id: message.id,
-          text: message.parts.map((part) => (part.type === "text" ? part.text : "")).join(""),
-        }
+      ? { kind: "employee", id: message.id, text: textOf(message), unsent: false }
       : { ...agentTurn(message), phase: "done" },
   );
 
   const last = turns.at(-1);
   const lastMessage = messages.at(-1);
   if (last?.kind === "agent" && lastMessage) return [...turns.slice(0, -1), settle(agentTurn(lastMessage), status)];
+  if (last?.kind === "employee" && status === "error") return [...turns.slice(0, -1), { ...last, unsent: true }];
   if (last?.kind === "employee" && status !== "ready") {
-    const pending: AgentTurn = { kind: "agent", id: `${last.id}-reply`, text: "", decision: null, steps: [], phase: "thinking" };
-    return [...turns, settle(pending, status)];
+    return [...turns, { kind: "agent", id: `${last.id}-reply`, text: "", decision: null, steps: [], phase: "thinking" }];
   }
   return turns;
+}
+
+/**
+ * The x/30 counter: the count of the last reply that brought one (its first part), else the one the page loaded
+ * with. A message on its way counts at once; one that never reached the server does not.
+ */
+export function messageCount(messages: readonly NexoUIMessage[], status: ChatStatus, saved: number): number {
+  let count = saved;
+  for (const message of messages) {
+    for (const part of message.parts) if (part.type === "data-conversation") count = part.data.messageCount;
+  }
+  return status === "submitted" && messages.at(-1)?.role === "user" ? count + 1 : count;
 }

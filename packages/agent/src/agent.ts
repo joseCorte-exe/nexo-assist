@@ -2,10 +2,8 @@ import { Agent } from "@mastra/core/agent";
 import type { MastraModelConfig } from "@mastra/core/llm";
 import { LibSQLStore } from "@mastra/libsql";
 import { Memory } from "@mastra/memory";
-import type { StoredDecision } from "@nexo/shared";
 import { instructions, workingMemoryTemplate } from "./instructions";
 import { createTools, type HelpCenter } from "./tools";
-import { summarizeTurn } from "./turn-summary";
 
 // Explicit limits, so one reply never runs away with time or cost (ARQUITETURA.md, section 9).
 const MAX_STEPS = 5;
@@ -63,14 +61,9 @@ export type Turn = {
   text: string;
 };
 
-export type TurnResult = { ok: true; text: string; decision: StoredDecision } | { ok: false; error: unknown };
-
-/**
- * One reply of the agent. `output` is the stream for the screen; `finished` resolves when the reply is over,
- * with the text and the decision to save, and never rejects.
- */
+/** One reply of the agent: the Mastra stream, which the route turns into the chat stream and saves at the end. */
 export function streamReply(agent: NexoAgent, { conversationId, employeeId, text }: Turn) {
-  const output = agent.stream(text, {
+  return agent.stream(text, {
     memory: { thread: conversationId, resource: employeeId },
     maxSteps: MAX_STEPS,
     // recordDecision is mandatory in the first step; afterwards the model chooses.
@@ -78,17 +71,4 @@ export function streamReply(agent: NexoAgent, { conversationId, employeeId, text
       stepNumber === 0 ? { toolChoice: { type: "tool", toolName: "recordDecision" } } : undefined,
     modelSettings: { maxOutputTokens: MAX_OUTPUT_TOKENS, timeout: { totalMs: TOTAL_TIMEOUT_MS } },
   });
-
-  const finished: Promise<TurnResult> = output
-    .then((stream) => stream.getFullOutput())
-    .then((full): TurnResult => {
-      if (full.error) return { ok: false, error: full.error };
-      const toolCalls = full.steps.flatMap((step) =>
-        step.toolCalls.map(({ payload }) => ({ toolName: payload.toolName, args: payload.args })),
-      );
-      return { ok: true, text: full.text, decision: summarizeTurn(toolCalls) };
-    })
-    .catch((error: unknown) => ({ ok: false, error }));
-
-  return { output, finished };
 }

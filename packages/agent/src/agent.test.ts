@@ -1,7 +1,7 @@
 import type { DecisionRecord, KbArticle } from "@nexo/shared";
 import { describe, expect, it } from "vitest";
-import { createNexoAgent, createMemory, streamReply } from "./agent";
-import { promptText, scriptedModel } from "./testing";
+import { createNexoAgent, createMemory } from "./agent";
+import { promptText, replyOf, scriptedModel } from "./testing";
 import type { HelpCenter } from "./tools";
 
 const hours: KbArticle = {
@@ -36,26 +36,27 @@ function setup(steps: Parameters<typeof scriptedModel>[0]) {
 const turn = { conversationId: "conv-1", employeeId: "emp-ana", text: "Qual o horário do service desk?" };
 
 describe("streamReply", () => {
-  it("answers and gives back the text and the decision of the turn", async () => {
+  it("records the decision, searches and answers", async () => {
     const { agent } = setup(hoursScript());
-    const reply = streamReply(agent, turn);
-    expect(await reply.finished).toEqual({
-      ok: true,
+    expect(await replyOf(agent, turn)).toEqual({
       text: answer,
-      decision: { ...decision, toolsUsed: ["recordDecision", "searchArticles"] },
+      toolCalls: [
+        { toolName: "recordDecision", args: decision },
+        { toolName: "searchArticles", args: { query: "horário do service desk" } },
+      ],
     });
   });
 
   it("forces recordDecision in the first step and lets the model choose afterwards", async () => {
     const { agent, model } = setup(hoursScript());
-    await streamReply(agent, turn).finished;
+    await replyOf(agent, turn);
     expect(model.calls[0]?.toolChoice).toEqual({ type: "tool", toolName: "recordDecision" });
     expect(model.calls[1]?.toolChoice).toEqual({ type: "auto" });
   });
 
   it("gives the model the article the help center found", async () => {
     const { agent, model } = setup(hoursScript());
-    await streamReply(agent, turn).finished;
+    await replyOf(agent, turn);
     expect(promptText(model.calls[2]!)).toContain("das 8h às 18h");
   });
 
@@ -66,8 +67,8 @@ describe("streamReply", () => {
       { text: "Sim, de segunda a sexta." },
     ]);
     const agent = createNexoAgent({ model, memory: createMemory({ url: ":memory:" }), helpCenter });
-    await streamReply(agent, turn).finished;
-    await streamReply(agent, { ...turn, text: "E no sábado?" }).finished;
+    await replyOf(agent, turn);
+    await replyOf(agent, { ...turn, text: "E no sábado?" });
 
     const secondTurn = promptText(model.calls[3]!);
     expect(secondTurn).toContain("Qual o horário do service desk?");
@@ -82,8 +83,8 @@ describe("streamReply", () => {
       { text: "Oi!" },
     ]);
     const agent = createNexoAgent({ model, memory: createMemory({ url: ":memory:" }), helpCenter });
-    await streamReply(agent, turn).finished;
-    await streamReply(agent, { conversationId: "conv-2", employeeId: "emp-bruno", text: "Oi" }).finished;
+    await replyOf(agent, turn);
+    await replyOf(agent, { conversationId: "conv-2", employeeId: "emp-bruno", text: "Oi" });
     expect(promptText(model.calls[3]!)).not.toContain("Qual o horário do service desk?");
   });
 
@@ -97,13 +98,13 @@ describe("streamReply", () => {
       again,
       again,
     ]);
-    await streamReply(agent, turn).finished;
+    await replyOf(agent, turn);
     expect(model.calls).toHaveLength(5);
   });
 
   it("marks the instructions for the prompt cache, so the steps of a reply reuse them", async () => {
     const { agent, model } = setup(hoursScript());
-    await streamReply(agent, turn).finished;
+    await replyOf(agent, turn);
     const [system] = model.calls[0]!.prompt;
     expect(system?.role).toBe("system");
     expect(system?.content).toContain("Você é o Nexo Assist");
@@ -112,13 +113,12 @@ describe("streamReply", () => {
 
   it("caps the tokens of each step", async () => {
     const { agent, model } = setup(hoursScript());
-    await streamReply(agent, turn).finished;
+    await replyOf(agent, turn);
     expect(model.calls[0]?.maxOutputTokens).toBe(800);
   });
 
-  it("reports a failure of the model instead of throwing", async () => {
+  it("ends the reply with the failure of the model", async () => {
     const { agent } = setup([new Error("overloaded")]);
-    const reply = await streamReply(agent, turn).finished;
-    expect(reply.ok).toBe(false);
+    await expect(replyOf(agent, turn)).rejects.toThrow();
   });
 });

@@ -6,6 +6,7 @@ import {
   type KbArticle,
   sampleAnalysts,
   sampleEmployees,
+  type TicketServiceClient,
 } from "@nexo/shared";
 import { NextRequest } from "next/server";
 import { createDb } from "@/db";
@@ -38,7 +39,7 @@ export const vpnArticle: KbArticle = {
  * The real ticket-service client, answering from the sample people instead of the network,
  * so tests go through the same lookup rules the app uses.
  */
-export function fakeTicketService({ down = false } = {}): Deps["ticketService"] {
+export function fakeTicketService({ down = false } = {}): TicketServiceClient {
   const employees: Employee[] = sampleEmployees.map((employee) => ({
     ...employee,
     passwordChangedAt: ana.passwordChangedAt,
@@ -70,11 +71,10 @@ export async function testDeps(overrides: Partial<Deps> = {}): Promise<TestDeps>
   await migrateDb(db);
   await seed(db, NOW);
   const pending: Promise<unknown>[] = [];
-  const ticketService = overrides.ticketService ?? fakeTicketService();
   return {
     db,
-    ticketService,
-    agent: testAgent(simulatedModel(), ticketService),
+    ticketService: fakeTicketService(),
+    agent: testAgent(),
     waitUntil: (task) => pending.push(task),
     sessionSecret: SECRET,
     secureCookies: false,

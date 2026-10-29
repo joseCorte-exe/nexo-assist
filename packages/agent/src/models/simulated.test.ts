@@ -1,6 +1,8 @@
 import type { KbArticle } from "@nexo/shared";
 import { describe, expect, it } from "vitest";
-import { createMemory, createNexoAgent, streamReply } from "../agent";
+import { createMemory, createNexoAgent } from "../agent";
+import { replyOf } from "../testing";
+import { summarizeTurn } from "../turn-summary";
 import type { HelpCenter } from "../tools";
 import { simulatedModel } from "./simulated";
 
@@ -29,43 +31,43 @@ const helpCenter = (state: "up" | "down" = "up"): HelpCenter => ({
 
 async function reply(text: string, center = helpCenter()) {
   const agent = createNexoAgent({ model: simulatedModel(), memory: createMemory({ url: ":memory:" }), helpCenter: center });
-  return streamReply(agent, { conversationId: "conv-1", employeeId: "emp-ana", text }).finished;
+  const { text: answer, toolCalls } = await replyOf(agent, { conversationId: "conv-1", employeeId: "emp-ana", text });
+  const parts = toolCalls.map(({ toolName, args }) => ({ type: `tool-${toolName}`, toolCallId: toolName, state: "input-available", input: args }));
+  return { text: answer, decision: summarizeTurn(parts as Parameters<typeof summarizeTurn>[0]) };
 }
 
 describe("simulatedModel", () => {
   it("records the decision, searches the help center and answers with the article", async () => {
     const result = await reply("Minha VPN dá erro 809");
-    if (!result.ok) throw result.error;
     expect(result.decision).toMatchObject({
-      action: "Buscar na central de ajuda",
+      record: { action: "Buscar na central de ajuda" },
       toolsUsed: ["recordDecision", "searchArticles"],
     });
-    expect(result.decision.confidence).toBeGreaterThan(0.6);
+    expect(result.decision.record?.confidence).toBeGreaterThan(0.6);
     expect(result.text).toContain(vpn.content);
   });
 
   it("says when the help center has nothing about the case", async () => {
     const result = await reply("Meu mouse está piscando em roxo");
-    if (!result.ok) throw result.error;
     expect(result.text).toContain("Não encontrei nada sobre isso na central de ajuda");
   });
 
   it("redirects a subject of HR to its channel", async () => {
     const result = await reply("Como faço para pedir férias?");
-    if (!result.ok) throw result.error;
-    expect(result.decision).toMatchObject({ action: "Indicar o canal de RH", toolsUsed: ["recordDecision", "redirectOutOfScope"] });
+    expect(result.decision).toMatchObject({
+      record: { action: "Indicar o canal de RH" },
+      toolsUsed: ["recordDecision", "redirectOutOfScope"],
+    });
     expect(result.text).toContain("rh@nexo.com.br");
   });
 
   it("explains when the help center did not answer", async () => {
     const result = await reply("Minha VPN dá erro 809", helpCenter("down"));
-    if (!result.ok) throw result.error;
     expect(result.text).toContain("A central de ajuda não respondeu");
   });
 
   it("answers a greeting without searching", async () => {
     const result = await reply("Oi, bom dia!");
-    if (!result.ok) throw result.error;
     expect(result.decision.toolsUsed).toEqual(["recordDecision"]);
     expect(result.text).toContain("Como posso ajudar");
   });

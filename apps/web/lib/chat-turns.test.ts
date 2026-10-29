@@ -1,7 +1,6 @@
-import type { ChatMessage } from "@nexo/shared";
+import type { NexoUIMessage } from "@nexo/shared";
 import { describe, expect, it } from "vitest";
-import type { NexoUIMessage } from "./chat-message";
-import { liveTurns, turnsFromHistory } from "./chat-turns";
+import { liveTurns, messageCount } from "./chat-turns";
 
 const decision = {
   understanding: "Quer saber o horário do service desk",
@@ -9,59 +8,6 @@ const decision = {
   confidence: 0.93,
   reason: "Existe um artigo sobre o horário.",
 };
-const at = "2026-10-26T13:00:00.000Z";
-
-describe("turnsFromHistory", () => {
-  it("shows each saved message, the agent ones with their decision and the actions that ran", () => {
-    const history: ChatMessage[] = [
-      { id: "m1", author: "employee", text: "Qual o horário?", createdAt: at, decision: null },
-      {
-        id: "m2",
-        author: "agent",
-        text: "Das 8h às 18h.",
-        createdAt: at,
-        decision: { ...decision, toolsUsed: ["recordDecision", "searchArticles"] },
-      },
-    ];
-    expect(turnsFromHistory(history)).toEqual([
-      { kind: "employee", id: "m1", text: "Qual o horário?" },
-      {
-        kind: "agent",
-        id: "m2",
-        text: "Das 8h às 18h.",
-        decision,
-        steps: [{ tool: "searchArticles", state: "done" }],
-        phase: "done",
-      },
-    ]);
-  });
-
-  it("keeps the reduced record without confidence", () => {
-    const [turn] = turnsFromHistory([
-      {
-        id: "m2",
-        author: "agent",
-        text: "Oi!",
-        createdAt: at,
-        decision: { understanding: "", action: "", confidence: null, reason: null, toolsUsed: [] },
-      },
-    ]);
-    expect(turn).toMatchObject({ decision: { understanding: "", action: "", confidence: null, reason: null } });
-  });
-
-  it("only shows actions the screen has a label for", () => {
-    const [turn] = turnsFromHistory([
-      {
-        id: "m2",
-        author: "agent",
-        text: "Pronto.",
-        createdAt: at,
-        decision: { ...decision, toolsUsed: ["recordDecision", "updateWorkingMemory", "redirectOutOfScope"] },
-      },
-    ]);
-    expect(turn).toMatchObject({ steps: [{ tool: "redirectOutOfScope", state: "done" }] });
-  });
-});
 
 const user = (id: string, text: string): NexoUIMessage => ({ id, role: "user", parts: [{ type: "text", text }] });
 const recordDecision = (state: "input-streaming" | "input-available" | "output-available") =>
@@ -85,7 +31,10 @@ const agent = (parts: NexoUIMessage["parts"]): NexoUIMessage => ({ id: "a1", rol
 describe("liveTurns", () => {
   it("shows the agent thinking as soon as the message goes, before anything arrives", () => {
     const turns = liveTurns([user("u1", "Qual o horário?")], "submitted");
-    expect(turns.at(-1)).toEqual({ kind: "agent", id: "u1-reply", text: "", decision: null, steps: [], phase: "thinking" });
+    expect(turns).toEqual([
+      { kind: "employee", id: "u1", text: "Qual o horário?", unsent: false },
+      { kind: "agent", id: "u1-reply", text: "", decision: null, steps: [], phase: "thinking" },
+    ]);
   });
 
   it("keeps thinking while the decision is still being written", () => {
@@ -126,16 +75,38 @@ describe("liveTurns", () => {
     expect(turns.at(-1)).toMatchObject({ phase: "done" });
   });
 
-  it("fails when the agent could not answer anything", () => {
-    expect(liveTurns([user("u1", "Oi")], "error").at(-1)).toMatchObject({ kind: "agent", phase: "failed" });
-    expect(liveTurns([user("u1", "Oi"), agent([recordDecision("output-available")])], "error").at(-1)).toMatchObject({
-      phase: "failed",
-    });
+  it("marks the message as not sent when nothing of the reply arrived, with no reply under it", () => {
+    expect(liveTurns([user("u1", "Oi")], "error")).toEqual([{ kind: "employee", id: "u1", text: "Oi", unsent: true }]);
+  });
+
+  it("fails when the reply started but brought no answer", () => {
+    const turns = liveTurns([user("u1", "Oi"), agent([recordDecision("output-available")])], "error");
+    expect(turns.at(-1)).toMatchObject({ phase: "failed" });
+    expect(turns[0]).toMatchObject({ unsent: false });
   });
 
   it("is interrupted when the answer stopped in the middle, keeping what arrived", () => {
     const turns = liveTurns([user("u1", "Oi"), agent([{ type: "text", text: "Das 8h" }])], "error");
     expect(turns.at(-1)).toMatchObject({ text: "Das 8h", phase: "interrupted" });
+  });
+
+  it("draws a saved reply as it was drawn live, a failed search included", () => {
+    const saved = agent([recordDecision("output-available"), search("output-available", false), { type: "text", text: "Fora do ar." }]);
+    const turns = liveTurns([user("u1", "Oi"), saved, user("u2", "E agora?")], "submitted");
+    expect(turns[1]).toEqual({
+      kind: "agent",
+      id: "a1",
+      text: "Fora do ar.",
+      decision,
+      steps: [{ tool: "searchArticles", state: "failed" }],
+      phase: "done",
+    });
+  });
+
+  it("only shows actions the screen has a label for", () => {
+    const memory = { type: "tool-updateWorkingMemory", toolCallId: "c3", state: "output-available", input: {}, output: {} };
+    const turns = liveTurns([user("u1", "Oi"), agent([recordDecision("output-available"), memory as NexoUIMessage["parts"][number]])], "ready");
+    expect(turns.at(-1)).toMatchObject({ steps: [] });
   });
 
   it("only changes the phase of the last reply: earlier ones stay done", () => {
@@ -149,5 +120,27 @@ describe("liveTurns", () => {
       "employee",
       "thinking",
     ]);
+  });
+});
+
+const conversation = (count: number) =>
+  ({ type: "data-conversation", data: { id: "conv-1", state: "with_agent", messageCount: count } }) as NexoUIMessage["parts"][number];
+
+describe("messageCount", () => {
+  it("is the count the page loaded with while no reply brought a newer one", () => {
+    expect(messageCount([user("u1", "Oi"), agent([{ type: "text", text: "Oi!" }])], "ready", 4)).toBe(4);
+  });
+
+  it("is the count of the last reply that brought one", () => {
+    const messages = [user("u1", "Oi"), agent([conversation(5)]), user("u2", "E?"), agent([conversation(6)])];
+    expect(messageCount(messages, "ready", 4)).toBe(6);
+  });
+
+  it("counts a message on its way at once", () => {
+    expect(messageCount([user("u1", "Oi"), agent([conversation(5)]), user("u2", "E?")], "submitted", 4)).toBe(6);
+  });
+
+  it("does not count a message that never reached the server", () => {
+    expect(messageCount([user("u1", "Oi"), agent([conversation(5)]), user("u2", "E?")], "error", 4)).toBe(5);
   });
 });

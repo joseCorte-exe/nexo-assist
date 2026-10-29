@@ -148,6 +148,9 @@ importers:
 
   packages/shared:
     dependencies:
+      ai:
+        specifier: ^7.0.154
+        version: 7.0.154(zod@4.6.7)
       zod:
         specifier: ^4.6.7
         version: 4.6.7

@@ -1,4 +1,6 @@
+import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
+import { messages } from "@/db/schema";
 import { conversationHandler, loadConversation } from "./conversation";
 import { ana, rafael, request, sessionCookieFor, testDeps } from "./test-deps";
 
@@ -20,7 +22,7 @@ describe("GET /api/conversation", () => {
 });
 
 describe("loadConversation", () => {
-  it("returns the active conversation with its messages in order and the decision of each agent reply", async () => {
+  it("returns the active conversation with its messages in order, the agent replies with the parts they streamed", async () => {
     // Bruno is talking to the agent in the sample data.
     const { db } = await testDeps();
     const view = await loadConversation(db, "emp-bruno");
@@ -28,25 +30,46 @@ describe("loadConversation", () => {
     expect(view.messages).toEqual([
       {
         id: "conv-bruno-msg-1",
-        author: "employee",
-        text: "Como está meu pedido da licença do Power BI?",
-        createdAt: "2026-10-26T12:57:00.000Z",
-        decision: null,
+        role: "user",
+        parts: [{ type: "text", text: "Como está meu pedido da licença do Power BI?" }],
       },
       {
         id: "conv-bruno-msg-2",
-        author: "agent",
-        text: "Seu pedido REQ-10450 está aguardando um analista. O prazo dele é de 5 dias úteis desde a abertura, ontem.",
-        createdAt: "2026-10-26T12:57:08.000Z",
-        decision: {
-          understanding: "Quer saber a situação do pedido de licença do Power BI",
-          action: "Consultar os chamados do funcionário",
-          confidence: 0.9,
-          reason: "Só existe um pedido de Power BI entre os chamados dele.",
-          toolsUsed: ["recordDecision", "listMyTickets", "getTicket"],
-        },
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-recordDecision",
+            toolCallId: "conv-bruno-msg-2-decision",
+            state: "output-available",
+            input: {
+              understanding: "Quer saber a situação do pedido de licença do Power BI",
+              action: "Consultar os chamados do funcionário",
+              confidence: 0.9,
+              reason: "Só existe um pedido de Power BI entre os chamados dele.",
+            },
+            output: { recorded: true },
+          },
+          {
+            type: "text",
+            text: "Seu pedido REQ-10450 está aguardando um analista. O prazo dele é de 5 dias úteis desde a abertura, ontem.",
+          },
+        ],
       },
     ]);
+  });
+
+  it("returns a saved message without parts as its text", async () => {
+    const { db } = await testDeps();
+    await db.update(messages).set({ parts: null }).where(eq(messages.id, "conv-bruno-msg-2"));
+    const [, reply] = (await loadConversation(db, "emp-bruno")).messages;
+    expect(reply?.parts).toEqual([{ type: "text", text: expect.stringContaining("REQ-10450") }]);
+  });
+
+  it("leaves out what is not from the employee or the agent, which comes with the console in feature 5", async () => {
+    // Carla's conversation ends with a system message, the transfer.
+    const { db } = await testDeps();
+    const roles = (await loadConversation(db, "emp-carla")).messages.map(({ role }) => role);
+    expect(roles).toEqual(["user", "assistant"]);
   });
 
   it("leaves out closed conversations", async () => {
