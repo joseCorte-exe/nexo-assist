@@ -66,6 +66,10 @@ export type Turn = {
 };
 
 type ToolResult = { toolName: string; output?: unknown };
+type Step = { text: string; toolResults: ReadonlyArray<ToolResult> };
+
+/** The Mastra tool the model calls to keep the summary of the case (the working memory). */
+const WORKING_MEMORY_TOOL = "updateWorkingMemory";
 
 /**
  * An offer tool that ran and showed its offer: the list answers ok, the replies answer shown. The model gets the
@@ -78,6 +82,16 @@ function shownOffer({ toolName, output }: ToolResult) {
   return ("ok" in value && value.ok === true) || ("shown" in value && value.shown === true);
 }
 
+/**
+ * The reply is done: an offer was shown, or the model answered and only updated the working memory along with it.
+ * Called again after that, the model writes the same answer a second time.
+ */
+function replyDone(step: Step | undefined) {
+  if (!step) return false;
+  if (step.toolResults.some(shownOffer)) return true;
+  return step.text.trim() !== "" && step.toolResults.every(({ toolName }) => toolName === WORKING_MEMORY_TOOL);
+}
+
 /** One reply of the agent: the Mastra stream, which the route turns into the chat stream and saves at the end. */
 export function streamReply(agent: NexoAgent, { conversationId, employeeId, text }: Turn) {
   return agent.stream(text, {
@@ -87,8 +101,7 @@ export function streamReply(agent: NexoAgent, { conversationId, employeeId, text
     maxSteps: MAX_STEPS,
     // An offer that was shown hands the turn to the employee, who answers with a click: calling the model again would
     // only cost. One that could not be shown (refused input, no ticket of hers, service down) lets the model explain.
-    stopWhen: ({ steps }: { steps: ReadonlyArray<{ toolResults: ReadonlyArray<ToolResult> }> }) =>
-      steps.at(-1)?.toolResults.some(shownOffer) ?? false,
+    stopWhen: ({ steps }: { steps: ReadonlyArray<Step> }) => replyDone(steps.at(-1)),
     // recordDecision is mandatory in the first step; afterwards the model chooses.
     prepareStep: ({ stepNumber }) =>
       stepNumber === 0 ? { toolChoice: { type: "tool", toolName: "recordDecision" } } : undefined,

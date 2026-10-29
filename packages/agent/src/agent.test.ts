@@ -196,6 +196,17 @@ describe("streamReply", () => {
     expect(model.calls).toHaveLength(2);
   });
 
+  it("ends the reply once it answered and only updated the working memory, so the answer is not written twice", async () => {
+    // A third step would fail: the script has only two.
+    const { agent, model, memory } = setup([
+      { toolCalls: [{ toolName: "recordDecision", input: decision }] },
+      { text: answer, toolCalls: [{ toolName: "updateWorkingMemory", input: { memory: "# Caso\n- Problema: horário" } }] },
+    ]);
+    expect((await replyOf(agent, turn)).text).toBe(answer);
+    expect(model.calls).toHaveLength(2);
+    expect(await memory.getWorkingMemory({ threadId: "conv-1", resourceId: "emp-ana" })).toContain("horário");
+  });
+
   it("goes on when the offer could not be shown, so the agent explains instead of answering nothing", async () => {
     // None of these numbers is the employee's: the list has nothing to show.
     const { agent, model } = setup([
