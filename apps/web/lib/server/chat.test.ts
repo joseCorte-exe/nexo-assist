@@ -245,6 +245,30 @@ describe("POST /api/chat", () => {
     expect((await anaConversation(deps))?.messageCount).toBe(2);
   });
 
+  it("refuses an id sent again with another text, which would be answered without being saved or counted", async () => {
+    const model = scriptedModel([new Error("overloaded"), ...vpnScript()]);
+    const deps = await testDeps({ agent: testAgent(model) });
+    await readStream(await chat(await post({ id: "msg-ana-1", text: "Minha VPN dá erro 809" }), deps));
+    await deps.settled();
+    const response = await chat(await post({ id: "msg-ana-1", text: "Outra pergunta" }), deps);
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).error.code).toBe("message_conflict");
+    expect(model.calls).toHaveLength(1);
+  });
+
+  it("refuses an id whose message was already answered", async () => {
+    const model = scriptedModel([...vpnScript(), ...vpnScript()]);
+    const deps = await testDeps({ agent: testAgent(model) });
+    const message = { id: "msg-ana-1", text: "Minha VPN dá erro 809" };
+    await readStream(await chat(await post(message), deps));
+    await deps.settled();
+    const response = await chat(await post(message), deps);
+
+    expect(response.status).toBe(409);
+    expect(model.calls).toHaveLength(3);
+  });
+
   it("refuses the id of a message of another conversation, without answering or counting", async () => {
     // Bruno's first message in the sample data.
     const model = scriptedModel(vpnScript());

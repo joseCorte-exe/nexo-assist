@@ -24,8 +24,9 @@ type StartedTurn =
  * conversations or lose a count.
  *
  * The message is saved under the id the chat gave it. Sent again ("Tentar de novo", or the network dropped the
- * response), the id is already there: it is answered, not saved twice, and the counter, which counts the saved
- * messages, does not move. Outside with_agent nothing is saved and the agent is not called (feature 5).
+ * response) with the same text and still unanswered, it is answered, not saved twice, and the counter, which counts
+ * the saved messages, does not move. Any other use of a taken id is refused. Outside with_agent nothing is saved and
+ * the agent is not called (feature 5).
  */
 async function startTurn(db: Db, { employeeId, id, text, now }: { employeeId: string; id: string; text: string; now: Date }) {
   const at = now.getTime();
@@ -53,16 +54,23 @@ async function startTurn(db: Db, { employeeId, id, text, now }: { employeeId: st
         id: conversations.id,
         state: conversations.state,
         messageCount: conversations.messageCount,
-        // False when the id was already taken by a message of another conversation.
-        owns: sql<number>`exists (select 1 from ${messages} m where m.id = ${id} and m.conversation_id = ${conversations}.id)`,
+        // The message under this id is this employee's, with this text, and nothing came after it: the one just saved,
+        // or the same one sent again. Anything else would get an answer for a message that is not saved or counted.
+        answerable: sql<number>`exists (
+          select 1 from ${messages} m
+          where m.id = ${id} and m.conversation_id = ${conversations}.id and m.author = 'employee' and m.text = ${text}
+            and not exists (
+              select 1 from ${messages} r where r.conversation_id = m.conversation_id and r.created_at > m.created_at
+            )
+        )`,
       })
       .from(conversations)
       .where(activeConversationOf(employeeId)),
   ]);
   if (!conversation) throw new Error("The active conversation is missing after it was ensured");
-  const { owns, ...part } = conversation;
+  const { answerable, ...part } = conversation;
   if (part.state !== "with_agent") return { ok: false, reason: "agent_paused" } satisfies StartedTurn;
-  if (!owns) return { ok: false, reason: "message_conflict" } satisfies StartedTurn;
+  if (!answerable) return { ok: false, reason: "message_conflict" } satisfies StartedTurn;
   return { ok: true, conversation: part, startedAt: now } satisfies StartedTurn;
 }
 
@@ -107,7 +115,7 @@ export async function chat(request: NextRequest, deps: Deps) {
   if (!turn.ok) {
     return turn.reason === "agent_paused"
       ? jsonError(409, "agent_paused", "Sua conversa está com um analista. Ele responde por aqui.")
-      : jsonError(409, "message_conflict", "Essa mensagem já pertence a outra conversa.");
+      : jsonError(409, "message_conflict", "Essa mensagem já foi enviada.");
   }
 
   const { conversation, startedAt } = turn;
