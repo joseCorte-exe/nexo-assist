@@ -57,8 +57,8 @@ export function fakeTicketService({ down = false } = {}): TicketServiceClient {
 }
 
 /** The real agent with its own in-memory memory, on the given model (the simulated one by default). */
-export function testAgent(model: AgentModel = simulatedModel(), helpCenter = fakeTicketService()): NexoAgent {
-  return createNexoAgent({ model, memory: createMemory({ url: ":memory:" }), helpCenter });
+export function testAgent(model: AgentModel = simulatedModel(), ticketService = fakeTicketService()): NexoAgent {
+  return createNexoAgent({ model, memory: createMemory({ url: ":memory:" }), ticketService, now: () => NOW });
 }
 
 export type TestDeps = Deps & {

@@ -1,9 +1,10 @@
 import { Agent } from "@mastra/core/agent";
+import { RequestContext } from "@mastra/core/request-context";
 import type { MastraModelConfig } from "@mastra/core/llm";
 import { LibSQLStore } from "@mastra/libsql";
 import { Memory } from "@mastra/memory";
 import { instructions, workingMemoryTemplate } from "./instructions";
-import { createTools, type HelpCenter } from "./tools";
+import { createTools, OFFER_TOOLS, type TicketDesk } from "./tools";
 
 // Explicit limits, so one reply never runs away with time or cost (ARQUITETURA.md, section 9).
 const MAX_STEPS = 5;
@@ -29,11 +30,14 @@ export type AgentModel = MastraModelConfig;
 export function createNexoAgent({
   model,
   memory,
-  helpCenter,
+  ticketService,
+  now = () => new Date(),
 }: {
   model: AgentModel;
   memory: Memory;
-  helpCenter: HelpCenter;
+  ticketService: TicketDesk;
+  /** The clock of the overdue (RN-02) and of "há N dias". */
+  now?: () => Date;
 }) {
   return new Agent({
     id: "nexo-assist",
@@ -47,7 +51,7 @@ export function createNexoAgent({
     },
     model,
     memory,
-    tools: createTools({ helpCenter }),
+    tools: createTools({ ticketService, now }),
   });
 }
 
@@ -65,7 +69,12 @@ export type Turn = {
 export function streamReply(agent: NexoAgent, { conversationId, employeeId, text }: Turn) {
   return agent.stream(text, {
     memory: { thread: conversationId, resource: employeeId },
+    // Whose tickets the tools read: the employee of the session, never a value the model writes.
+    requestContext: new RequestContext([["employeeId", employeeId]]),
     maxSteps: MAX_STEPS,
+    // An offer hands the turn to the employee, who answers with a click: calling the model again would only cost.
+    stopWhen: ({ steps }: { steps: ReadonlyArray<{ toolCalls: ReadonlyArray<{ toolName: string }> }> }) =>
+      steps.at(-1)?.toolCalls.some((call) => OFFER_TOOLS.has(call.toolName)) ?? false,
     // recordDecision is mandatory in the first step; afterwards the model chooses.
     prepareStep: ({ stepNumber }) =>
       stepNumber === 0 ? { toolChoice: { type: "tool", toolName: "recordDecision" } } : undefined,

@@ -308,7 +308,7 @@ describe("POST /api/chat under concurrent messages", () => {
     const ticketService = fakeTicketService();
     const deps = await testDeps({
       db,
-      agent: createNexoAgent({ model: simulatedModel({ delayMs: 35 }), memory: createMemory({ url }), helpCenter: ticketService }),
+      agent: createNexoAgent({ model: simulatedModel({ delayMs: 35 }), memory: createMemory({ url }), ticketService }),
     });
     const employees = [
       { role: "employee" as const, ...ana },

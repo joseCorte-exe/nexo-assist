@@ -5,8 +5,13 @@ import type {
   LanguageModelV4StreamResult,
 } from "@ai-sdk/provider";
 
-/** One step of a model that is not the real LLM: the tool calls it makes, or the text it writes. */
-export type ModelStep = { toolCalls: Array<{ toolName: string; input: unknown }> } | { text: string };
+type ToolCalls = Array<{ toolName: string; input: unknown }>;
+
+/**
+ * One step of a model that is not the real LLM: the text it writes, the tool calls it makes, or both, the text
+ * first, as a provider streams a question together with the tool that shows its options.
+ */
+export type ModelStep = { text: string; toolCalls?: ToolCalls } | { text?: undefined; toolCalls: ToolCalls };
 
 type Options = {
   /** Wait between the parts, so a screen can show the reply arriving. */
@@ -21,19 +26,22 @@ const usage = (output: number) => ({
 /** The parts a provider would stream for the step: text in a few chunks, or the tool calls. */
 export function stepParts(step: ModelStep, callId: string): LanguageModelV4StreamPart[] {
   const parts: LanguageModelV4StreamPart[] = [{ type: "stream-start", warnings: [] }];
-  if ("text" in step) {
+  if (step.text !== undefined) {
     const id = `${callId}-text`;
     parts.push({ type: "text-start", id });
     // Word by word, like a real provider, so the screen shows the reply arriving in parts.
     for (const delta of step.text.match(/\S+\s*/g) ?? []) parts.push({ type: "text-delta", id, delta });
     parts.push({ type: "text-end", id });
-    parts.push({ type: "finish", usage: usage(step.text.length), finishReason: { unified: "stop", raw: "end_turn" } });
-    return parts;
   }
-  step.toolCalls.forEach(({ toolName, input }, index) => {
+  const toolCalls = step.toolCalls ?? [];
+  toolCalls.forEach(({ toolName, input }, index) => {
     parts.push({ type: "tool-call", toolCallId: `${callId}-tool-${index}`, toolName, input: JSON.stringify(input) });
   });
-  parts.push({ type: "finish", usage: usage(1), finishReason: { unified: "tool-calls", raw: "tool_use" } });
+  parts.push(
+    toolCalls.length > 0
+      ? { type: "finish", usage: usage(1), finishReason: { unified: "tool-calls", raw: "tool_use" } }
+      : { type: "finish", usage: usage(step.text?.length ?? 0), finishReason: { unified: "stop", raw: "end_turn" } },
+  );
   return parts;
 }
 

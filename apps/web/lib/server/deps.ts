@@ -47,7 +47,7 @@ export function getDeps(): Deps {
           config.NEXO_AGENT_MODEL === "simulated" ? simulatedModel({ delayMs: SIMULATED_WORD_DELAY_MS }) : AGENT_MODEL,
         // Same database as the conversations: the memory goes in the mastra_* tables.
         memory: createMemory({ url: config.CONVERSATIONS_DB_URL, authToken: config.CONVERSATIONS_DB_AUTH_TOKEN }),
-        helpCenter: ticketService,
+        ticketService,
       }),
       waitUntil: (task) => after(task),
       sessionSecret: getSessionSecret(),
