@@ -1,7 +1,8 @@
 import type { UIMessage } from "ai";
 import { z } from "zod";
-import { conversationState } from "./domain";
+import { category, conversationState, priority, ticketStatus, ticketType } from "./domain";
 import { kbArticleSchema } from "./help-center";
+import { ticketId } from "./tickets";
 
 // Contracts of the chat (ARQUITETURA.md, section 7): the route body, the parts of the stream and the conversation
 // the screen loads. The agent tools take their schemas from here too, so the screen reads the same shapes.
@@ -68,11 +69,116 @@ export const redirectOutOfScopeOutput = z.discriminatedUnion("ok", [
 ]);
 export type RedirectOutOfScopeOutput = z.infer<typeof redirectOutOfScopeOutput>;
 
+// Tools of the ticket lookup (feature 3). Whose tickets they are never comes from the model: the route puts the
+// employee of the session in the request context, and the inputs have no field for it.
+
+/** A ticket as a line of a list: what the employee needs to recognize it and whether it is late. */
+export const ticketSummary = z.object({
+  id: z.string(),
+  title: z.string(),
+  status: ticketStatus,
+  createdAt: z.iso.datetime(),
+  overdue: z.boolean(),
+});
+export type TicketSummary = z.infer<typeof ticketSummary>;
+
+export const listMyTicketsInput = z.object({
+  scope: z
+    .enum(["open", "all"])
+    .default("open")
+    .describe("open: só os chamados abertos (não resolvidos). all: inclui os resolvidos."),
+});
+export type ListMyTicketsInput = z.infer<typeof listMyTicketsInput>;
+export const listMyTicketsOutput = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), tickets: z.array(ticketSummary) }),
+  z.object({ ok: z.literal(false), message: z.string() }),
+]);
+export type ListMyTicketsOutput = z.infer<typeof listMyTicketsOutput>;
+
+export const getTicketInput = z.object({
+  ticketId: ticketId.describe("O número do chamado, como INC-20311 ou REQ-10442."),
+});
+export type GetTicketInput = z.infer<typeof getTicketInput>;
+
+/**
+ * The card of a ticket, as it was when the agent looked it up. The numbers are ready, so the model never does date
+ * arithmetic: days without an update and the deadline of the priority in words.
+ */
+export const ticketCard = z.object({
+  id: z.string(),
+  type: ticketType,
+  title: z.string(),
+  description: z.string(),
+  category,
+  subcategory: z.string().nullable(),
+  priority,
+  status: ticketStatus,
+  assigneeName: z.string().nullable(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+  dueAt: z.iso.datetime(),
+  overdue: z.boolean(),
+  daysSinceUpdate: z.number().int().nonnegative(),
+  /** The deadline of the priority in words: "3 dias úteis". */
+  deadline: z.string(),
+  /** What IT wrote last, if it wrote anything. */
+  lastItUpdate: z.string().nullable(),
+  /** When the agent looked it up: the card shows "há N dias" counted from here, as the agent said it. */
+  checkedAt: z.iso.datetime(),
+});
+export type TicketCard = z.infer<typeof ticketCard>;
+
+export const getTicketOutput = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), ticket: ticketCard }),
+  z.object({ ok: z.literal(false), reason: z.enum(["not_found", "unavailable"]), message: z.string() }),
+]);
+export type GetTicketOutput = z.infer<typeof getTicketOutput>;
+
+export const offerTicketChoiceInput = z.object({
+  // In the input, not in the text: a model that skips the text still never shows the list without its question.
+  question: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .describe("A pergunta que aparece acima da lista, como \"Você tem 3 chamados abertos. Sobre qual deles quer saber?\"."),
+  ticketIds: z.array(ticketId).min(2).max(8).describe("Os números dos chamados que o funcionário pode escolher."),
+});
+export type OfferTicketChoiceInput = z.infer<typeof offerTicketChoiceInput>;
+export const offerTicketChoiceOutput = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), tickets: z.array(ticketSummary) }),
+  z.object({ ok: z.literal(false), message: z.string() }),
+]);
+export type OfferTicketChoiceOutput = z.infer<typeof offerTicketChoiceOutput>;
+
+export const offerRepliesInput = z.object({
+  question: z
+    .string()
+    .trim()
+    .min(1)
+    .max(400)
+    .describe("O texto da pergunta que aparece acima dos botões, como \"Quer que eu chame um analista?\"."),
+  options: z
+    .array(z.string().trim().min(1).max(40))
+    .min(2)
+    .max(4)
+    .refine((options) => new Set(options.map((option) => option.toLowerCase())).size === options.length, {
+      message: "As opções precisam ser diferentes.",
+    })
+    .describe("De 2 a 4 respostas curtas que o funcionário pode clicar."),
+});
+export type OfferRepliesInput = z.infer<typeof offerRepliesInput>;
+export const offerRepliesOutput = z.object({ ok: z.literal(true) });
+
 /** The schemas of each tool: for the agent that runs them, and to check saved messages when they are read back. */
 export const nexoToolSchemas = {
   recordDecision: { inputSchema: decisionRecord, outputSchema: recordDecisionOutput },
   searchArticles: { inputSchema: searchArticlesInput, outputSchema: searchArticlesOutput },
   redirectOutOfScope: { inputSchema: redirectOutOfScopeInput, outputSchema: redirectOutOfScopeOutput },
+  listMyTickets: { inputSchema: listMyTicketsInput, outputSchema: listMyTicketsOutput },
+  getTicket: { inputSchema: getTicketInput, outputSchema: getTicketOutput },
+  offerTicketChoice: { inputSchema: offerTicketChoiceInput, outputSchema: offerTicketChoiceOutput },
+  offerReplies: { inputSchema: offerRepliesInput, outputSchema: offerRepliesOutput },
 };
 
 /** First part of every chat stream: the conversation the message went to, with the new counter. */

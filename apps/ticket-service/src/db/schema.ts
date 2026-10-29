@@ -1,5 +1,5 @@
 import type { AnalystLevel, Affected, Category, Priority, TicketStatus, TicketType, UpdateAuthor } from "@nexo/shared";
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
 
@@ -38,7 +38,10 @@ export const tickets = sqliteTable("tickets", {
   lastItResponseAt: timestamp("last_it_response_at"),
   dueAt: timestamp("due_at").notNull(),
   resolvedAt: timestamp("resolved_at"),
-});
+}, (table) => [
+  // The tickets of an employee, most recent first: the list and the lookup of the chat both start here.
+  index("tickets_opened_by_created_at_idx").on(table.openedBy, table.createdAt),
+]);
 
 export const ticketUpdates = sqliteTable("ticket_updates", {
   id: text("id").primaryKey(),
@@ -48,7 +51,7 @@ export const ticketUpdates = sqliteTable("ticket_updates", {
   author: text("author").$type<UpdateAuthor>().notNull(),
   text: text("text").notNull(),
   createdAt: timestamp("created_at").notNull(),
-});
+}, (table) => [index("ticket_updates_ticket_id_created_at_idx").on(table.ticketId, table.createdAt)]);
 
 export const kbArticles = sqliteTable("kb_articles", {
   id: text("id").primaryKey(),

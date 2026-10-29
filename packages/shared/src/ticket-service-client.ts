@@ -1,7 +1,13 @@
 import { z } from "zod";
 import { kbArticleSchema } from "./help-center";
 import { analystSchema, employeeSchema, type Person } from "./people";
-import { type CreateTicketInput, ticketSchema } from "./tickets";
+import {
+  type CreateTicketInput,
+  type EmployeeTicketsStatus,
+  type TicketDetail,
+  ticketDetailSchema,
+  ticketSchema,
+} from "./tickets";
 
 export const SERVICE_SECRET_HEADER = "x-service-secret";
 export const ADMIN_KEY_HEADER = "x-admin-key";
@@ -114,8 +120,27 @@ export function createTicketServiceClient(options: Options) {
     return { ok: true, data: null };
   }
 
+  /** The tickets of an employee, most recent first: the open ones, or every one without a status. */
+  function listEmployeeTickets(employeeId: string, { status }: { status?: EmployeeTicketsStatus } = {}) {
+    const query = status ? `?${new URLSearchParams({ status })}` : "";
+    return request(z.array(ticketSchema), "GET", `/employees/${encodeURIComponent(employeeId)}/tickets${query}`);
+  }
+
+  /**
+   * A ticket of the employee, with its updates. The service answers the same 404 for a ticket that does not exist and
+   * for one of somebody else, and both come back as null: to the employee, it is not one of theirs.
+   */
+  async function getTicket(ticketId: string, employeeId: string): Promise<TicketServiceResult<TicketDetail | null>> {
+    const path = `/tickets/${encodeURIComponent(ticketId)}?${new URLSearchParams({ employeeId })}`;
+    const result = await request(ticketDetailSchema, "GET", path);
+    if (!result.ok && result.error.status === 404) return { ok: true, data: null };
+    return result;
+  }
+
   return {
     request,
+    listEmployeeTickets,
+    getTicket,
     findPersonByEmail,
     listAnalysts,
     searchArticles: (query: string) =>

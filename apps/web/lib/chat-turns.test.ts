@@ -1,6 +1,6 @@
-import type { NexoUIMessage } from "@nexo/shared";
+import type { NexoUIMessage, TicketCard, TicketSummary } from "@nexo/shared";
 import { describe, expect, it } from "vitest";
-import { liveTurns, messageCount } from "./chat-turns";
+import { type AgentTurn, liveTurns, messageCount, ticketChoiceText, type Turn } from "./chat-turns";
 
 const decision = {
   understanding: "Quer saber o horário do service desk",
@@ -33,7 +33,7 @@ describe("liveTurns", () => {
     const turns = liveTurns([user("u1", "Qual o horário?")], "submitted");
     expect(turns).toEqual([
       { kind: "employee", id: "u1", text: "Qual o horário?", unsent: false },
-      { kind: "agent", id: "u1-reply", text: "", decision: null, steps: [], phase: "thinking" },
+      { kind: "agent", id: "u1-reply", text: "", decision: null, steps: [], blocks: [], phase: "thinking" },
     ]);
   });
 
@@ -49,14 +49,14 @@ describe("liveTurns", () => {
 
   it("shows a tool running, then done", () => {
     const running = liveTurns([user("u1", "Oi"), agent([recordDecision("output-available"), search("input-available")])], "streaming");
-    expect(running.at(-1)).toMatchObject({ steps: [{ tool: "searchArticles", state: "running" }], phase: "working" });
+    expect(running.at(-1)).toMatchObject({ steps: [{ label: "buscando na central de ajuda", state: "running" }], phase: "working" });
     const done = liveTurns([user("u1", "Oi"), agent([recordDecision("output-available"), search("output-available")])], "streaming");
-    expect(done.at(-1)).toMatchObject({ steps: [{ tool: "searchArticles", state: "done" }] });
+    expect(done.at(-1)).toMatchObject({ steps: [{ label: "buscou na central de ajuda", state: "done" }] });
   });
 
   it("marks a tool that came back without an answer", () => {
     const turns = liveTurns([user("u1", "Oi"), agent([recordDecision("output-available"), search("output-available", false)])], "ready");
-    expect(turns.at(-1)).toMatchObject({ steps: [{ tool: "searchArticles", state: "failed" }] });
+    expect(turns.at(-1)).toMatchObject({ steps: [{ label: "não acessou a central de ajuda", state: "failed" }] });
   });
 
   it("joins the text of every step and is writing while it streams", () => {
@@ -98,7 +98,8 @@ describe("liveTurns", () => {
       id: "a1",
       text: "Fora do ar.",
       decision,
-      steps: [{ tool: "searchArticles", state: "failed" }],
+      steps: [{ key: "c2", label: "não acessou a central de ajuda", state: "failed" }],
+      blocks: [{ kind: "text", key: "text-2", text: "Fora do ar." }],
       phase: "done",
     });
   });
@@ -120,6 +121,189 @@ describe("liveTurns", () => {
       "employee",
       "thinking",
     ]);
+  });
+});
+
+// Feature 3: the ticket lookup.
+
+type Part = NexoUIMessage["parts"][number];
+const tool = (name: string, toolCallId: string, input: unknown, output?: unknown) =>
+  ({
+    type: `tool-${name}`,
+    toolCallId,
+    state: output === undefined ? "input-available" : "output-available",
+    input,
+    output,
+  }) as Part;
+const text = (value: string): Part => ({ type: "text", text: value });
+
+const notebook: TicketSummary = {
+  id: "INC-20311",
+  title: "Notebook lento após atualização do Windows",
+  status: "waiting_for_analyst",
+  createdAt: "2026-10-20T13:00:00.000Z",
+  overdue: true,
+};
+const sharepoint: TicketSummary = { ...notebook, id: "INC-20298", title: "Acesso à pasta Financeiro no SharePoint", status: "in_progress", overdue: false };
+const card: TicketCard = {
+  ...notebook,
+  type: "INC",
+  description: "Lentidão geral.",
+  category: "hardware",
+  subcategory: "Notebook",
+  priority: "medium",
+  assigneeName: null,
+  updatedAt: notebook.createdAt,
+  dueAt: "2026-10-23T13:00:00.000Z",
+  daysSinceUpdate: 6,
+  deadline: "3 dias úteis",
+  lastItUpdate: null,
+  checkedAt: "2026-10-26T13:00:00.000Z",
+};
+const replies = ["Falar com um analista", "Adicionar informação", "Não, obrigado"];
+
+const question = "Você tem 2 chamados abertos. Sobre qual deles quer saber?";
+const listReply = agent([
+  recordDecision("output-available"),
+  tool("listMyTickets", "c2", { scope: "open" }, { ok: true, tickets: [notebook, sharepoint] }),
+  tool("offerTicketChoice", "c3", { question, ticketIds: ["INC-20311", "INC-20298"] }, { ok: true, tickets: [notebook, sharepoint] }),
+]);
+const offer = "Está sem atualização há 6 dias. Quer que eu chame um analista?";
+const ticketReply = agent([
+  recordDecision("output-available"),
+  tool("getTicket", "c2", { ticketId: "INC-20311" }, { ok: true, ticket: card }),
+  tool("offerReplies", "c3", { question: offer, options: replies }, { ok: true }),
+]);
+
+/** What the reply at that position draws, in order. */
+const blocksOf = (turns: Turn[], index = turns.length - 1) => (turns[index] as AgentTurn).blocks;
+
+describe("liveTurns, looking up tickets", () => {
+  it("names the lookup of the tickets in the action line", () => {
+    const steps = (output?: unknown) =>
+      (liveTurns([user("u1", "Meu chamado?"), agent([tool("listMyTickets", "c2", { scope: "open" }, output)])], "streaming").at(-1) as { steps: unknown })
+        .steps;
+    expect(steps()).toEqual([{ key: "c2", label: "consultando seus chamados", state: "running" }]);
+    expect(steps({ ok: true, tickets: [] })).toEqual([{ key: "c2", label: "consultou seus chamados", state: "done" }]);
+    expect(steps({ ok: false, message: "fora" })).toEqual([{ key: "c2", label: "não acessou seus chamados", state: "failed" }]);
+  });
+
+  it("names the ticket it looks up, and the deadline it worked out once the ticket came", () => {
+    const steps = (output?: unknown) =>
+      (liveTurns([user("u1", "INC-20311"), agent([tool("getTicket", "c2", { ticketId: "INC-20311" }, output)])], "streaming").at(-1) as { steps: unknown })
+        .steps;
+    expect(steps()).toEqual([{ key: "c2", label: "consultando o INC-20311", state: "running" }]);
+    expect(steps({ ok: true, ticket: card })).toEqual([
+      { key: "c2", label: "consultou o INC-20311", state: "done" },
+      { key: "c2-deadline", label: "calculou o prazo", state: "done" },
+    ]);
+    expect(steps({ ok: false, reason: "not_found", message: "?" })).toEqual([
+      { key: "c2", label: "não encontrou o INC-20311", state: "failed" },
+    ]);
+    expect(steps({ ok: false, reason: "unavailable", message: "?" })).toEqual([
+      { key: "c2", label: "não acessou o INC-20311", state: "failed" },
+    ]);
+  });
+
+  it("shows no action for an offer: it is a question to the employee, not something the agent did", () => {
+    const turn = liveTurns([user("u1", "Meu chamado?"), listReply], "ready").at(-1);
+    expect(turn).toMatchObject({ steps: [{ label: "consultou seus chamados" }] });
+  });
+
+  it("asks with the question of the list in a bubble, then the list, open while nobody chose", () => {
+    expect(blocksOf(liveTurns([user("u1", "Meu chamado?"), listReply], "ready"))).toEqual([
+      { kind: "text", key: "question-c3", text: question },
+      { kind: "choice", key: "c3", tickets: [notebook, sharepoint], chosen: null, mode: "open" },
+    ]);
+  });
+
+  it("keeps the list without clicks while the agent is still answering", () => {
+    expect(blocksOf(liveTurns([user("u1", "Meu chamado?"), listReply], "streaming")).at(-1)).toMatchObject({ mode: "busy" });
+  });
+
+  it("does not ask twice when the text already has the question", () => {
+    const parts = listReply.parts;
+    const both = agent([...parts.slice(0, 2), text(`Vi seus chamados. ${question}`), parts[2]!]);
+    expect(blocksOf(liveTurns([user("u1", "Meu chamado?"), both], "ready"))).toMatchObject([
+      { kind: "text", text: `Vi seus chamados. ${question}` },
+      { kind: "choice" },
+    ]);
+  });
+
+  it("marks the ticket the next message chose, and closes the list", () => {
+    const turns = liveTurns([user("u1", "Meu chamado?"), listReply, user("u2", ticketChoiceText(notebook))], "submitted");
+    expect(blocksOf(turns, 1).at(-1)).toMatchObject({ kind: "choice", chosen: "INC-20311", mode: "answered" });
+  });
+
+  it("writes the choice as the design shows it", () => {
+    expect(ticketChoiceText(notebook)).toBe("INC-20311 · Notebook lento após atualização do Windows");
+  });
+
+  it("draws the card of the ticket where it came, then the question as a bubble with its replies", () => {
+    expect(blocksOf(liveTurns([user("u1", "INC-20311"), ticketReply], "ready"))).toEqual([
+      { kind: "ticket", key: "c2", ticket: card },
+      { kind: "text", key: "question-c3", text: offer, replies: { question: null, options: replies, chosen: null, mode: "open" } },
+    ]);
+  });
+
+  it("puts the replies in the last bubble, their question in bold unless the text already says it", () => {
+    const parts = ticketReply.parts;
+    const apart = blocksOf(liveTurns([user("u1", "INC-20311"), agent([...parts.slice(0, 2), text("Vi o chamado."), parts[2]!])], "ready"));
+    expect(apart).toMatchObject([{ kind: "ticket" }, { kind: "text", text: "Vi o chamado.", replies: { question: offer } }]);
+    const said = blocksOf(liveTurns([user("u1", "INC-20311"), agent([...parts.slice(0, 2), text(offer), parts[2]!])], "ready"));
+    expect(said).toMatchObject([{ kind: "ticket" }, { kind: "text", text: offer, replies: { question: null } }]);
+  });
+
+  it("marks the reply the next message chose, whatever its case, or what started with it", () => {
+    const chosen = (next: string) => {
+      const last = blocksOf(liveTurns([user("u1", "INC-20311"), ticketReply, user("u2", next)], "submitted"), 1).at(-1);
+      return last?.kind === "text" ? last.replies?.chosen : undefined;
+    };
+    expect(chosen("Falar com um analista")).toBe("Falar com um analista");
+    expect(chosen("não, obrigado")).toBe("Não, obrigado");
+    expect(chosen("Adicionar informação. Reiniciei duas vezes.")).toBe("Adicionar informação");
+    expect(chosen("Falar com um analistas")).toBeNull();
+    expect(chosen("Quero outra coisa")).toBeNull();
+  });
+
+  it("has no card for a ticket that was not found, and no offer while it is still being written", () => {
+    const turns = liveTurns(
+      [
+        user("u1", "INC-99999"),
+        agent([
+          tool("getTicket", "c2", { ticketId: "INC-99999" }, { ok: false, reason: "not_found", message: "?" }),
+          { type: "tool-offerReplies", toolCallId: "c3", state: "input-streaming", input: { question: "Quer", options: ["Fal"] } } as Part,
+        ]),
+      ],
+      "streaming",
+    );
+    expect(blocksOf(turns)).toEqual([]);
+  });
+
+  it("shows no replies when the offer failed, so the agent's explanation is all there is", () => {
+    const failed = {
+      type: "tool-offerReplies",
+      toolCallId: "c3",
+      state: "output-error",
+      input: { question: offer, options: replies },
+      errorText: "invalid",
+    } as Part;
+    const turns = liveTurns([user("u1", "INC-20311"), agent([failed, text("Não consegui mostrar as opções.")])], "ready");
+    expect(blocksOf(turns)).toEqual([{ kind: "text", key: "text-1", text: "Não consegui mostrar as opções." }]);
+  });
+
+  it("keeps the text on both sides of a card in two bubbles, in order", () => {
+    const turn = liveTurns(
+      [user("u1", "INC-20311"), agent([text("Vou consultar."), tool("getTicket", "c2", { ticketId: "INC-20311" }, { ok: true, ticket: card }), text("Está vencido.")])],
+      "ready",
+    ).at(-1);
+    expect(turn).toMatchObject({
+      blocks: [
+        { kind: "text", text: "Vou consultar." },
+        { kind: "ticket" },
+        { kind: "text", text: "Está vencido." },
+      ],
+    });
   });
 });
 

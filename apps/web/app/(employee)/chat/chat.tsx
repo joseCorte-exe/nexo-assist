@@ -4,9 +4,10 @@ import { useChat } from "@ai-sdk/react";
 import { apiError, type ConversationResponse, type NexoUIMessage, textOf } from "@nexo/shared";
 import { DefaultChatTransport } from "ai";
 import { CircleAlert } from "lucide-react";
-import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ACTION_LABELS, THINKING_LABEL } from "@/lib/agent-actions";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { THINKING_LABEL } from "@/lib/agent-actions";
 import { liveTurns, messageCount, type Turn } from "@/lib/chat-turns";
+import { useWholePixelWidth } from "@/lib/use-whole-pixel-width";
 import { AgentReply } from "./agent-reply";
 import { Composer } from "./composer";
 import { EmptyChat } from "./empty-chat";
@@ -79,6 +80,12 @@ export function Chat({ initial, employeeName }: { initial: ConversationResponse;
     void sendMessage({ text });
   }
 
+  /** A click in an offer is the employee's answer: sent as her message, and the composer gets the focus back. */
+  function choose(text: string) {
+    send(text);
+    inputRef.current?.focus();
+  }
+
   function retry() {
     void regenerate();
     inputRef.current?.focus();
@@ -112,7 +119,13 @@ export function Chat({ initial, employeeName }: { initial: ConversationResponse;
               turn.kind === "employee" ? (
                 <EmployeeMessage key={turn.id} text={turn.text} unsent={turn.unsent} onRetry={retry} />
               ) : (
-                <AgentReply key={turn.id} turn={turn} failures={failures} onRetry={retry} />
+                <AgentReply
+                  key={turn.id}
+                  turn={turn}
+                  failures={failures}
+                  onRetry={retry}
+                  onChoose={choose}
+                />
               ),
             )}
           </section>
@@ -149,26 +162,6 @@ function EmployeeMessage({ text, unsent, onRetry }: { text: string; unsent: bool
   );
 }
 
-/**
- * The bubble hugs its text and sits against the right edge, so a fractional text width puts its left edge, and the
- * text, between two pixels, which blurs the glyphs differently from nexo.pen. Rounding the width up to a whole pixel
- * keeps the text on the pixel grid without changing how it wraps.
- */
-function useWholePixelWidth(ref: RefObject<HTMLElement | null>, content: string) {
-  useLayoutEffect(() => {
-    const element = ref.current;
-    if (!element) return;
-    const snap = () => {
-      element.style.width = "";
-      element.style.width = `${Math.ceil(element.getBoundingClientRect().width)}px`;
-    };
-    snap();
-    // The width depends on the font and the window: measure again once the font is in and on every resize.
-    void document.fonts.ready.then(snap);
-    window.addEventListener("resize", snap);
-    return () => window.removeEventListener("resize", snap);
-  }, [ref, content]);
-}
 
 /**
  * Tells a screen reader what the agent is doing and, once, the whole answer. Never token by token:
@@ -178,13 +171,19 @@ function Announcer({ turn }: { turn: Turn | undefined }) {
   const [message, setMessage] = useState("");
   const agent = turn?.kind === "agent" ? turn : null;
   const running = agent?.steps.find((step) => step.state === "running");
-  const key = agent ? `${agent.id}:${agent.phase}:${running?.tool ?? ""}` : "";
+  const key = agent ? `${agent.id}:${agent.phase}:${running?.key ?? ""}` : "";
 
   useEffect(() => {
     if (!agent) return;
     if (agent.phase === "thinking") setMessage(`Nexo Assist: ${THINKING_LABEL}`);
-    else if (running) setMessage(`Nexo Assist: ${ACTION_LABELS[running.tool].running}`);
-    else if (agent.phase === "done" && agent.text) setMessage(`Nexo Assist respondeu: ${agent.text}`);
+    else if (running) setMessage(`Nexo Assist: ${running.label}`);
+    else if (agent.phase === "done") {
+      const said = agent.blocks
+        .flatMap((block) => (block.kind === "text" ? [block.text, block.replies?.question] : []))
+        .filter(Boolean)
+        .join(" ");
+      if (said) setMessage(`Nexo Assist respondeu: ${said}`);
+    }
     // Only when the phase or the running tool changes, not on every streamed word.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);

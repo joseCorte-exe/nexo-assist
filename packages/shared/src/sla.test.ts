@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addBusinessHours, dueAt, isOverdue } from "./sla";
+import { addBusinessHours, dueAt, isOverdue, slaText } from "./sla";
 
 // 2026-10-26 is a Monday. Times are São Paulo local (-03:00).
 const at = (local: string) => new Date(`${local}-03:00`);
@@ -87,5 +87,14 @@ describe("isOverdue", () => {
     const createdAt = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000);
     const ticket = { status: "waiting_for_analyst" as const, dueAt: dueAt({ priority: "medium", createdAt, lastItResponseAt: null }) };
     expect(isOverdue(ticket, now)).toBe(true);
+  });
+});
+
+describe("slaText", () => {
+  it("says the deadline of each priority as Annex A writes it", () => {
+    expect(slaText("critical")).toBe("1 hora");
+    expect(slaText("high")).toBe("4 horas úteis");
+    expect(slaText("medium")).toBe("3 dias úteis");
+    expect(slaText("low")).toBe("5 dias úteis");
   });
 });

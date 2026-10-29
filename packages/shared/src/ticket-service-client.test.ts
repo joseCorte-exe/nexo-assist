@@ -141,6 +141,48 @@ describe("searchArticles", () => {
   });
 });
 
+describe("listEmployeeTickets", () => {
+  it("asks for the open tickets of the employee, with the id in the path", async () => {
+    const { client, fetch } = clientWith([json(200, [ticket])]);
+    expect(await client.listEmployeeTickets("emp-ana", { status: "open" })).toEqual({ ok: true, data: [ticket] });
+    expect(String(fetch.mock.calls[0]?.[0])).toBe("http://tickets.test/employees/emp-ana/tickets?status=open");
+  });
+
+  it("asks for every ticket without a status, and escapes the id", async () => {
+    const { client, fetch } = clientWith([json(200, [])]);
+    await client.listEmployeeTickets("emp/../x");
+    expect(String(fetch.mock.calls[0]?.[0])).toBe("http://tickets.test/employees/emp%2F..%2Fx/tickets");
+  });
+
+  it("retries the list, since it is a read", async () => {
+    const { client } = clientWith([json(503, {}), json(200, [])]);
+    expect(await client.listEmployeeTickets("emp-ana")).toEqual({ ok: true, data: [] });
+  });
+});
+
+describe("getTicket", () => {
+  const detail = { ...ticket, assigneeName: null, updates: [] };
+
+  it("asks for the ticket on behalf of the employee", async () => {
+    const { client, fetch } = clientWith([json(200, detail)]);
+    expect(await client.getTicket("INC-20312", "emp-ana")).toEqual({ ok: true, data: detail });
+    expect(String(fetch.mock.calls[0]?.[0])).toBe("http://tickets.test/tickets/INC-20312?employeeId=emp-ana");
+  });
+
+  it("answers null when the ticket is not the employee's, or does not exist", async () => {
+    const { client } = clientWith([json(404, { error: { code: "ticket_not_found", message: "Ticket not found" } })]);
+    expect(await client.getTicket("INC-20319", "emp-ana")).toEqual({ ok: true, data: null });
+  });
+
+  it("keeps any other refusal as an error", async () => {
+    const { client } = clientWith([json(400, { error: { code: "invalid_query", message: "employeeId is required" } })]);
+    expect(await client.getTicket("INC-20312", "")).toEqual({
+      ok: false,
+      error: { code: "http_error", status: 400, message: "employeeId is required" },
+    });
+  });
+});
+
 describe("ticket-service client", () => {
   it("sends the service secret", async () => {
     const { client, fetch } = clientWith([json(200, { ok: true })]);

@@ -1,0 +1,2 @@
+CREATE INDEX `ticket_updates_ticket_id_created_at_idx` ON `ticket_updates` (`ticket_id`,`created_at`);--> statement-breakpoint
+CREATE INDEX `tickets_opened_by_created_at_idx` ON `tickets` (`opened_by`,`created_at`);

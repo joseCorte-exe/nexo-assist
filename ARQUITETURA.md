@@ -181,7 +181,7 @@ As datas são relativas ao momento em que o seed roda ("há 6 dias" é sempre h�
 - Analistas: Rafael Lima (N2) e pelo menos um analista N1.
 - Artigos (de 5 a 10): o da VPN com erro 809 (só Windows 10), o do horário do service desk e os canais fictícios de RH, financeiro e facilities.
 - Chamados do Anexo B com os dados exatos: INC-20311 (Notebook lento após atualização do Windows, Hardware › Notebook, Média, Aguardando analista, há 6 dias), REQ-10442 (Segundo monitor para home office, Hardware, Baixa, Aprovado, há 1 semana) e INC-20150 (Senha do SAP bloqueada, Acesso, Média, Resolvido há 4 dias).
-- Chamados do design: INC-20288 (Acesso à pasta Financeiro no SharePoint, Em andamento), INC-19877 e INC-19410 (resolvidos há mais de 7 dias), além de chamados de outros funcionários.
+- Chamados do design: INC-20298 (Acesso à pasta Financeiro no SharePoint, Em andamento), INC-19877 e INC-19410 (resolvidos há mais de 7 dias), além de chamados de outros funcionários.
 - Conversas em cada estado e com cada selo do console: transferida com chamado, transferida com "contato em X min", "Agent pediu ajuda · confiança 41%", "Agent atendendo" e "Resolvido pelo agent".
 
 ## 7. Contratos
@@ -251,6 +251,8 @@ Ferramentas:
 | draftTicket | Monta o rascunho para criar, atualizar ou reabrir. Antes de criar, o código busca os chamados abertos parecidos e exige que o rascunho diga por que não é duplicado |
 | transferToAnalyst | Muda o estado da conversa, escolhe N1 ou N2 pela regra, calcula a espera e grava o resumo do caso |
 | redirectOutOfScope | Responde a assuntos de RH, financeiro e facilities indicando o canal |
+| offerTicketChoice | Mostra a pergunta e a lista dos chamados do funcionário para ele escolher um. Encerra a resposta |
+| offerReplies | Mostra a pergunta e de 2 a 4 respostas rápidas. Encerra a resposta |
 
 Como o registro de decisão aparece em toda resposta: no primeiro passo, o `prepareStep` obriga o modelo a chamar `recordDecision`; nos passos seguintes, ele escolhe à vontade. A tela recebe essa chamada pelo próprio stream, como a parte `tool-recordDecision`, e com ela monta o detalhe da decisão. A linha de ações acima da resposta ("consultou seus chamados", "classificou a prioridade") sai das partes `tool-*`, com um mapa de nome para rótulo. No fim da resposta, o código completa `tools_used` com os passos que rodaram. Se por algum motivo o registro não vier, o código grava um registro reduzido, sem confiança. Se a confiança vier abaixo de 0,6 e não for caso de pedir informação, o passo seguinte obriga `transferToAnalyst`. A resposta é gravada com as mesmas partes do stream, em `messages.parts`, e ao recarregar a página `GET /api/conversation` devolve essas partes: a tela desenha a resposta do mesmo jeito que desenhou ao vivo. A tabela `decisions` guarda o registro para o console.
 
