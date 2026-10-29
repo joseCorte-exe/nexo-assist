@@ -11,7 +11,10 @@
   --color-cta: #0062c4;
   --color-cta-hover: #0056ad;
   --color-mark: #037af6;
+  --color-primary: #0285f7;
   --color-primary-soft: #0285f712;
+  /* The chosen row of a list: the CTA blue at 4%. */
+  --color-cta-soft: #0062c40a;
   --color-primary-text: #0069c7;
   --color-success: #00bd6c;
   --color-success-text: #00804a;
@@ -22,6 +25,10 @@
   --color-danger-text: #c4161d;
   --color-field: #1b24311f;
   --color-card-line: #1b243117;
+  /* Ink at 40%, 25% and 20%: the dots of a medium priority and a resolved ticket, and an empty radio. */
+  --color-ink-muted: #1b243166;
+  --color-ink-faint: #1b243140;
+  --color-radio: #1b243133;
 
   --font-display: var(--font-newsreader), Georgia, serif;
   /* nexo.pen renders Newsreader at optical size 24 at every size: "Entrar" is 102 px wide, "72%" 62 px. */
@@ -45,6 +52,8 @@
   --text-16--line-height: 20px;
   --text-17: 17px;
   --text-17--line-height: 21px;
+  --text-18: 18px;
+  --text-18--line-height: 23px;
   --text-24: 24px;
   --text-24--line-height: 30px;
   --text-34: 34px;
