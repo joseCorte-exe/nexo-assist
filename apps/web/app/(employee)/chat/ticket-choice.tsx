@@ -2,13 +2,7 @@ import { TICKET_STATUS_LABEL, type TicketSummary } from "@nexo/shared";
 import { WholePixel } from "@/components/whole-pixel";
 import { formatDay } from "@/lib/format";
 import { STATUS_DOT } from "@/lib/ticket-look";
-import { ticketChoiceText } from "@/lib/chat-turns";
-
-/**
- * How an offer takes a click. open: each item is a button that sends the choice; busy: the agent is still answering,
- * so the buttons stay (focus is not lost) but do nothing; answered: plain history, with the choice marked.
- */
-export type OfferMode = "open" | "busy" | "answered";
+import { type OfferMode, ticketChoiceText } from "@/lib/chat-turns";
 
 type Props = {
   tickets: TicketSummary[];

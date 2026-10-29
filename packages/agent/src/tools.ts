@@ -160,7 +160,7 @@ export function createTools({ ticketService, now }: { ticketService: TicketDesk;
     description:
       "Mostra a pergunta e de 2 a 4 respostas rápidas como botões, para o funcionário responder com um clique. A pergunta vai em question, não no texto. Encerra a sua resposta.",
     ...nexoToolSchemas.offerReplies,
-    execute: async () => ({ shown: true as const }),
+    execute: async () => ({ ok: true as const }),
   });
 
   return { recordDecision, searchArticles, redirectOutOfScope, listMyTickets, getTicket, offerTicketChoice, offerReplies };

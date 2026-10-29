@@ -168,7 +168,7 @@ export const offerRepliesInput = z.object({
     .describe("De 2 a 4 respostas curtas que o funcionário pode clicar."),
 });
 export type OfferRepliesInput = z.infer<typeof offerRepliesInput>;
-export const offerRepliesOutput = z.object({ shown: z.literal(true) });
+export const offerRepliesOutput = z.object({ ok: z.literal(true) });
 
 /** The schemas of each tool: for the agent that runs them, and to check saved messages when they are read back. */
 export const nexoToolSchemas = {

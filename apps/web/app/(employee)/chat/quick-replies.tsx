@@ -1,8 +1,8 @@
 "use client";
 
 import { type RefObject, useRef } from "react";
+import type { OfferMode } from "@/lib/chat-turns";
 import { useWholePixelWidth } from "@/lib/use-whole-pixel-width";
-import type { OfferMode } from "./ticket-choice";
 
 type Props = {
   options: string[];

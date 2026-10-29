@@ -10,7 +10,7 @@ import type { AgentTurn, Step } from "@/lib/chat-turns";
 import { formatConfidence } from "@/lib/format";
 import { QuickReplies } from "./quick-replies";
 import { TicketCard } from "./ticket-card";
-import { type OfferMode, TicketChoice } from "./ticket-choice";
+import { TicketChoice } from "./ticket-choice";
 
 /** The 600 px agent bubble of nexo.pen: square top-left corner, hairline instead of a shadow. */
 const bubble =
@@ -21,8 +21,6 @@ type Props = {
   /** How many replies in a row failed: the second one sends the employee to the phone. */
   failures: number;
   onRetry: () => void;
-  /** How the offer of this reply, if any, takes a click. */
-  offerMode: OfferMode;
   /** Sends what the employee picked in the offer as her message. */
   onChoose: (text: string) => void;
 };
@@ -31,13 +29,12 @@ type Props = {
  * One reply of the agent: who answered, the actions it took (the line grows while tools run), "Ver decisão"
  * with what it understood, did, how sure it was and why, and the answer. Failures show where the answer would be.
  */
-export function AgentReply({ turn, failures, onRetry, offerMode, onChoose }: Props) {
+export function AgentReply({ turn, failures, onRetry, onChoose }: Props) {
   const [open, setOpen] = useState(false);
   const detailId = useId();
   const articleRef = useRef<HTMLElement>(null);
   const busy = turn.phase === "thinking" || turn.phase === "working" || turn.phase === "writing";
   const confidence = turn.decision ? formatConfidence(turn.decision.confidence) : null;
-  const { offer } = turn;
 
   function toggle() {
     setOpen(!open);
@@ -75,32 +72,22 @@ export function AgentReply({ turn, failures, onRetry, offerMode, onChoose }: Pro
 
       {turn.decision ? <DecisionDetail id={detailId} open={open} decision={turn.decision} /> : null}
 
-      {turn.blocks.map((block, index) => {
+      {turn.blocks.map((block) => {
         if (block.kind === "ticket") return <TicketCard key={block.key} ticket={block.ticket} />;
-        // The quick replies go inside the last bubble: under its text, their question in bold, as in nexo.pen.
-        const replies = index === turn.blocks.length - 1 && offer?.kind === "replies" ? offer : null;
+        if (block.kind === "choice") {
+          const { tickets, chosen, mode } = block;
+          return <TicketChoice key={block.key} tickets={tickets} chosen={chosen} mode={mode} onChoose={onChoose} />;
+        }
+        const { replies } = block;
+        // The quick replies go inside the bubble: under its text, their question in bold, as in nexo.pen.
         return (
           <div key={block.key} className={`${bubble} mt-1.5 flex flex-col gap-3`}>
             <p className="text-14.5 leading-[22px] text-pretty whitespace-pre-line text-ink">{block.text}</p>
             {replies?.question ? <p className="text-14.5 font-semibold text-pretty text-ink">{replies.question}</p> : null}
-            {replies ? <QuickReplies {...replies} mode={offerMode} onChoose={onChoose} /> : null}
+            {replies ? <QuickReplies {...replies} onChoose={onChoose} /> : null}
           </div>
         );
       })}
-
-      {/* Without a text of its own, the question is the text of the bubble. */}
-      {offer?.kind === "replies" && turn.blocks.at(-1)?.kind !== "text" ? (
-        <div className={`${bubble} mt-1.5 flex flex-col gap-3`}>
-          {offer.question ? <p className="text-14.5 leading-[22px] text-pretty text-ink">{offer.question}</p> : null}
-          <QuickReplies {...offer} mode={offerMode} onChoose={onChoose} />
-        </div>
-      ) : null}
-      {offer?.kind === "tickets" && offer.question ? (
-        <div className={`${bubble} mt-1.5`}>
-          <p className="text-14.5 leading-[22px] text-pretty text-ink">{offer.question}</p>
-        </div>
-      ) : null}
-      {offer?.kind === "tickets" ? <TicketChoice {...offer} mode={offerMode} onChoose={onChoose} /> : null}
 
       {turn.phase === "failed" ? (
         <div role="alert" className={`${bubble} mt-1.5 flex items-center gap-3`}>

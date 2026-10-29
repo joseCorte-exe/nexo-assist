@@ -1,13 +1,4 @@
-import {
-  type DecisionRecord,
-  decisionOf,
-  findTicketIds,
-  type NexoUIMessage,
-  offerRepliesInput,
-  type TicketCard,
-  type TicketSummary,
-  textOf,
-} from "@nexo/shared";
+import { type DecisionRecord, decisionOf, findTicketIds, type NexoUIMessage, type TicketCard, type TicketSummary, textOf } from "@nexo/shared";
 import type { ChatStatus } from "ai";
 import { type Step, stepsOf } from "./agent-actions";
 
@@ -21,18 +12,23 @@ export type { Step };
  */
 export type Phase = "thinking" | "working" | "writing" | "done" | "failed" | "interrupted";
 
-/** What a reply shows, in the order it arrived: text in bubbles and the card of each ticket looked up. */
-export type Block = { kind: "text"; key: string; text: string } | { kind: "ticket"; key: string; ticket: TicketCard };
+/**
+ * How an offer takes a click. open: each item is a button that sends the choice; busy: the agent is still answering,
+ * so the buttons stay (focus is not lost) but do nothing; answered: plain history, with the choice marked.
+ */
+export type OfferMode = "open" | "busy" | "answered";
+
+/** The quick replies inside the last bubble. question: in bold above them, null when the bubble already asks it. */
+export type Replies = { question: string | null; options: string[]; chosen: string | null; mode: OfferMode };
 
 /**
- * A question with its answers as buttons, at the end of a reply: the list of tickets, or the quick replies inside the
- * last bubble. chosen is what the next message of the employee picked; open while nobody answered yet.
+ * What a reply shows, in the order it arrived: text in bubbles, the card of each ticket looked up and the list of
+ * tickets to choose from. chosen is what the next message of the employee picked.
  */
-export type Offer =
-  /** question: the bubble above the list, null when the text of the reply already asked it. */
-  | { kind: "tickets"; question: string | null; tickets: TicketSummary[]; chosen: string | null; open: boolean }
-  /** question: null when the text of the reply already asked it. */
-  | { kind: "replies"; question: string | null; options: string[]; chosen: string | null; open: boolean };
+export type Block =
+  | { kind: "text"; key: string; text: string; replies?: Replies }
+  | { kind: "ticket"; key: string; ticket: TicketCard }
+  | { kind: "choice"; key: string; tickets: TicketSummary[]; chosen: string | null; mode: OfferMode };
 
 /** unsent: the message never reached the server (nothing of the reply came back). */
 export type EmployeeTurn = { kind: "employee"; id: string; text: string; unsent: boolean };
@@ -43,7 +39,6 @@ export type AgentTurn = {
   decision: DecisionRecord | null;
   steps: Step[];
   blocks: Block[];
-  offer: Offer | null;
   phase: Phase;
 };
 export type Turn = EmployeeTurn | AgentTurn;
@@ -62,28 +57,36 @@ function chosenReply(options: string[], answer: string): string | null {
   );
 }
 
-function offerOf(part: NexoUIMessage["parts"][number], answer: string | null, said: string): Offer | null {
+/**
+ * The offer at the end of the reply, as blocks. The list: its question in a bubble (unless the text already asked it),
+ * then the list. The replies: inside the last bubble, or in a bubble of their own whose text is the question.
+ */
+function addOffer(blocks: Block[], part: NexoUIMessage["parts"][number], said: string, answer: string | null, mode: OfferMode) {
   if (part.type === "tool-offerTicketChoice" && part.state === "output-available" && part.output.ok) {
     const { tickets } = part.output;
     const question = part.input.question.trim();
     const chosen = answer === null ? null : (findTicketIds(answer).find((id) => tickets.some((ticket) => ticket.id === id)) ?? null);
-    return { kind: "tickets", question: said.includes(question) ? null : question, tickets, chosen, open: answer === null };
+    if (!said.includes(question)) blocks.push({ kind: "text", key: `question-${part.toolCallId}`, text: question });
+    blocks.push({ kind: "choice", key: part.toolCallId, tickets, chosen, mode });
+  } else if (part.type === "tool-offerReplies" && part.state === "output-available" && part.output.ok) {
+    const { options } = part.input;
+    const question = part.input.question.trim();
+    const chosen = answer === null ? null : chosenReply(options, answer);
+    const last = blocks.at(-1);
+    if (last?.kind === "text") last.replies = { question: said.includes(question) ? null : question, options, chosen, mode };
+    else blocks.push({ kind: "text", key: `question-${part.toolCallId}`, text: question, replies: { question: null, options, chosen, mode } });
   }
-  if (part.type === "tool-offerReplies" && part.state !== "input-streaming") {
-    const input = offerRepliesInput.safeParse(part.input);
-    if (!input.success) return null;
-    const { options } = input.data;
-    const question = said.includes(input.data.question) ? null : input.data.question;
-    return { kind: "replies", question, options, chosen: answer === null ? null : chosenReply(options, answer), open: answer === null };
-  }
-  return null;
 }
 
-/** answer: the next message of the employee, which answers the offer of this reply, if any. */
-function agentTurn(message: NexoUIMessage, answer: string | null): AgentTurn {
+/**
+ * answer: the next message of the employee, which answers the offer of this reply, if any. busy: the agent is still
+ * answering, so an open offer takes no click yet.
+ */
+function agentTurn(message: NexoUIMessage, answer: string | null, busy: boolean): AgentTurn {
   const steps: Step[] = [];
   const blocks: Block[] = [];
-  let offer: Offer | null = null;
+  const text = textOf(message.parts);
+  const mode: OfferMode = answer !== null ? "answered" : busy ? "busy" : "open";
 
   message.parts.forEach((part, index) => {
     steps.push(...stepsOf(part));
@@ -95,14 +98,13 @@ function agentTurn(message: NexoUIMessage, answer: string | null): AgentTurn {
     } else if (part.type === "tool-getTicket" && part.state === "output-available" && part.output.ok) {
       blocks.push({ kind: "ticket", key: part.toolCallId, ticket: part.output.ticket });
     } else {
-      offer = offerOf(part, answer, textOf(message.parts)) ?? offer;
+      addOffer(blocks, part, text, answer, mode);
     }
   });
 
-  const text = textOf(message.parts);
   const decision = decisionOf(message.parts);
   const phase: Phase = text ? "writing" : decision ? "working" : "thinking";
-  return { kind: "agent", id: message.id, text, decision, steps, blocks, offer, phase };
+  return { kind: "agent", id: message.id, text, decision, steps, blocks, phase };
 }
 
 function settle(turn: AgentTurn, status: ChatStatus): AgentTurn {
@@ -122,20 +124,21 @@ export function liveTurns(messages: readonly NexoUIMessage[], status: ChatStatus
     const next = messages[index + 1];
     return next?.role === "user" ? textOf(next.parts) : null;
   };
+  const busy = status === "submitted" || status === "streaming";
   const turns: Turn[] = messages.map((message, index) =>
     message.role === "user"
       ? { kind: "employee", id: message.id, text: textOf(message.parts), unsent: false }
-      : { ...agentTurn(message, answerTo(index)), phase: "done" },
+      : { ...agentTurn(message, answerTo(index), busy), phase: "done" },
   );
 
   const last = turns.at(-1);
   const lastMessage = messages.at(-1);
-  if (last?.kind === "agent" && lastMessage) return [...turns.slice(0, -1), settle(agentTurn(lastMessage, null), status)];
+  if (last?.kind === "agent" && lastMessage) return [...turns.slice(0, -1), settle(agentTurn(lastMessage, null, busy), status)];
   if (last?.kind === "employee" && status === "error") return [...turns.slice(0, -1), { ...last, unsent: true }];
   if (last?.kind === "employee" && status !== "ready") {
     return [
       ...turns,
-      { kind: "agent", id: `${last.id}-reply`, text: "", decision: null, steps: [], blocks: [], offer: null, phase: "thinking" },
+      { kind: "agent", id: `${last.id}-reply`, text: "", decision: null, steps: [], blocks: [], phase: "thinking" },
     ];
   }
   return turns;

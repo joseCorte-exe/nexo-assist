@@ -1,6 +1,6 @@
 import type { NexoUIMessage, TicketCard, TicketSummary } from "@nexo/shared";
 import { describe, expect, it } from "vitest";
-import { liveTurns, messageCount, ticketChoiceText } from "./chat-turns";
+import { type AgentTurn, liveTurns, messageCount, ticketChoiceText, type Turn } from "./chat-turns";
 
 const decision = {
   understanding: "Quer saber o horário do service desk",
@@ -33,7 +33,7 @@ describe("liveTurns", () => {
     const turns = liveTurns([user("u1", "Qual o horário?")], "submitted");
     expect(turns).toEqual([
       { kind: "employee", id: "u1", text: "Qual o horário?", unsent: false },
-      { kind: "agent", id: "u1-reply", text: "", decision: null, steps: [], blocks: [], offer: null, phase: "thinking" },
+      { kind: "agent", id: "u1-reply", text: "", decision: null, steps: [], blocks: [], phase: "thinking" },
     ]);
   });
 
@@ -100,7 +100,6 @@ describe("liveTurns", () => {
       decision,
       steps: [{ key: "c2", label: "não acessou a central de ajuda", state: "failed" }],
       blocks: [{ kind: "text", key: "text-2", text: "Fora do ar." }],
-      offer: null,
       phase: "done",
     });
   });
@@ -173,8 +172,11 @@ const offer = "Está sem atualização há 6 dias. Quer que eu chame um analista
 const ticketReply = agent([
   recordDecision("output-available"),
   tool("getTicket", "c2", { ticketId: "INC-20311" }, { ok: true, ticket: card }),
-  tool("offerReplies", "c3", { question: offer, options: replies }, { shown: true }),
+  tool("offerReplies", "c3", { question: offer, options: replies }, { ok: true }),
 ]);
+
+/** What the reply at that position draws, in order. */
+const blocksOf = (turns: Turn[], index = turns.length - 1) => (turns[index] as AgentTurn).blocks;
 
 describe("liveTurns, looking up tickets", () => {
   it("names the lookup of the tickets in the action line", () => {
@@ -208,50 +210,55 @@ describe("liveTurns, looking up tickets", () => {
     expect(turn).toMatchObject({ steps: [{ label: "consultou seus chamados" }] });
   });
 
-  it("asks with the question of the list and offers it, open while nobody chose", () => {
-    const turn = liveTurns([user("u1", "Meu chamado?"), listReply], "ready").at(-1);
-    expect(turn).toMatchObject({
-      blocks: [],
-      offer: { kind: "tickets", question, tickets: [notebook, sharepoint], chosen: null, open: true },
-    });
+  it("asks with the question of the list in a bubble, then the list, open while nobody chose", () => {
+    expect(blocksOf(liveTurns([user("u1", "Meu chamado?"), listReply], "ready"))).toEqual([
+      { kind: "text", key: "question-c3", text: question },
+      { kind: "choice", key: "c3", tickets: [notebook, sharepoint], chosen: null, mode: "open" },
+    ]);
+  });
+
+  it("keeps the list without clicks while the agent is still answering", () => {
+    expect(blocksOf(liveTurns([user("u1", "Meu chamado?"), listReply], "streaming")).at(-1)).toMatchObject({ mode: "busy" });
   });
 
   it("does not ask twice when the text already has the question", () => {
     const parts = listReply.parts;
     const both = agent([...parts.slice(0, 2), text(`Vi seus chamados. ${question}`), parts[2]!]);
-    const turn = liveTurns([user("u1", "Meu chamado?"), both], "ready").at(-1);
-    expect(turn).toMatchObject({ offer: { kind: "tickets", question: null } });
+    expect(blocksOf(liveTurns([user("u1", "Meu chamado?"), both], "ready"))).toMatchObject([
+      { kind: "text", text: `Vi seus chamados. ${question}` },
+      { kind: "choice" },
+    ]);
   });
 
   it("marks the ticket the next message chose, and closes the list", () => {
     const turns = liveTurns([user("u1", "Meu chamado?"), listReply, user("u2", ticketChoiceText(notebook))], "submitted");
-    expect(turns[1]).toMatchObject({ offer: { kind: "tickets", chosen: "INC-20311", open: false } });
+    expect(blocksOf(turns, 1).at(-1)).toMatchObject({ kind: "choice", chosen: "INC-20311", mode: "answered" });
   });
 
   it("writes the choice as the design shows it", () => {
     expect(ticketChoiceText(notebook)).toBe("INC-20311 · Notebook lento após atualização do Windows");
   });
 
-  it("draws the card of the ticket where it came, then the question with its replies", () => {
-    const turn = liveTurns([user("u1", "INC-20311"), ticketReply], "ready").at(-1);
-    expect(turn).toMatchObject({
-      blocks: [{ kind: "ticket", key: "c2", ticket: card }],
-      offer: { kind: "replies", question: offer, options: replies, chosen: null, open: true },
-    });
+  it("draws the card of the ticket where it came, then the question as a bubble with its replies", () => {
+    expect(blocksOf(liveTurns([user("u1", "INC-20311"), ticketReply], "ready"))).toEqual([
+      { kind: "ticket", key: "c2", ticket: card },
+      { kind: "text", key: "question-c3", text: offer, replies: { question: null, options: replies, chosen: null, mode: "open" } },
+    ]);
   });
 
-  it("keeps the question of the replies apart from a text that does not say it, and drops it when the text does", () => {
+  it("puts the replies in the last bubble, their question in bold unless the text already says it", () => {
     const parts = ticketReply.parts;
-    const apart = liveTurns([user("u1", "INC-20311"), agent([...parts.slice(0, 2), text("Vi o chamado."), parts[2]!])], "ready");
-    expect(apart.at(-1)).toMatchObject({ offer: { question: offer } });
-    const said = liveTurns([user("u1", "INC-20311"), agent([...parts.slice(0, 2), text(offer), parts[2]!])], "ready");
-    expect(said.at(-1)).toMatchObject({ offer: { question: null } });
+    const apart = blocksOf(liveTurns([user("u1", "INC-20311"), agent([...parts.slice(0, 2), text("Vi o chamado."), parts[2]!])], "ready"));
+    expect(apart).toMatchObject([{ kind: "ticket" }, { kind: "text", text: "Vi o chamado.", replies: { question: offer } }]);
+    const said = blocksOf(liveTurns([user("u1", "INC-20311"), agent([...parts.slice(0, 2), text(offer), parts[2]!])], "ready"));
+    expect(said).toMatchObject([{ kind: "ticket" }, { kind: "text", text: offer, replies: { question: null } }]);
   });
 
   it("marks the reply the next message chose, whatever its case, or what started with it", () => {
-    const chosen = (next: string) =>
-      (liveTurns([user("u1", "INC-20311"), ticketReply, user("u2", next)], "submitted")[1] as { offer: { chosen: string | null } })
-        .offer.chosen;
+    const chosen = (next: string) => {
+      const last = blocksOf(liveTurns([user("u1", "INC-20311"), ticketReply, user("u2", next)], "submitted"), 1).at(-1);
+      return last?.kind === "text" ? last.replies?.chosen : undefined;
+    };
     expect(chosen("Falar com um analista")).toBe("Falar com um analista");
     expect(chosen("não, obrigado")).toBe("Não, obrigado");
     expect(chosen("Adicionar informação. Reiniciei duas vezes.")).toBe("Adicionar informação");
@@ -260,7 +267,7 @@ describe("liveTurns, looking up tickets", () => {
   });
 
   it("has no card for a ticket that was not found, and no offer while it is still being written", () => {
-    const turn = liveTurns(
+    const turns = liveTurns(
       [
         user("u1", "INC-99999"),
         agent([
@@ -269,8 +276,20 @@ describe("liveTurns, looking up tickets", () => {
         ]),
       ],
       "streaming",
-    ).at(-1);
-    expect(turn).toMatchObject({ blocks: [], offer: null });
+    );
+    expect(blocksOf(turns)).toEqual([]);
+  });
+
+  it("shows no replies when the offer failed, so the agent's explanation is all there is", () => {
+    const failed = {
+      type: "tool-offerReplies",
+      toolCallId: "c3",
+      state: "output-error",
+      input: { question: offer, options: replies },
+      errorText: "invalid",
+    } as Part;
+    const turns = liveTurns([user("u1", "INC-20311"), agent([failed, text("Não consegui mostrar as opções.")])], "ready");
+    expect(blocksOf(turns)).toEqual([{ kind: "text", key: "text-1", text: "Não consegui mostrar as opções." }]);
   });
 
   it("keeps the text on both sides of a card in two bubbles, in order", () => {

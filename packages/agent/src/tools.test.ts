@@ -338,6 +338,6 @@ describe("offerTicketChoice", () => {
 describe("offerReplies", () => {
   it("only shows the replies, which the screen draws from its input", async () => {
     const { desk } = ticketDesk();
-    expect(await run(tools(desk).offerReplies, { question: "Quer ajuda?", options: ["Falar com um analista", "Não, obrigado"] })).toEqual({ shown: true });
+    expect(await run(tools(desk).offerReplies, { question: "Quer ajuda?", options: ["Falar com um analista", "Não, obrigado"] })).toEqual({ ok: true });
   });
 });

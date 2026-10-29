@@ -124,7 +124,6 @@ export function Chat({ initial, employeeName }: { initial: ConversationResponse;
                   turn={turn}
                   failures={failures}
                   onRetry={retry}
-                  offerMode={!turn.offer?.open ? "answered" : busy ? "busy" : "open"}
                   onChoose={choose}
                 />
               ),
@@ -179,7 +178,10 @@ function Announcer({ turn }: { turn: Turn | undefined }) {
     if (agent.phase === "thinking") setMessage(`Nexo Assist: ${THINKING_LABEL}`);
     else if (running) setMessage(`Nexo Assist: ${running.label}`);
     else if (agent.phase === "done") {
-      const said = [agent.text, agent.offer?.question].filter(Boolean).join(" ");
+      const said = agent.blocks
+        .flatMap((block) => (block.kind === "text" ? [block.text, block.replies?.question] : []))
+        .filter(Boolean)
+        .join(" ");
       if (said) setMessage(`Nexo Assist respondeu: ${said}`);
     }
     // Only when the phase or the running tool changes, not on every streamed word.

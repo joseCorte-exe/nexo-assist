@@ -71,15 +71,10 @@ type Step = { text: string; toolResults: ReadonlyArray<ToolResult> };
 /** The Mastra tool the model calls to keep the summary of the case (the working memory). */
 const WORKING_MEMORY_TOOL = "updateWorkingMemory";
 
-/**
- * An offer tool that ran and showed its offer: the list answers ok, the replies answer shown. The model gets the
- * output back wrapped as { type: "json", value }.
- */
+/** An offer tool that ran and showed its offer (it answers ok). The model gets the output wrapped as { type: "json", value }. */
 function shownOffer({ toolName, output }: ToolResult) {
-  const wrapped = output as { type?: string; value?: unknown } | undefined;
-  const value = wrapped?.type === "json" ? wrapped.value : undefined;
-  if (!OFFER_TOOLS.has(toolName) || typeof value !== "object" || value === null) return false;
-  return ("ok" in value && value.ok === true) || ("shown" in value && value.shown === true);
+  const wrapped = output as { type?: string; value?: { ok?: unknown } } | undefined;
+  return OFFER_TOOLS.has(toolName) && wrapped?.type === "json" && wrapped.value?.ok === true;
 }
 
 /**

@@ -18,7 +18,7 @@ O plano está em [plano.md](plano.md). Este arquivo junta o que foi pedido, a pr
 
 | Suíte | Antes | Depois |
 |---|---|---|
-| Unidade e integração (Vitest) | 213 | 308 |
+| Unidade e integração (Vitest) | 213 | 310 |
 | Navegador (Playwright) | 22 | 28 |
 
 Todas passam, e os tipos fecham nos quatro pacotes.
