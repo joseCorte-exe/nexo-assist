@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { toAISdkStream } from "@mastra/ai-sdk";
-import { streamReply, summarizeTurn } from "@nexo/agent";
-import { chatInput, type ConversationPart, type NexoUIMessage } from "@nexo/shared";
+import { streamReply } from "@nexo/agent";
+import { chatInput, type ConversationPart, type NexoUIMessage, replyText, summarizeTurn } from "@nexo/shared";
 import { consumeStream, createUIMessageStream, createUIMessageStreamResponse, type InferUIMessageChunk } from "ai";
 import { eq, sql } from "drizzle-orm";
 import type { NextRequest } from "next/server";
@@ -13,9 +13,15 @@ import { jsonError, readBody, readEmployeeSession } from "./http";
 
 const AGENT_FAILED = "O Nexo não conseguiu responder. Tente de novo.";
 
+const REFUSALS = {
+  agent_paused: "Sua conversa está com um analista. Ele responde por aqui.",
+  already_answered: "Essa mensagem já foi respondida.",
+  message_conflict: "Essa mensagem já foi enviada.",
+};
+
 type StartedTurn =
   | { ok: true; conversation: ConversationPart; startedAt: Date }
-  | { ok: false; reason: "agent_paused" | "message_conflict" };
+  | { ok: false; reason: "agent_paused" | "already_answered" | "message_conflict" };
 
 /**
  * Saves the employee message in the active conversation, or in a new one, and counts it, in one batch: a single
@@ -25,8 +31,8 @@ type StartedTurn =
  *
  * The message is saved under the id the chat gave it. Sent again ("Tentar de novo", or the network dropped the
  * response) with the same text and still unanswered, it is answered, not saved twice, and the counter, which counts
- * the saved messages, does not move. Any other use of a taken id is refused. Outside with_agent nothing is saved and
- * the agent is not called (feature 5).
+ * the saved messages, does not move. Already answered, the chat is told so, to load the reply instead. Any other use
+ * of a taken id is refused. Outside with_agent nothing is saved and the agent is not called (feature 5).
  */
 async function startTurn(db: Db, { employeeId, id, text, now }: { employeeId: string; id: string; text: string; now: Date }) {
   const at = now.getTime();
@@ -54,23 +60,26 @@ async function startTurn(db: Db, { employeeId, id, text, now }: { employeeId: st
         id: conversations.id,
         state: conversations.state,
         messageCount: conversations.messageCount,
-        // The message under this id is this employee's, with this text, and nothing came after it: the one just saved,
-        // or the same one sent again. Anything else would get an answer for a message that is not saved or counted.
-        answerable: sql<number>`exists (
+        // The message under this id is this employee's, in this conversation, with this text.
+        mine: sql<number>`exists (
           select 1 from ${messages} m
           where m.id = ${id} and m.conversation_id = ${conversations}.id and m.author = 'employee' and m.text = ${text}
-            and not exists (
-              select 1 from ${messages} r where r.conversation_id = m.conversation_id and r.created_at > m.created_at
-            )
+        )`,
+        // Something came after it: it was already answered.
+        answered: sql<number>`exists (
+          select 1 from ${messages} m join ${messages} r on r.conversation_id = m.conversation_id and r.created_at > m.created_at
+          where m.id = ${id}
         )`,
       })
       .from(conversations)
       .where(activeConversationOf(employeeId)),
   ]);
   if (!conversation) throw new Error("The active conversation is missing after it was ensured");
-  const { answerable, ...part } = conversation;
+  const { mine, answered, ...part } = conversation;
   if (part.state !== "with_agent") return { ok: false, reason: "agent_paused" } satisfies StartedTurn;
-  if (!answerable) return { ok: false, reason: "message_conflict" } satisfies StartedTurn;
+  // Anything but this employee's unanswered message would be answered without being saved or counted.
+  if (!mine) return { ok: false, reason: "message_conflict" } satisfies StartedTurn;
+  if (answered) return { ok: false, reason: "already_answered" } satisfies StartedTurn;
   return { ok: true, conversation: part, startedAt: now } satisfies StartedTurn;
 }
 
@@ -82,15 +91,13 @@ async function saveReply(
   db: Db,
   { conversationId, startedAt, now, reply }: { conversationId: string; startedAt: Date; now: Date; reply: NexoUIMessage },
 ) {
-  const messageId = reply.id || `msg-${randomUUID()}`;
   // The counter belongs to the moment the reply streamed; the conversation has the current one.
   const parts = reply.parts.filter((part) => part.type !== "data-conversation");
-  const text = parts.map((part) => (part.type === "text" ? part.text : "")).join("");
   const { record, toolsUsed } = summarizeTurn(parts);
   const at = new Date(Math.max(now.getTime(), startedAt.getTime() + 1));
   await db.batch([
-    db.insert(messages).values({ id: messageId, conversationId, author: "agent", text, parts, createdAt: at }),
-    db.insert(decisions).values({ id: `dec-${randomUUID()}`, messageId, toolsUsed, ...record }),
+    db.insert(messages).values({ id: reply.id, conversationId, author: "agent", text: replyText(parts), parts, createdAt: at }),
+    db.insert(decisions).values({ id: `dec-${randomUUID()}`, messageId: reply.id, toolsUsed, ...record }),
     db
       .update(conversations)
       .set({ firstResponseAt: sql`coalesce(${conversations.firstResponseAt}, ${at.getTime()})` })
@@ -112,11 +119,7 @@ export async function chat(request: NextRequest, deps: Deps) {
   const employeeId = session.session.id;
   const { id, text } = body.data;
   const turn = await startTurn(deps.db, { employeeId, id, text, now: deps.now() });
-  if (!turn.ok) {
-    return turn.reason === "agent_paused"
-      ? jsonError(409, "agent_paused", "Sua conversa está com um analista. Ele responde por aqui.")
-      : jsonError(409, "message_conflict", "Essa mensagem já foi enviada.");
-  }
+  if (!turn.ok) return jsonError(409, turn.reason, REFUSALS[turn.reason]);
 
   const { conversation, startedAt } = turn;
   const reply = streamReply(deps.agent, { conversationId: conversation.id, employeeId, text });

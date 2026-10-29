@@ -1,4 +1,5 @@
-import type { ConversationResponse, NexoUIMessage } from "@nexo/shared";
+import { conversationPart, type ConversationResponse, type NexoUIMessage, nexoToolSchemas } from "@nexo/shared";
+import { safeValidateUIMessages } from "ai";
 import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import type { Db } from "@/db";
@@ -32,14 +33,28 @@ export async function loadConversation(db: Db, employeeId: string): Promise<Conv
   // Analyst and system messages come with the console, in feature 5.
   return {
     conversation,
-    messages: rows.map(
-      ({ id, author, text, parts }): NexoUIMessage => ({
-        id,
-        role: author === "employee" ? "user" : "assistant",
-        parts: parts ?? [{ type: "text", text }],
+    messages: await Promise.all(
+      rows.map(async ({ id, author, text, parts }): Promise<NexoUIMessage> => {
+        const asText: NexoUIMessage = { id, role: author === "employee" ? "user" : "assistant", parts: [{ type: "text", text }] };
+        return parts ? savedReply({ ...asText, parts }, asText) : asText;
       }),
     ),
   };
+}
+
+/**
+ * The parts are what the AI SDK streamed, saved as JSON: checked against the schemas of the tools when read, so a
+ * change of format shows up here and not on the screen. A reply that no longer matches is shown as its saved text.
+ */
+async function savedReply(message: NexoUIMessage, asText: NexoUIMessage): Promise<NexoUIMessage> {
+  const checked = await safeValidateUIMessages<NexoUIMessage>({
+    messages: [message],
+    dataSchemas: { conversation: conversationPart },
+    tools: nexoToolSchemas,
+  });
+  if (checked.success) return checked.data[0] ?? asText;
+  console.error("saved reply does not match the chat format", { messageId: message.id, error: checked.error });
+  return asText;
 }
 
 /** GET /api/conversation. The chat reads it again when the page comes back. */

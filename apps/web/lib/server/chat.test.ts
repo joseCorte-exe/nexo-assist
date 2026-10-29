@@ -257,7 +257,8 @@ describe("POST /api/chat", () => {
     expect(model.calls).toHaveLength(1);
   });
 
-  it("refuses an id whose message was already answered", async () => {
+  it("says a message sent again was already answered, so the chat can load the reply instead", async () => {
+    // The network dropped the response after the reply was saved, and the employee pressed "Tentar de novo".
     const model = scriptedModel([...vpnScript(), ...vpnScript()]);
     const deps = await testDeps({ agent: testAgent(model) });
     const message = { id: "msg-ana-1", text: "Minha VPN dá erro 809" };
@@ -266,6 +267,7 @@ describe("POST /api/chat", () => {
     const response = await chat(await post(message), deps);
 
     expect(response.status).toBe(409);
+    expect((await response.json()).error.code).toBe("already_answered");
     expect(model.calls).toHaveLength(3);
   });
 

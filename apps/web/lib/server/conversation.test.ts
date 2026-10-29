@@ -65,6 +65,14 @@ describe("loadConversation", () => {
     expect(reply?.parts).toEqual([{ type: "text", text: expect.stringContaining("REQ-10450") }]);
   });
 
+  it("returns a saved reply whose parts no longer match the tools as its text", async () => {
+    const { db } = await testDeps();
+    const broken = [{ type: "tool-searchArticles", toolCallId: "c1", state: "output-available", input: { query: 42 }, output: {} }];
+    await db.update(messages).set({ parts: broken as never }).where(eq(messages.id, "conv-bruno-msg-2"));
+    const [, reply] = (await loadConversation(db, "emp-bruno")).messages;
+    expect(reply?.parts).toEqual([{ type: "text", text: expect.stringContaining("REQ-10450") }]);
+  });
+
   it("leaves out what is not from the employee or the agent, which comes with the console in feature 5", async () => {
     // Carla's conversation ends with a system message, the transfer.
     const { db } = await testDeps();

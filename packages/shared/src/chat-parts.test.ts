@@ -1,6 +1,6 @@
-import type { NexoUIMessage } from "@nexo/shared";
 import { describe, expect, it } from "vitest";
-import { summarizeTurn } from "./turn-summary";
+import type { NexoUIMessage } from "./chat";
+import { decisionOf, replyText, summarizeTurn } from "./chat-parts";
 
 const decision = {
   understanding: "Quer saber o horário do service desk",
@@ -62,5 +62,24 @@ describe("summarizeTurn", () => {
       tool("recordDecision", { ...decision, action: "Outra coisa" }),
     ]);
     expect(summary.record?.action).toBe(decision.action);
+  });
+});
+
+describe("replyText", () => {
+  it("joins the text of every step, leaving the tools out", () => {
+    expect(replyText([tool("recordDecision", decision), text("Das 8h "), tool("searchArticles", {}), text("às 18h.")])).toBe(
+      "Das 8h às 18h.",
+    );
+  });
+});
+
+describe("decisionOf", () => {
+  it("is the first valid record", () => {
+    expect(decisionOf([tool("recordDecision", { confidence: "alta" }), tool("recordDecision", decision)])).toEqual(decision);
+  });
+
+  it("waits while the record is still streaming, since its input may be partial", () => {
+    const streaming = { type: "tool-recordDecision", toolCallId: "c1", state: "input-streaming", input: decision } as Part;
+    expect(decisionOf([streaming])).toBeNull();
   });
 });

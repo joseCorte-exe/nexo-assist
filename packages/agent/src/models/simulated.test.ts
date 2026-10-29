@@ -1,8 +1,7 @@
-import type { KbArticle } from "@nexo/shared";
+import { type KbArticle, summarizeTurn } from "@nexo/shared";
 import { describe, expect, it } from "vitest";
 import { createMemory, createNexoAgent } from "../agent";
 import { replyOf } from "../testing";
-import { summarizeTurn } from "../turn-summary";
 import type { HelpCenter } from "../tools";
 import { simulatedModel } from "./simulated";
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import type { ConversationResponse, NexoUIMessage } from "@nexo/shared";
+import { apiError, type ConversationResponse, type NexoUIMessage, replyText } from "@nexo/shared";
 import { DefaultChatTransport } from "ai";
 import { CircleAlert } from "lucide-react";
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -24,31 +24,53 @@ const transport = new DefaultChatTransport<NexoUIMessage>({
     let last = messages.length - 1;
     while (last > 0 && messages[last]?.role !== "user") last--;
     const message = messages[last];
-    const text = message?.parts.map((part) => (part.type === "text" ? part.text : "")).join("") ?? "";
-    return { body: { id: message?.id, text } };
+    return { body: { id: message?.id, text: message ? replyText(message.parts) : "" } };
   },
 });
 
 const newMessageId = () => `msg-${crypto.randomUUID()}`;
 
+/** The route refused a message sent again because its reply was saved: the network only lost the response. */
+function wasAlreadyAnswered(error: Error) {
+  try {
+    return apiError.safeParse(JSON.parse(error.message)).data?.error.code === "already_answered";
+  } catch {
+    return false;
+  }
+}
+
 export function Chat({ initial, employeeName }: { initial: ConversationResponse; employeeName: string }) {
   // How many replies in a row failed: the second one sends the employee to the phone.
   const [failures, setFailures] = useState(0);
+  // The counter of the conversation as last loaded from the server; replies bring newer ones in the stream.
+  const [savedCount, setSavedCount] = useState(initial.conversation?.messageCount ?? 0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const { messages, sendMessage, regenerate, status } = useChat<NexoUIMessage>({
+  const { messages, setMessages, sendMessage, regenerate, status, clearError } = useChat<NexoUIMessage>({
     messages: initial.messages,
     transport,
     generateId: newMessageId,
-    onError: () => setFailures((count) => count + 1),
+    onError: (error) => {
+      if (wasAlreadyAnswered(error)) return void showSavedConversation();
+      setFailures((count) => count + 1);
+    },
     onFinish: ({ isError }) => {
       if (!isError) setFailures(0);
     },
   });
 
+  async function showSavedConversation() {
+    const response = await fetch("/api/conversation", { cache: "no-store" });
+    if (!response.ok) return setFailures((count) => count + 1);
+    const saved = (await response.json()) as ConversationResponse;
+    setSavedCount(saved.conversation?.messageCount ?? 0);
+    setMessages(saved.messages);
+    clearError();
+  }
+
   const busy = status === "submitted" || status === "streaming";
   const turns = liveTurns(messages, status);
-  const count = messageCount(messages, status, initial.conversation?.messageCount ?? 0);
+  const count = messageCount(messages, status, savedCount);
 
   function send(text: string) {
     void sendMessage({ text });

@@ -68,6 +68,13 @@ export const redirectOutOfScopeOutput = z.discriminatedUnion("ok", [
 ]);
 export type RedirectOutOfScopeOutput = z.infer<typeof redirectOutOfScopeOutput>;
 
+/** The schemas of each tool: for the agent that runs them, and to check saved messages when they are read back. */
+export const nexoToolSchemas = {
+  recordDecision: { inputSchema: decisionRecord, outputSchema: recordDecisionOutput },
+  searchArticles: { inputSchema: searchArticlesInput, outputSchema: searchArticlesOutput },
+  redirectOutOfScope: { inputSchema: redirectOutOfScopeInput, outputSchema: redirectOutOfScopeOutput },
+};
+
 /** First part of every chat stream: the conversation the message went to, with the new counter. */
 export const conversationPart = z.object({
   id: z.string(),

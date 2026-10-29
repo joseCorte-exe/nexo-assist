@@ -126,6 +126,31 @@ test("a message the network dropped is marked as not sent and goes on the retry,
   await expect(counter(page)).toHaveText("5/30 mensagens nesta sessão");
 });
 
+test("a reply the network lost after it was saved shows up on the retry, counted once", async ({ page }) => {
+  await signInAsAna(page);
+  await expect(counter(page)).toHaveText("5/30 mensagens nesta sessão");
+  await page.route(
+    "**/api/chat",
+    async (route) => {
+      // The server answers in full and saves the reply; only the browser never gets it.
+      await (await route.fetch()).body();
+      await route.abort("internetdisconnected");
+    },
+    { times: 1 },
+  );
+
+  await composer(page).fill("Como faço para pedir férias?");
+  await composer(page).press("Enter");
+  const mine = page.getByRole("article", { name: "Você" }).last();
+  await expect(mine).toContainText("Não enviada.");
+
+  await mine.getByRole("button", { name: "Tentar de novo" }).click();
+  await expect(replies(page).last()).toContainText("rh@nexo.com.br");
+  await expect(mine).not.toContainText("Não enviada.");
+  await expect(counter(page)).toHaveText("6/30 mensagens nesta sessão");
+  await expect(page.getByRole("article", { name: "Você" })).toHaveCount(6);
+});
+
 test.describe("on a phone", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 

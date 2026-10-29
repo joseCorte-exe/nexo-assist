@@ -1,14 +1,5 @@
 import { createTool } from "@mastra/core/tools";
-import {
-  decisionRecord,
-  recordDecisionOutput,
-  type OutOfScopeArea,
-  redirectOutOfScopeInput,
-  redirectOutOfScopeOutput,
-  searchArticlesInput,
-  searchArticlesOutput,
-  type TicketServiceClient,
-} from "@nexo/shared";
+import { nexoToolSchemas, type OutOfScopeArea, type TicketServiceClient } from "@nexo/shared";
 
 /** The part of the ticket-service the tools of this feature use. */
 export type HelpCenter = Pick<TicketServiceClient, "searchArticles">;
@@ -27,8 +18,7 @@ export function createTools({ helpCenter }: { helpCenter: HelpCenter }) {
     id: "recordDecision",
     description:
       "Registra o que você entendeu, a ação que vai tomar, sua segurança (0 a 1) e o motivo. É sempre o primeiro passo da resposta.",
-    inputSchema: decisionRecord,
-    outputSchema: recordDecisionOutput,
+    ...nexoToolSchemas.recordDecision,
     // The route saves the decision when the reply ends, together with the tools that ran.
     execute: async () => ({ recorded: true as const }),
   });
@@ -36,8 +26,7 @@ export function createTools({ helpCenter }: { helpCenter: HelpCenter }) {
   const searchArticles = createTool({
     id: "searchArticles",
     description: "Procura artigos na central de ajuda de TI da Nexo para responder a dúvida do funcionário.",
-    inputSchema: searchArticlesInput,
-    outputSchema: searchArticlesOutput,
+    ...nexoToolSchemas.searchArticles,
     execute: async ({ query }) => {
       const result = await helpCenter.searchArticles(query);
       return result.ok ? { ok: true as const, articles: result.data } : { ok: false as const, message: HELP_CENTER_DOWN };
@@ -48,8 +37,7 @@ export function createTools({ helpCenter }: { helpCenter: HelpCenter }) {
     id: "redirectOutOfScope",
     description:
       "Para assuntos que não são de TI (RH, financeiro, facilities): busca o canal certo para indicar ao funcionário.",
-    inputSchema: redirectOutOfScopeInput,
-    outputSchema: redirectOutOfScopeOutput,
+    ...nexoToolSchemas.redirectOutOfScope,
     execute: async ({ area }) => {
       const { query, articleId } = AREA_CHANNEL[area];
       const result = await helpCenter.searchArticles(query);
