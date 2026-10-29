@@ -2,11 +2,16 @@ import { type AgentModel, createMemory, createNexoAgent, type NexoAgent, simulat
 import {
   type Analyst,
   createTicketServiceClient,
+  dueAt,
   type Employee,
   type KbArticle,
+  type Priority,
   sampleAnalysts,
   sampleEmployees,
+  type Ticket,
+  type TicketDetail,
   type TicketServiceClient,
+  type TicketStatus,
 } from "@nexo/shared";
 import { NextRequest } from "next/server";
 import { createDb } from "@/db";
@@ -35,9 +40,38 @@ export const vpnArticle: KbArticle = {
   category: "network_vpn",
 };
 
+type SampleTicket = Pick<Ticket, "id" | "title" | "openedBy"> & { priority: Priority; status: TicketStatus; openedDaysAgo: number; itAnsweredDaysAgo?: number };
+
+/** Ana's open tickets, as in the design, and one of Diego's. Their rules are tested in the ticket-service. */
+const sampleTickets: SampleTicket[] = [
+  { id: "INC-20311", title: "Notebook lento após atualização do Windows", openedBy: "emp-ana", priority: "medium", status: "waiting_for_analyst", openedDaysAgo: 6 },
+  { id: "INC-20298", title: "Acesso à pasta Financeiro no SharePoint", openedBy: "emp-ana", priority: "medium", status: "in_progress", openedDaysAgo: 8, itAnsweredDaysAgo: 1 },
+  { id: "REQ-10442", title: "Segundo monitor para home office", openedBy: "emp-ana", priority: "low", status: "approved", openedDaysAgo: 13, itAnsweredDaysAgo: 7 },
+  { id: "INC-20319", title: "Sistema de pedidos fora do ar para a equipe", openedBy: "emp-diego", priority: "critical", status: "waiting_for_analyst", openedDaysAgo: 0 },
+];
+
+function toTicket({ openedDaysAgo, itAnsweredDaysAgo, ...sample }: SampleTicket): Ticket {
+  const createdAt = new Date(NOW.getTime() - openedDaysAgo * DAY);
+  const lastItResponseAt = itAnsweredDaysAgo === undefined ? null : new Date(NOW.getTime() - itAnsweredDaysAgo * DAY);
+  return {
+    ...sample,
+    type: sample.id.startsWith("REQ") ? "REQ" : "INC",
+    description: "Descrição do chamado.",
+    category: "hardware",
+    subcategory: null,
+    affected: "only_me",
+    assignedTo: null,
+    createdAt: createdAt.toISOString(),
+    updatedAt: (lastItResponseAt ?? createdAt).toISOString(),
+    lastItResponseAt: lastItResponseAt?.toISOString() ?? null,
+    dueAt: dueAt({ priority: sample.priority, createdAt, lastItResponseAt }).toISOString(),
+    resolvedAt: null,
+  };
+}
+
 /**
- * The real ticket-service client, answering from the sample people instead of the network,
- * so tests go through the same lookup rules the app uses.
+ * The real ticket-service client, answering from the sample people and tickets instead of the network,
+ * so tests go through the same lookup rules the app uses. As the service, it never answers another person's ticket.
  */
 export function fakeTicketService({ down = false } = {}): TicketServiceClient {
   const employees: Employee[] = sampleEmployees.map((employee) => ({
@@ -45,12 +79,21 @@ export function fakeTicketService({ down = false } = {}): TicketServiceClient {
     passwordChangedAt: ana.passwordChangedAt,
   }));
   const analysts: Analyst[] = sampleAnalysts.map((analyst) => ({ ...analyst }));
+  const tickets = sampleTickets.map(toTicket);
   const fetch = async (url: URL | RequestInfo) => {
     if (down) return Response.json({}, { status: 503 });
     const { pathname, searchParams } = new URL(String(url));
     if (pathname === "/analysts") return Response.json(analysts);
     // The help center only knows the VPN article here; its ranking is tested in the ticket-service.
     if (pathname === "/kb/search") return Response.json(/vpn|809/i.test(searchParams.get("q") ?? "") ? [vpnArticle] : []);
+    const list = pathname.match(/^\/employees\/([^/]+)\/tickets$/);
+    if (list) return Response.json(tickets.filter((ticket) => ticket.openedBy === decodeURIComponent(list[1]!)));
+    const one = pathname.match(/^\/tickets\/([^/]+)$/);
+    if (one) {
+      const found = tickets.find((ticket) => ticket.id === one[1] && ticket.openedBy === searchParams.get("employeeId"));
+      const detail: TicketDetail | undefined = found && { ...found, assigneeName: null, updates: [] };
+      return detail ? Response.json(detail) : Response.json({ error: { code: "ticket_not_found", message: "Ticket not found" } }, { status: 404 });
+    }
     return Response.json(employees.filter((employee) => employee.email === searchParams.get("email")));
   };
   return createTicketServiceClient({ baseUrl: "http://tickets.test", secret: "s", fetch, sleep: async () => {} });

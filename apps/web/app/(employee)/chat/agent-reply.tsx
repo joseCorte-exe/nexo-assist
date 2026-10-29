@@ -5,7 +5,7 @@ import { ChevronDown, CircleAlert, LoaderCircle } from "lucide-react";
 import { useId, useRef, useState } from "react";
 import { Button } from "@/components/button";
 import { CheckIcon } from "@/components/design-icons";
-import { ACTION_LABELS, THINKING_LABEL } from "@/lib/agent-actions";
+import { THINKING_LABEL } from "@/lib/agent-actions";
 import type { AgentTurn, Step } from "@/lib/chat-turns";
 import { formatConfidence } from "@/lib/format";
 
@@ -42,8 +42,8 @@ export function AgentReply({ turn, failures, onRetry }: Props) {
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="text-12.5 font-semibold whitespace-nowrap text-ink">Nexo Assist</span>
         {turn.phase === "thinking" ? <Action label={THINKING_LABEL} state="running" /> : null}
-        {turn.steps.map((step, index) => (
-          <Action key={`${step.tool}-${index}`} label={ACTION_LABELS[step.tool][step.state]} state={step.state} />
+        {turn.steps.map((step) => (
+          <Action key={step.key} label={step.label} state={step.state} />
         ))}
         {confidence?.level === "low" ? (
           <span className="text-12.5 whitespace-nowrap text-warning-text">· confiança {confidence.percent}%</span>

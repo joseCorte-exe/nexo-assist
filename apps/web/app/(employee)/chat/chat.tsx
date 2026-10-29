@@ -5,7 +5,7 @@ import { apiError, type ConversationResponse, type NexoUIMessage, textOf } from 
 import { DefaultChatTransport } from "ai";
 import { CircleAlert } from "lucide-react";
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ACTION_LABELS, THINKING_LABEL } from "@/lib/agent-actions";
+import { THINKING_LABEL } from "@/lib/agent-actions";
 import { liveTurns, messageCount, type Turn } from "@/lib/chat-turns";
 import { AgentReply } from "./agent-reply";
 import { Composer } from "./composer";
@@ -178,12 +178,12 @@ function Announcer({ turn }: { turn: Turn | undefined }) {
   const [message, setMessage] = useState("");
   const agent = turn?.kind === "agent" ? turn : null;
   const running = agent?.steps.find((step) => step.state === "running");
-  const key = agent ? `${agent.id}:${agent.phase}:${running?.tool ?? ""}` : "";
+  const key = agent ? `${agent.id}:${agent.phase}:${running?.key ?? ""}` : "";
 
   useEffect(() => {
     if (!agent) return;
     if (agent.phase === "thinking") setMessage(`Nexo Assist: ${THINKING_LABEL}`);
-    else if (running) setMessage(`Nexo Assist: ${ACTION_LABELS[running.tool].running}`);
+    else if (running) setMessage(`Nexo Assist: ${running.label}`);
     else if (agent.phase === "done" && agent.text) setMessage(`Nexo Assist respondeu: ${agent.text}`);
     // Only when the phase or the running tool changes, not on every streamed word.
     // eslint-disable-next-line react-hooks/exhaustive-deps

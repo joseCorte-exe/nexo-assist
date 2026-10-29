@@ -11,6 +11,7 @@ import { migrateDb } from "@/db/migrate";
 import { conversations, decisions, messages } from "@/db/schema";
 import { seed } from "@/db/seed";
 import { chat } from "./chat";
+import { loadConversation } from "./conversation";
 import {
   ana,
   fakeTicketService,
@@ -293,6 +294,61 @@ describe("POST /api/chat", () => {
     const conversation = await anaConversation(deps);
     expect((await messagesOf(deps, conversation!.id)).map(({ author }) => author)).toEqual(["employee"]);
     expect(conversation?.firstResponseAt).toBeNull();
+  });
+});
+
+describe("POST /api/chat looking up tickets (feature 3)", () => {
+  /** Ana asks with the simulated model, which goes through the real agent, tools and ticket-service client. */
+  async function ask(text: string) {
+    const deps = await testDeps();
+    const chunks = await readStream(await chat(await say(text), deps));
+    await deps.settled();
+    const conversation = await anaConversation(deps);
+    const [, reply] = await messagesOf(deps, conversation!.id);
+    const parts = reply!.parts!.filter((part) => part.type !== "step-start");
+    return { chunks, reply: reply!, parts };
+  }
+
+  it("lists Ana's open tickets and offers the choice, saved with the rows the screen draws", async () => {
+    const { parts, reply } = await ask("Qual o status do meu chamado?");
+    expect(parts.map((part) => part.type)).toEqual([
+      "tool-recordDecision",
+      "tool-listMyTickets",
+      "text",
+      "tool-offerTicketChoice",
+    ]);
+    expect(reply.text).toBe("Você tem 3 chamados abertos. Sobre qual deles quer saber?");
+    const choice = parts[3] as { state: string; output: { ok: boolean; tickets: Array<{ id: string }> } };
+    expect(choice.state).toBe("output-available");
+    expect(choice.output.tickets.map((ticket) => ticket.id)).toEqual(["INC-20311", "INC-20298", "REQ-10442"]);
+    expect(reply.decision?.toolsUsed).toEqual(["recordDecision", "listMyTickets", "offerTicketChoice"]);
+  });
+
+  it("looks the ticket up by its number and saves the card and the offer of an analyst", async () => {
+    const { parts } = await ask("INC-20311 · Notebook lento após atualização do Windows");
+    expect(parts.map((part) => part.type)).toEqual(["tool-recordDecision", "tool-getTicket", "text", "tool-offerReplies"]);
+    expect(parts[1]).toMatchObject({
+      state: "output-available",
+      output: { ok: true, ticket: { id: "INC-20311", overdue: true, daysSinceUpdate: 6, deadline: "3 dias úteis" } },
+    });
+    expect(parts[3]).toMatchObject({ input: { options: ["Falar com um analista", "Adicionar informação", "Não, obrigado"] } });
+  });
+
+  it("never shows Ana a ticket of somebody else, even with its number", async () => {
+    // INC-20319 is Diego's.
+    const { parts, reply } = await ask("Como está o INC-20319?");
+    expect(parts[1]).toMatchObject({ type: "tool-getTicket", output: { ok: false, reason: "not_found" } });
+    expect(reply.text).toContain("Não encontrei o INC-20319 entre os seus chamados.");
+    expect(JSON.stringify(parts)).not.toContain("Sistema de pedidos");
+  });
+
+  it("reads the saved reply back with its tool parts, checked against the same schemas", async () => {
+    const deps = await testDeps();
+    await readStream(await chat(await say("Qual o status do meu chamado?"), deps));
+    await deps.settled();
+    const { messages: saved } = await loadConversation(deps.db, ana.id);
+    const types = saved.at(-1)?.parts.map((part) => part.type).filter((type) => type !== "step-start");
+    expect(types).toEqual(["tool-recordDecision", "tool-listMyTickets", "text", "tool-offerTicketChoice"]);
   });
 });
 
