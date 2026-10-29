@@ -18,7 +18,7 @@ O plano está em [plano.md](plano.md). Este arquivo junta o que foi pedido, a pr
 
 | Suíte | Antes | Depois |
 |---|---|---|
-| Unidade e integração (Vitest) | 213 | 307 |
+| Unidade e integração (Vitest) | 213 | 308 |
 | Navegador (Playwright) | 22 | 28 |
 
 Todas passam, e os tipos fecham nos quatro pacotes.
@@ -68,6 +68,7 @@ As instruções e as ferramentas somam 3,5 mil tokens em cache, lidos a 10% do p
 
 - A medição com o modelo real mudou o desenho: o Haiku às vezes chamava a oferta sem escrever a pergunta. A pergunta passou a ser um campo obrigatório das duas ofertas, e a tela a desenha.
 - A revisão independente achou dois problemas, corrigidos com teste: uma oferta que falhava deixava a resposta vazia, e o modelo simulado mandava "INC-20298 · Acesso à pasta Financeiro…" para o canal do financeiro.
+- Testando na tela, a resposta a "Falar com um analista" saiu duplicada: o Haiku escrevia a resposta e anotava o caso na memória no mesmo passo, e chamado de novo repetia o texto. Um passo com texto e só a memória anotada agora encerra a resposta.
 - O chamado do SharePoint virou INC-20298, o número que o design mostra no chat e no console. O seed e a arquitetura diziam INC-20288.
 - "Falar com um analista" e "Adicionar informação" respondem com franqueza que o chat ainda não faz isso e indicam o ramal 4000. As features 5 e 4 trocam essa resposta pela ação.
 - A lista usa o título completo do chamado (Anexo B). O design mostra um título encurtado.
