@@ -12,8 +12,10 @@ Tela do design: "Chat — Consulta e transferência (desktop)", no nexo.pen. Des
    - `chat.ts`: entrada e saída de quatro ferramentas novas e o id de chamado (`INC-` ou `REQ-` com 5 dígitos, maiúsculo):
      - `listMyTickets`: os chamados do funcionário, abertos ou todos, com id, título, status, abertura e se está vencido;
      - `getTicket`: o card do chamado (tipo, título, descrição, categoria, subcategoria, prioridade, status, quem assumiu, abertura, última atualização, prazo, vencido, dias sem atualização, o prazo da prioridade em palavras, a última atualização da TI e o momento da consulta);
-     - `offerTicketChoice`: a lista selecionável, com os chamados que o agent escolheu mostrar;
-     - `offerReplies`: de 2 a 4 respostas rápidas, de até 40 caracteres.
+     - `offerTicketChoice`: a pergunta e a lista selecionável, com os chamados que o agent escolheu mostrar;
+     - `offerReplies`: a pergunta e de 2 a 4 respostas rápidas, de até 40 caracteres.
+
+     A pergunta das duas ofertas é obrigatória e vai na própria ferramenta. Medindo com o Haiku, o modelo às vezes chamava a oferta sem escrever o texto antes, e a lista aparecia sem pergunta.
 2. Ticket-service:
    - `GET /employees/:id/tickets?status=open` devolve os chamados do funcionário, do mais recente para o mais antigo. `status=open` deixa de fora os resolvidos; sem `status`, vêm todos. Funcionário que não existe dá 404;
    - `GET /tickets/:id?employeeId=` devolve o detalhe. Um chamado que não existe e um chamado de outra pessoa dão o mesmo 404, para ninguém descobrir pelo erro que o número existe. Sem `employeeId`, 400;
@@ -23,7 +25,7 @@ Tela do design: "Chat — Consulta e transferência (desktop)", no nexo.pen. Des
    - o id do funcionário chega às ferramentas pelo `requestContext` do Mastra, validado por schema e montado pela rota com o id da sessão. O modelo nunca escolhe de quem são os chamados;
    - `listMyTickets` e `getTicket` calculam o vencido com o RN-02 do `shared` e o relógio injetado, e mandam ao modelo números já prontos (dias sem atualização, prazo em palavras), para ele não fazer conta de data;
    - `offerTicketChoice` busca de novo os chamados do funcionário e mostra só os que são dele, na ordem do serviço. Um id de outra pessoa é descartado em silêncio;
-   - `offerReplies` só mostra as opções;
+   - `offerReplies` só mostra a pergunta e as opções;
    - as duas ferramentas de oferta terminam a resposta (`stopWhen`): o funcionário responde clicando, e o modelo não é chamado de novo à toa;
    - instruções: consulta sem número lista os chamados; com um só aberto, consulta direto; com vários, pergunta qual com a lista; com o número, consulta direto. Chamado vencido ganha a oferta de chamar um analista com "Falar com um analista", "Adicionar informação" e "Não, obrigado". Enquanto a transferência (feature 5) e o complemento (feature 4) não existem, o agent diz com franqueza que ainda não faz isso pelo chat e indica o ramal 4000;
    - o modelo simulado ganha as mesmas regras, para o Playwright e para rodar sem chave.
@@ -31,8 +33,10 @@ Tela do design: "Chat — Consulta e transferência (desktop)", no nexo.pen. Des
 5. Tela de Atendimento, conferida lado a lado com o design:
    - a linha de ações ganha "consultou seus chamados", "consultou o INC-20311" e "calculou o prazo";
    - a resposta desenha as partes na ordem em que chegaram: texto em bolha, card do chamado quando `getTicket` responde. A lista selecionável vem depois do texto, e as respostas rápidas ficam dentro da última bolha;
-   - lista selecionável: número, título, status com a cor do design e a data de abertura. O clique manda "INC-20311 · título" como mensagem do funcionário;
-   - card do chamado: "Chamado · INC-20311", status, título, descrição, e Categoria, Prioridade, Aberto em e Última atualização, com "há N dias · prazo vencido" em âmbar quando vencido e "· no prazo" quando não;
+   - lista selecionável: a pergunta numa bolha e, abaixo, número, título, status com a cor do design e a data de abertura. O clique manda "INC-20311 · título" como mensagem do funcionário. Linhas e opções são botões, e as setas não enviam nada;
+   - respostas rápidas: sem texto próprio na resposta, a pergunta é o texto da bolha (como na consulta); com texto, ela aparece em negrito entre o texto e as opções (como na abertura de chamado);
+   - card do chamado: "Chamado · INC-20311", status, título, descrição, e Categoria, Prioridade, Aberto em e Última atualização, com "há N dias · prazo vencido" em âmbar quando vencido, "· no prazo" quando não e só "há N dias" quando resolvido. Em atendimento mostra "Assumido por" com o primeiro nome;
+   - abaixo de 560 px de coluna, o card vai para duas colunas e o título da lista desce inteiro para a segunda linha;
    - o escolhido fica marcado (a lista e a opção) e sai da mensagem seguinte do funcionário, então é o mesmo ao vivo e depois de recarregar. Só a última resposta aceita clique, e só quando o agent não está respondendo;
    - estados: consultando, chamado não encontrado, serviço de chamados fora do ar e sem chamados abertos.
 6. Dados de exemplo: o chamado do SharePoint passa a ser o INC-20298, o número que o design usa no chat e no console. A descrição do INC-20311 fica igual à do design, sem a data fixa.

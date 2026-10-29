@@ -31,8 +31,9 @@ async function shot(target, name) {
 
 await composer().fill("Qual o status do meu chamado?");
 await composer().press("Enter");
-await page.getByText("consultando seus chamados").waitFor();
-await shot(page, "ticket-looking-up");
+// The lookup is quick on a production build: the shot is taken only if the moment is caught.
+const caught = await page.getByText("consultando seus chamados").waitFor({ timeout: 3000 }).then(() => true, () => false);
+if (caught) await page.screenshot({ path: `${outDir}/ticket-looking-up.png` });
 await lastReply().getByRole("list", { name: "Seus chamados" }).waitFor();
 await idle();
 await composer().blur();
