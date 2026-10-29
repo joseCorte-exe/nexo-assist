@@ -69,13 +69,14 @@ type Intent =
   | { kind: "help_center" };
 
 function intentOf(question: string): Intent {
-  const area = AREAS.find(({ words }) => words.test(question));
-  if (area) return { kind: "out_of_scope", area: area.area, name: area.name };
-  if (GREETING.test(question)) return { kind: "greeting" };
+  // A click in an offer and a ticket number come first: a title chosen from the list can carry words of another area.
   const answer = OFFER_ANSWERS[question.trim().toLowerCase()];
   if (answer) return { kind: "offer_answer", answer };
   const [ticketId] = findTicketIds(question);
   if (ticketId) return { kind: "ticket", ticketId };
+  const area = AREAS.find(({ words }) => words.test(question));
+  if (area) return { kind: "out_of_scope", area: area.area, name: area.name };
+  if (GREETING.test(question)) return { kind: "greeting" };
   if (TICKET_WORDS.test(question)) return { kind: "my_tickets" };
   return { kind: "help_center" };
 }

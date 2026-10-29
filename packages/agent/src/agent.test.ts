@@ -196,6 +196,31 @@ describe("streamReply", () => {
     expect(model.calls).toHaveLength(2);
   });
 
+  it("goes on when the offer could not be shown, so the agent explains instead of answering nothing", async () => {
+    // None of these numbers is the employee's: the list has nothing to show.
+    const { agent, model } = setup([
+      { toolCalls: [{ toolName: "recordDecision", input: decision }] },
+      {
+        toolCalls: [
+          { toolName: "offerTicketChoice", input: { question: "Sobre qual deles?", ticketIds: ["INC-99998", "INC-99999"] } },
+        ],
+      },
+      { text: "Não consegui mostrar seus chamados agora." },
+    ]);
+    expect((await replyOf(agent, turn)).text).toBe("Não consegui mostrar seus chamados agora.");
+    expect(model.calls).toHaveLength(3);
+  });
+
+  it("goes on when the model wrote an offer the schema refuses", async () => {
+    const { agent, model } = setup([
+      { toolCalls: [{ toolName: "recordDecision", input: decision }] },
+      { toolCalls: [{ toolName: "offerReplies", input: { question: "Quer ajuda?", options: ["Sim"] } }] },
+      { text: "Quer que eu chame um analista?" },
+    ]);
+    expect((await replyOf(agent, turn)).text).toBe("Quer que eu chame um analista?");
+    expect(model.calls).toHaveLength(3);
+  });
+
   it("ends the reply with the failure of the model", async () => {
     const { agent } = setup([new Error("overloaded")]);
     await expect(replyOf(agent, turn)).rejects.toThrow();

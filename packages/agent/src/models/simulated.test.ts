@@ -157,6 +157,12 @@ describe("simulatedModel", () => {
     });
   });
 
+  it("reads a ticket chosen from the list by its number, even when its title has words of another area", async () => {
+    // "Financeiro" is in the title, not a question about the finance team.
+    const result = await reply("INC-20298 · Acesso à pasta Financeiro no SharePoint");
+    expect(result.decision.toolsUsed).toEqual(["recordDecision", "getTicket"]);
+  });
+
   it("tells a ticket on time with what IT wrote last", async () => {
     const result = await reply("Como está o inc-20298?");
     expect(result.decision.toolsUsed).toEqual(["recordDecision", "getTicket"]);
