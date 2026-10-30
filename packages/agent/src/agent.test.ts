@@ -287,6 +287,20 @@ describe("streamReply", () => {
     expect(promptText(model.calls[2]!)).toContain('"priority":"high"');
   });
 
+  it("takes the offers away once the draft is shown: the card has its own buttons", async () => {
+    const { agent, model } = setup([
+      { toolCalls: [{ toolName: "recordDecision", input: decision }] },
+      { toolCalls: [{ toolName: "draftTicket", input: vpnDraft }] },
+      { text: aboveTheCard },
+    ]);
+    await replyOf(agent, turn);
+    const toolsOf = (call: number) => (model.calls[call]!.tools ?? []).map((tool) => tool.name);
+    expect(toolsOf(1)).toContain("offerReplies");
+    expect(toolsOf(2)).not.toContain("offerReplies");
+    expect(toolsOf(2)).not.toContain("offerTicketChoice");
+    expect(toolsOf(2)).toContain("draftTicket");
+  });
+
   it("ends the reply when the line above the card came with the draft", async () => {
     const { agent, model } = setup([
       { toolCalls: [{ toolName: "recordDecision", input: decision }] },

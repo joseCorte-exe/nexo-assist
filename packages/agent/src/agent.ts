@@ -3,6 +3,7 @@ import { RequestContext } from "@mastra/core/request-context";
 import type { MastraModelConfig } from "@mastra/core/llm";
 import { LibSQLStore } from "@mastra/libsql";
 import { Memory } from "@mastra/memory";
+import { nexoToolSchemas } from "@nexo/shared";
 import { instructions, workingMemoryTemplate } from "./instructions";
 import { createTools, type DraftStore, OFFER_TOOLS, type TicketDesk } from "./tools";
 
@@ -102,6 +103,9 @@ type Step = { text: string; toolResults: ReadonlyArray<ToolResult> };
 /** The Mastra tool the model calls to keep the summary of the case (the working memory). */
 const WORKING_MEMORY_TOOL = "updateWorkingMemory";
 
+/** Every tool but the offers, for the steps after a draft was shown. */
+const AFTER_DRAFT_TOOLS = [...Object.keys(nexoToolSchemas).filter((tool) => !OFFER_TOOLS.has(tool)), WORKING_MEMORY_TOOL];
+
 /** A tool that ran and answered ok. The model gets the output wrapped as { type: "json", value }. */
 function answeredOk({ output }: ToolResult) {
   const wrapped = output as { type?: string; value?: { ok?: unknown } } | undefined;
@@ -138,9 +142,13 @@ export function streamReply(agent: NexoAgent, { conversationId, employeeId, text
     // An offer that was shown hands the turn to the employee, who answers with a click: calling the model again would
     // only cost. One that could not be shown (refused input, no ticket of hers, service down) lets the model explain.
     stopWhen: ({ steps }: { steps: ReadonlyArray<Step> }) => replyDone(steps.at(-1)),
-    // recordDecision is mandatory in the first step; afterwards the model chooses.
-    prepareStep: ({ stepNumber }) =>
-      stepNumber === 0 ? { toolChoice: { type: "tool", toolName: "recordDecision" } } : undefined,
+    // recordDecision is mandatory in the first step; afterwards the model chooses. Once a draft is shown, the offers go:
+    // its card has Confirmar, Editar and Cancelar, and quick replies under it would only send those words as a message.
+    prepareStep: ({ stepNumber, steps }) => {
+      if (stepNumber === 0) return { toolChoice: { type: "tool", toolName: "recordDecision" } };
+      const drafted = steps.some((step) => step.toolResults.some((result) => result.toolName === "draftTicket" && answeredOk(result)));
+      return drafted ? { activeTools: AFTER_DRAFT_TOOLS } : undefined;
+    },
     modelSettings: { maxOutputTokens: MAX_OUTPUT_TOKENS, timeout: { totalMs: TOTAL_TIMEOUT_MS } },
   });
 }
