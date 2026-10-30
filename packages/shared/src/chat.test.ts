@@ -157,4 +157,10 @@ describe("listMyTicketsOutput", () => {
     expect(listMyTicketsOutput.safeParse({ ok: true, tickets: [] }).success).toBe(true);
     expect(listMyTicketsOutput.safeParse({ ok: true, tickets: [], recentlyResolved: [] }).success).toBe(true);
   });
+
+  it("keeps the tickets resolved in the last days, which the model needs to reopen instead of duplicating", () => {
+    const resolved = { id: "INC-20150", title: "Senha do SAP bloqueada", status: "resolved", createdAt: "2026-10-20T13:00:00.000Z", overdue: false };
+    const reply = listMyTicketsOutput.parse({ ok: true, tickets: [], recentlyResolved: [resolved] });
+    expect(reply).toEqual({ ok: true, tickets: [], recentlyResolved: [resolved] });
+  });
 });

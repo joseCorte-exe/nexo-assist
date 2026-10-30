@@ -11,17 +11,35 @@ O plano está em [plano.md](plano.md). Este arquivo junta o que foi pedido, a pr
 | Lógica do back | Nada é criado sem o clique em Confirmar, e a confirmação não passa pelo modelo. Tipo e prioridade (RN-01), prazo (RN-02), duplicidade e a janela de 7 dias ficam no código. As três escritas são idempotentes, com a chave amarrada à rota, ao chamado e ao funcionário. O rascunho de outra pessoa responde o mesmo 404 de um que não existe. |
 | Desempenho | A conversa e os rascunhos saem numa ida ao banco; um rascunho novo substitui o anterior e ganha número num batch só; um teste fixa quantas idas ao banco cada ação faz (salvar uma, editar e cancelar duas, confirmar três). As rotas novas usam o índice de `(opened_by, created_at)`, com teste do plano da consulta. A lista de chamados traz abertos e reabríveis numa chamada. Medições abaixo. |
 | Padrão do contrato | Os schemas Zod de `packages/shared` servem ao serviço, ao agent, às rotas e à tela. Uma entrada que o Mastra recusa é gravada como erro da ferramenta, e a resposta continua válida ao recarregar. |
-| Testes primeiro | Regras, rotas, ferramenta, banco e cada correção da revisão começaram por um teste que falhou pelo motivo certo. A exceção foram algumas correções do modelo simulado e ajustes do card, feitos antes do teste no meio da medição; todos têm teste agora. |
+| Testes primeiro | Regras, rotas, ferramenta, banco e cada correção da revisão começaram por um teste que falhou pelo motivo certo. Algumas correções do simulado e do card vieram antes do teste, no meio da medição. Para essas, cada correção foi tirada do código e o teste dela falhou pelo motivo certo (tabela abaixo); quatro ajustes do card não tinham teste e ganharam um. |
 | Ponta a ponta | Playwright com build de produção e o modelo simulado, conferindo no ticket-service o que foi gravado, e o Haiku 5.5 de verdade em rodadas medidas. |
 
 ## Testes
 
 | Suíte | Antes | Depois |
 |---|---|---|
-| Unidade e integração (Vitest) | 310 | 459 |
-| Navegador (Playwright) | 28 | 40 |
+| Unidade e integração (Vitest) | 310 | 460 |
+| Navegador (Playwright) | 28 | 42 |
 
-Todas passam, e os tipos fecham nos quatro pacotes. Por pacote: shared 132, ticket-service 72, agent 82, web 173.
+Todas passam, e os tipos fecham nos quatro pacotes. Por pacote: shared 133, ticket-service 72, agent 82, web 173.
+
+### Cada teste pega a sua correção
+
+Para as correções feitas antes do teste, a correção foi tirada do código e o teste rodou sem ela. Todos falharam pelo motivo que a correção resolve, e passaram com ela de volta.
+
+| Correção | Sem ela, o teste diz |
+|---|---|
+| O simulado não oferece abrir chamado quando os serviços não responderam | 2 testes do simulado falham: oferece o chamado; e trata como afetados uma mensagem que é outro assunto |
+| O simulado explica a prioridade pelo que foi respondido | "something stopped for the team is critical" falha |
+| A resposta perde as respostas rápidas depois do rascunho | "takes the offers away once the draft is shown" falha |
+| A lista e os candidatos trazem os resolvidos há até 7 dias | 1 teste do ticket-service e 4 do agent falham |
+| O contrato da lista guarda os resolvidos (teste novo) | o Zod descartava o campo em silêncio: `recentlyResolved` some da resposta |
+| A barra do card tem 52 px, com a linha centrada na borda (teste novo) | a barra mede 53 px |
+| O estado do card ocupa pixels inteiros (teste novo) | "Aguardando confirmação" mede 161,125 px |
+| O erro da confirmação fica acima da barra (teste novo) | o erro termina em 799 px, abaixo do botão, que começa em 710 px |
+| A bolha quebra palavra por palavra, como o Pencil (teste novo) | as linhas começam em "da" e "reiniciei" em vez de "empresa" e "tudo." |
+
+O chip ⌘↵ já tinha o seu teste, que falhava antes de a correção existir.
 
 ## Fidelidade ao design
 

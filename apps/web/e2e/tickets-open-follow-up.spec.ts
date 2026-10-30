@@ -67,6 +67,30 @@ test("her answer gives the draft, with the priority of the rule, and nothing is 
   expect(tickets.map((ticket: { id: string }) => ticket.id)).not.toContain("INC-20320");
 });
 
+test("the card is laid out as nexo.pen lays it out: a 52 px bar under a rule centred on its edge, the state on whole pixels", async ({ page }) => {
+  await signInAsAna(page);
+  const draft = lastDraft(page);
+  const layout = await draft.getByRole("button", { name: "Confirmar" }).evaluate((button) => {
+    const card = button.closest("section")!;
+    let bar = button as HTMLElement;
+    while (bar.parentElement !== card) bar = bar.parentElement!;
+    const rule = getComputedStyle(bar, "::before");
+    const state = [...card.querySelectorAll("span")].find((span) => span.children.length === 0 && span.textContent === "Aguardando confirmação")!.parentElement!;
+    return {
+      bar: bar.getBoundingClientRect().height,
+      ruleTop: rule.top,
+      ruleHeight: rule.height,
+      stateWidth: state.getBoundingClientRect().width,
+    };
+  });
+  expect(layout.bar).toBe(52);
+  // nexo.pen centres a stroke on the edge, half a pixel on each side.
+  expect(layout.ruleTop).toBe("-0.5px");
+  expect(layout.ruleHeight).toBe("1px");
+  // Aligned against the right edge, a fractional width would put the state a fraction of a pixel off.
+  expect(Number.isInteger(layout.stateWidth)).toBe(true);
+});
+
 test("she edits the title and the category in the card, never the priority", async ({ page }) => {
   await signInAsAna(page);
   const draft = lastDraft(page);
@@ -191,6 +215,10 @@ test("when the ticket service falls at the confirmation, the draft waits and the
   expect(outage.ok()).toBe(true);
   await draft.getByRole("button", { name: "Confirmar" }).click();
   await expect(draft.getByRole("alert")).toContainText("O serviço de chamados não respondeu. Tente de novo; o chamado não será duplicado.");
+  // Above the bar, next to the button it is about: under it, the composer would cover it.
+  const alert = await draft.getByRole("alert").boundingBox();
+  const retry = await draft.getByRole("button", { name: "Tentar de novo" }).boundingBox();
+  expect(alert!.y + alert!.height).toBeLessThanOrEqual(retry!.y);
   // The service may have written before falling: nothing but confirming again, which cannot duplicate.
   await expect(draft).toContainText("Confirmação pendente");
   await expect(draft.getByRole("button")).toHaveCount(1);
@@ -226,6 +254,45 @@ test.describe("on a Mac", () => {
     const button = await confirm.boundingBox();
     expect(Math.abs(button!.width - 126)).toBeLessThan(1);
   });
+});
+
+test("a bubble breaks its lines word by word, as nexo.pen does, never moving a word down for a longer last line", async ({ page }) => {
+  // Carla, so that Ana's conversation stays as the tests above left it.
+  await page.goto("/login");
+  await page.getByLabel("E-mail corporativo").fill("carla.mendes@nexo.com.br");
+  await page.getByLabel("Senha", { exact: true }).fill("qualquer-senha");
+  await page.getByRole("button", { name: "Entrar" }).click();
+  await page.waitForURL("/");
+  // Left to the browser's balanced wrapping, "tudo." would not end alone on the last line.
+  await ask(page, "O notebook novo que recebi semana passada não conecta na VPN da empresa quando estou em casa, só funciona no escritório. Já reiniciei tudo.");
+  const bubble = page.getByRole("article", { name: "Você" }).last().locator("div").first();
+  const lines = await bubble.evaluate((element) => {
+    const text = element.firstChild as Text;
+    // The word each line starts with.
+    const starts = () => {
+      const words: string[] = [];
+      let top = Number.NaN;
+      let at = 0;
+      for (const word of text.data.split(" ")) {
+        const range = document.createRange();
+        range.setStart(text, at);
+        range.setEnd(text, at + word.length);
+        const wordTop = Math.round(range.getBoundingClientRect().top);
+        if (wordTop !== top) words.push(word);
+        top = wordTop;
+        at += word.length + 1;
+      }
+      return words;
+    };
+    const drawn = starts();
+    const before = element.style.textWrap;
+    element.style.textWrap = "wrap";
+    const greedy = starts();
+    element.style.textWrap = before;
+    return { drawn, greedy };
+  });
+  expect(lines.drawn.length).toBeGreaterThan(1);
+  expect(lines.drawn).toEqual(lines.greedy);
 });
 
 test.describe("on a phone", () => {
