@@ -86,6 +86,7 @@ export function DraftCard({ draft, busy, shortcut, onChange, onDone }: Props) {
     const tries = failures + 1;
     setFailures(tries);
     const unavailable = result.code === "service_unavailable" || result.code === "network";
+    requestAnimationFrame(() => card.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
     setProblem({
       message: unavailable
         ? `O serviço de chamados não respondeu. Tente de novo; o chamado não será duplicado.${tries > 1 ? " Se continuar, ligue no ramal 4000." : ""}`
@@ -153,6 +154,13 @@ export function DraftCard({ draft, busy, shortcut, onChange, onDone }: Props) {
             <p className="text-13.5 leading-5 text-pretty whitespace-pre-line text-ink-2">{draft.description}</p>
           </div>
           <Fields draft={draft} overdue={overdue} />
+          {/* Above the bar, next to the button it is about, and never under the composer. */}
+          {problem ? (
+            <p role="alert" className="fade-enter flex items-start gap-2 border-t border-rule bg-desk px-[18px] py-3 text-13.5 leading-5 text-ink-2">
+              <CircleAlert aria-hidden className="mt-[3px] size-3.5 shrink-0 text-danger-text" />
+              {problem.message}
+            </p>
+          ) : null}
           <div className={bar}>
             {open ? (
               <div key="actions" className="fade-enter flex h-full items-center gap-1.5 py-2 pr-3.5 pl-2">
@@ -203,12 +211,6 @@ export function DraftCard({ draft, busy, shortcut, onChange, onDone }: Props) {
               <StatusLine key={draft.status} draft={draft} />
             )}
           </div>
-          {problem ? (
-            <p role="alert" className="fade-enter flex items-start gap-2 border-t border-rule bg-desk px-[18px] py-3 text-13.5 leading-5 text-ink-2">
-              <CircleAlert aria-hidden className="mt-[3px] size-3.5 shrink-0 text-danger-text" />
-              {problem.message}
-            </p>
-          ) : null}
         </>
       )}
       <p role="status" className="sr-only">
