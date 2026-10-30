@@ -9,19 +9,19 @@ O plano está em [plano.md](plano.md). Este arquivo junta o que foi pedido, a pr
 | Front e back | Ticket-service com `GET /employees/:id/tickets/candidates`, `PATCH /tickets/:id` e `POST /tickets/:id/reopen`; contratos do rascunho em `packages/shared`; a ferramenta `draftTicket` no agent; as rotas `PATCH /api/drafts/:id`, `POST /api/drafts/:id/confirm` e `POST /api/drafts/:id/cancel` no web; o card do rascunho em todos os estados. |
 | Fiel ao design | Medições abaixo, com a conversa do design gravada com os mesmos dados. Imagens em [provas/](provas/). |
 | Lógica do back | Nada é criado sem o clique em Confirmar, e a confirmação não passa pelo modelo. Tipo e prioridade (RN-01), prazo (RN-02), duplicidade e a janela de 7 dias ficam no código. As três escritas são idempotentes, com a chave amarrada à rota, ao chamado e ao funcionário. O rascunho de outra pessoa responde o mesmo 404 de um que não existe. |
-| Desempenho | A conversa e os rascunhos saem numa ida ao banco; um rascunho novo substitui o anterior e ganha número num batch só; as rotas novas usam o índice de `(opened_by, created_at)`, com teste do plano da consulta. A lista de chamados traz abertos e reabríveis numa chamada. |
+| Desempenho | A conversa e os rascunhos saem numa ida ao banco; um rascunho novo substitui o anterior e ganha número num batch só; um teste fixa quantas idas ao banco cada ação faz (salvar uma, editar e cancelar duas, confirmar três). As rotas novas usam o índice de `(opened_by, created_at)`, com teste do plano da consulta. A lista de chamados traz abertos e reabríveis numa chamada. Medições abaixo. |
 | Padrão do contrato | Os schemas Zod de `packages/shared` servem ao serviço, ao agent, às rotas e à tela. Uma entrada que o Mastra recusa é gravada como erro da ferramenta, e a resposta continua válida ao recarregar. |
-| Testes primeiro | Cada camada começou por um teste que falhou pelo motivo certo, inclusive cada correção da revisão. |
+| Testes primeiro | Regras, rotas, ferramenta, banco e cada correção da revisão começaram por um teste que falhou pelo motivo certo. A exceção foram algumas correções do modelo simulado e ajustes do card, feitos antes do teste no meio da medição; todos têm teste agora. |
 | Ponta a ponta | Playwright com build de produção e o modelo simulado, conferindo no ticket-service o que foi gravado, e o Haiku 5.5 de verdade em rodadas medidas. |
 
 ## Testes
 
 | Suíte | Antes | Depois |
 |---|---|---|
-| Unidade e integração (Vitest) | 310 | 451 |
-| Navegador (Playwright) | 28 | 39 |
+| Unidade e integração (Vitest) | 310 | 459 |
+| Navegador (Playwright) | 28 | 40 |
 
-Todas passam, e os tipos fecham nos quatro pacotes. Por pacote: shared 130, ticket-service 71, agent 82, web 168.
+Todas passam, e os tipos fecham nos quatro pacotes. Por pacote: shared 132, ticket-service 72, agent 82, web 173.
 
 ## Fidelidade ao design
 
@@ -32,13 +32,14 @@ Referência: a tela "Chat — Novo chamado (desktop)" do nexo.pen, renderizada p
 | Linhas horizontais das caixas (bolhas, card, divisórias), pelo centro de cada linha | 19 de 19 a até 0,55 px |
 | Posição de cada linha de texto, pelo centro da tinta | 17 de 17 a até 0,47 px (mediana 0,03 px) |
 | Bordas verticais das bolhas, das respostas rápidas e do card | 21 de 21 a até 0,5 px |
-| Pixels diferentes na área da feature 4 | 3,04% cru, 0,75% depois de um desfoque de 1 px |
+| Botões Confirmar (442 a 563 px) e Editar (575 a 634 px) | idênticos ao design, borda a borda |
+| Pixels diferentes na área da feature 4 | 0,56% depois de um desfoque de 1 px |
 
 Os 0,5 px que sobram vêm do design: o Pencil põe as caixas em meio pixel (as bolhas têm 1,5 × 14,5 px por linha), e o navegador as alinha ao pixel inteiro.
 
-A única diferença real é o chip "⌘↵" do Confirmar: o Pencil desenha esses dois símbolos com uma fonte Noto que ele carrega, e o Chrome usa a do sistema. O chip fica 5,5 px mais largo e Editar e Cancelar andam 4 px. Carregar a fonte Noto inteira por dois símbolos pesaria mais do que vale, e fora do Mac o chip mostra "Ctrl ↵" de qualquer jeito.
+O chip "⌘↵" do Confirmar ficava 5,5 px mais largo: o Pencil desenha os dois símbolos com a Noto, e o Chrome usava a fonte do sistema. Em vez de carregar a fonte inteira (431 KB) por dois símbolos, o app desenha os dois contornos da Noto em SVG, com o mesmo avanço. O chip ficou com 28 × 16 px, como no design, e um teste no navegador confere esse tamanho no Mac. Fora do Mac ele mostra "Ctrl ↵".
 
-Dois ajustes saíram dessa medição. A linha entre os campos e a barra do card ficava dentro da barra; o Pencil a centra na borda, e o app passou a fazer o mesmo, o que acertou 1 px de toda a conversa acima dela. As bolhas usavam a quebra de linha que evita palavra sozinha na última linha; o Pencil quebra palavra por palavra, e a bolha da Ana descia "VPN" para a segunda linha.
+Outros dois ajustes saíram dessa medição. A linha entre os campos e a barra do card ficava dentro da barra; o Pencil a centra na borda, e o app passou a fazer o mesmo, o que acertou 1 px de toda a conversa acima dela. As bolhas usavam a quebra de linha que evita palavra sozinha na última linha; o Pencil quebra palavra por palavra, e a bolha da Ana descia "VPN" para a segunda linha.
 
 ## Modelo real (Claude Haiku 5.5)
 
@@ -67,13 +68,44 @@ Abrir um chamado do começo ao fim custa cerca de US$ 0,003; complementar, US$ 0
 
 300 chamadas seguidas de cada, no local.
 
+Com carga, 20 chamadas simultâneas contra o banco em arquivo, sem nenhum erro:
+
+| Rota | Vazão | p95 |
+|---|---|---|
+| `GET .../tickets/candidates` | 2.933 req/s | 11,9 ms |
+| `PATCH /tickets/:id` (complemento) | 1.121 req/s | 30,9 ms |
+| `POST /tickets` (criar) | 978 req/s | 34,4 ms |
+
+## Rotas do rascunho no web
+
+Os handlers chamados direto, sem rede, com o banco em arquivo (p50 / p95):
+
+| Operação | p50 | p95 |
+|---|---|---|
+| Gravar um rascunho (substitui o anterior e numera) | 0,26 ms | 0,41 ms |
+| Carregar a conversa (30 mensagens, 320 rascunhos) | 4,03 ms | 4,57 ms |
+| Editar | 0,86 ms | 1,24 ms |
+| Cancelar | 0,86 ms | 1,32 ms |
+| Confirmar (sem contar o ticket-service) | 1,04 ms | 1,78 ms |
+
+## Peso no navegador
+
+O JavaScript que a tela de Atendimento baixa, medido na build de produção da main e na desta branch, logada como a Ana:
+
+| Build | Comprimido | Descomprimido |
+|---|---|---|
+| main | 72,0 KB | 847,4 KB |
+| feature 4 | 76,7 KB | 868,3 KB |
+
+O card, o editor e os dois símbolos do chip somam 4,7 KB comprimidos.
+
 ## Considerações
 
 - A medição com o modelo real mudou o desenho duas vezes. "A senha do SAP bloqueou de novo" virava um chamado novo, porque o Haiku só via os abertos; a lista de chamados passou a trazer à parte os resolvidos há até 7 dias, e a checagem de duplicidade passou a considerar esses também. Nas três rodadas seguintes, a reabertura saiu no primeiro turno. Numa rodada, o Haiku mostrou "Confirmar / Cancelar" como respostas rápidas abaixo do rascunho; agora a resposta perde as ofertas depois que um rascunho aparece.
-- A revisão independente achou casos em que o chamado existia e o card dizia o contrário: o serviço grava e cai antes de responder, e o funcionário cancela; ou um cancelamento chega enquanto a confirmação espera o serviço. O rascunho agora passa a "confirmando" antes de chamar o serviço e só aceita confirmar de novo, o que não duplica nada. A revisão também achou uma repetição de reabertura que virava recusa; a chave passou a ser conferida dentro da transação. As outras correções: a nota de sistema sai no mesmo batch do novo estado, mudar a categoria no card passa pela checagem de duplicidade, e os rascunhos de uma resposta que falhou são descartados. Cada uma tem teste.
+- A revisão independente achou casos em que o chamado existia e o card dizia o contrário: o serviço grava e cai antes de responder, e o funcionário cancela; ou um cancelamento chega enquanto a confirmação espera o serviço. O rascunho agora passa a "confirmando" antes de chamar o serviço e só aceita confirmar de novo, o que não duplica nada. A revisão também achou uma repetição de reabertura que virava recusa; a chave passou a ser conferida dentro da transação. As outras correções: a nota de sistema sai no mesmo batch do novo estado, mudar a categoria no card passa pela checagem de duplicidade, e os rascunhos de uma resposta que falhou são descartados. A reabertura também passou a gravar quando aconteceu (`reopened_at`), e o prazo de um chamado reaberto conta a partir dela. Os nove achados estão corrigidos no código, cada um com teste.
 - Na revisão de segurança automática, a chave de idempotência reusada por outro funcionário devolveria o chamado de quem a usou primeiro. O escopo da chave passou a nomear o funcionário.
 - Os estados que o design não desenha (editando, confirmando, criado, descartado, substituído, recusado) foram decididos com o design-engineer. Todos mantêm o card do design e trocam só o estado do topo e a barra de baixo.
-- O complemento entra como atualização do funcionário e não muda o prazo nem a "última atualização", que contam as respostas da TI. A reabertura recomeça o prazo, como uma nova abertura; ARQUITETURA.md registra que um recálculo futuro precisa partir dela.
+- O complemento entra como atualização do funcionário e não muda o prazo nem a "última atualização", que contam as respostas da TI. A reabertura recomeça o prazo, como uma nova abertura, a partir da coluna `reopened_at`.
 - Ficam de fora: transferir para um analista (feature 5, "Falar com um analista" continua com a resposta franca) e reclassificar a prioridade de um chamado complementado ou reaberto.
 
 ## Provas visuais
