@@ -1,6 +1,11 @@
 {
   "extends": "../../tsconfig.base.json",
+  // The Vercel builder reads this file without its "extends": without module here it falls back to its own defaults,
+  // strict off among them, and type-checks the shared package with them.
   "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM"],
     "types": ["node"]
   },
   "include": ["src"]
