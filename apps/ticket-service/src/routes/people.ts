@@ -1,4 +1,4 @@
-import { type Analyst, corporateEmail, type Employee, employeeTicketsStatus } from "@nexo/shared";
+import { type Analyst, candidatesQuery, corporateEmail, type Employee, employeeTicketsStatus } from "@nexo/shared";
 import { and, asc, desc, eq, ne } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -33,6 +33,23 @@ export function employeeRoutes(deps: Deps) {
         .where(parsed.data.status === "open" ? and(mine, ne(tickets.status, "resolved")) : mine)
         .orderBy(desc(tickets.createdAt), desc(tickets.id));
       // Only an empty answer needs to tell an employee without tickets from one that does not exist.
+      if (rows.length === 0 && !(await employeeExists(deps, employeeId))) {
+        return c.json(errorBody("employee_not_found", "Employee not found"), 404);
+      }
+      return c.json(rows.map(toTicket));
+    })
+    // The open tickets of the employee in a category: what a new ticket could duplicate. Resolved ones are left out,
+    // since those are reopened. Same index as the list, narrowed by category and status.
+    .get("/:id/tickets/candidates", async (c) => {
+      const parsed = candidatesQuery.safeParse(c.req.query());
+      if (!parsed.success) return c.json(errorBody("invalid_query", "category must be one of the ticket categories"), 400);
+      const employeeId = c.req.param("id");
+
+      const rows = await deps.db
+        .select()
+        .from(tickets)
+        .where(and(eq(tickets.openedBy, employeeId), eq(tickets.category, parsed.data.category), ne(tickets.status, "resolved")))
+        .orderBy(desc(tickets.createdAt), desc(tickets.id));
       if (rows.length === 0 && !(await employeeExists(deps, employeeId))) {
         return c.json(errorBody("employee_not_found", "Employee not found"), 404);
       }

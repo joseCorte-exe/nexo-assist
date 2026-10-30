@@ -61,9 +61,14 @@ export const kbArticles = sqliteTable("kb_articles", {
   keywords: text("keywords", { mode: "json" }).$type<string[]>().notNull(),
 });
 
-/** Saved in the same transaction as the ticket, so a retry returns what was already written. */
+/** Saved in the same transaction as the write, so a retry returns what was already written. */
 export const idempotencyKeys = sqliteTable("idempotency_keys", {
   key: text("key").primaryKey(),
+  /**
+   * The request the key was used for ("PATCH /tickets/INC-20311"): reused for another one, it is refused. The default
+   * only covers the keys saved before the column, which were all ticket creations.
+   */
+  scope: text("scope").notNull().default("POST /tickets"),
   response: text("response", { mode: "json" }).notNull(),
   createdAt: timestamp("created_at").notNull(),
 });
