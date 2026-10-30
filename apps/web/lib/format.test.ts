@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   firstName,
+  formatDueTime,
   formatConfidence,
   formatDay,
   formatDayTime,
@@ -115,5 +116,20 @@ describe("formatTimeAgo", () => {
     expect(formatTimeAgo(ago(HOUR), checkedAt)).toBe("há 1 hora");
     expect(formatTimeAgo(ago(20 * 60 * 1000), checkedAt)).toBe("agora há pouco");
     expect(formatTimeAgo(checkedAt, checkedAt)).toBe("agora há pouco");
+  });
+});
+
+describe("formatDueTime", () => {
+  // Monday 26, 10:00 in São Paulo.
+  const drafted = "2026-10-26T13:00:00.000Z";
+
+  it("says only the time when the answer is due the same day, as the draft card does", () => {
+    expect(formatDueTime("2026-10-26T16:43:00.000Z", drafted)).toBe("13:43");
+  });
+
+  it("says the day too when it is due on another day in São Paulo", () => {
+    expect(formatDueTime("2026-10-29T13:00:00.000Z", drafted)).toBe("29 out, 10:00");
+    // 02:30Z on Tuesday is still Monday 23:30 in São Paulo.
+    expect(formatDueTime("2026-10-27T02:30:00.000Z", drafted)).toBe("23:30");
   });
 });

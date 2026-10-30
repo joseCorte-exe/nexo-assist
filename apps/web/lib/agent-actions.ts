@@ -65,7 +65,43 @@ export function stepsOf(part: Part): Step[] {
         { key: `${part.toolCallId}-deadline`, label: "calculou o prazo", state: "done" },
       ];
     }
+    case "tool-draftTicket":
+      return draftSteps(part);
     default:
       return [];
   }
+}
+
+type DraftPart = Extract<Part, { type: "tool-draftTicket" }>;
+
+/** An input Mastra refused: the model fixes it on its own, so it is not an action to show. */
+const refusedInput = (output: unknown) => (output as { error?: unknown } | undefined)?.error === true;
+
+/**
+ * The draft as the design names it: a new ticket is classified, its deadline looked up and the draft made. A
+ * possible duplicate is something the agent found, not a failure.
+ */
+function draftSteps(part: DraftPart): Step[] {
+  const key = part.toolCallId;
+  if (part.state === "output-error" || (part.state === "output-available" && refusedInput(part.output))) return [];
+  if (part.state !== "output-available") return [{ key, label: "montando o rascunho", state: "running" }];
+  const { output } = part;
+  if (!output.ok) {
+    return output.reason === "possible_duplicate"
+      ? [{ key, label: "encontrou um chamado parecido", state: "done" }]
+      : [{ key, label: "não montou o rascunho", state: "failed" }];
+  }
+  const { operation, ticketId } = output.draft;
+  if (operation === "update") return [{ key, label: `montou o complemento do ${ticketId}`, state: "done" }];
+  if (operation === "reopen") {
+    return [
+      { key: `${key}-window`, label: "conferiu o prazo de 7 dias", state: "done" },
+      { key, label: `montou a reabertura do ${ticketId}`, state: "done" },
+    ];
+  }
+  return [
+    { key: `${key}-priority`, label: "classificou a prioridade", state: "done" },
+    { key: `${key}-sla`, label: "consultou o SLA", state: "done" },
+    { key, label: "montou o rascunho", state: "done" },
+  ];
 }

@@ -1,6 +1,6 @@
-import type { NexoUIMessage, TicketCard, TicketSummary } from "@nexo/shared";
+import type { DraftView, NexoUIMessage, TicketCard, TicketSummary } from "@nexo/shared";
 import { describe, expect, it } from "vitest";
-import { type AgentTurn, liveTurns, messageCount, ticketChoiceText, type Turn } from "./chat-turns";
+import { type AgentTurn, currentDraft, lastDraftId, liveTurns, messageCount, ticketChoiceText, type Turn } from "./chat-turns";
 
 const decision = {
   understanding: "Quer saber o horário do service desk",
@@ -307,6 +307,93 @@ describe("liveTurns, looking up tickets", () => {
   });
 });
 
+const draft: DraftView = {
+  id: "draft-1",
+  number: 381,
+  operation: "create",
+  status: "pending",
+  ticketId: null,
+  type: "INC",
+  title: "VPN não conecta no notebook — erro 809",
+  description: "Desde ontem o notebook não conecta na VPN.",
+  category: "network_vpn",
+  subcategory: "VPN",
+  priority: "high",
+  affected: "only_me",
+  rejectedReason: null,
+  deadline: "4 horas úteis",
+  dueAt: "2026-10-26T16:43:00.000Z",
+  createdAt: "2026-10-26T12:43:00.000Z",
+};
+const vpnDraftInput = { operation: "create", title: draft.title, description: draft.description };
+const aboveTheCard = "Coloquei prioridade alta por causa da reunião. Confira antes de eu criar:";
+
+describe("liveTurns, opening a ticket (feature 4)", () => {
+  const steps = (output?: unknown, input: unknown = vpnDraftInput, state?: string) =>
+    (
+      liveTurns(
+        [user("u1", "Só eu"), agent([{ ...tool("draftTicket", "c2", input, output), ...(state ? { state } : {}) } as Part])],
+        "streaming",
+      ).at(-1) as { steps: unknown }
+    ).steps;
+
+  it("says what the code did for a new ticket, as the design writes it", () => {
+    expect(steps()).toEqual([{ key: "c2", label: "montando o rascunho", state: "running" }]);
+    expect(steps({ ok: true, draft, dueText: "hoje, até 13:43" })).toEqual([
+      { key: "c2-priority", label: "classificou a prioridade", state: "done" },
+      { key: "c2-sla", label: "consultou o SLA", state: "done" },
+      { key: "c2", label: "montou o rascunho", state: "done" },
+    ]);
+  });
+
+  it("says what it did for a follow-up and for a reopening", () => {
+    const followUp = { ...draft, operation: "update", ticketId: "INC-20311" };
+    expect(steps({ ok: true, draft: followUp, dueText: "prazo vencido" }, { operation: "update", ticketId: "INC-20311" })).toEqual([
+      { key: "c2", label: "montou o complemento do INC-20311", state: "done" },
+    ]);
+    const reopening = { ...draft, operation: "reopen", ticketId: "INC-20150" };
+    expect(steps({ ok: true, draft: reopening, dueText: "até 29 out, 10:00" }, { operation: "reopen", ticketId: "INC-20150" })).toEqual([
+      { key: "c2-window", label: "conferiu o prazo de 7 dias", state: "done" },
+      { key: "c2", label: "montou a reabertura do INC-20150", state: "done" },
+    ]);
+  });
+
+  it("names the open ticket it found as possibly the same problem, which is not a failure", () => {
+    expect(steps({ ok: false, reason: "possible_duplicate", message: "?", candidates: [notebook] })).toEqual([
+      { key: "c2", label: "encontrou um chamado parecido", state: "done" },
+    ]);
+  });
+
+  it("marks a draft the service did not allow, and shows nothing for an input the model fixes on its own", () => {
+    expect(steps({ ok: false, reason: "unavailable", message: "?" })).toEqual([
+      { key: "c2", label: "não montou o rascunho", state: "failed" },
+    ]);
+    expect(steps({ error: true, message: "Para criar, falta title." })).toEqual([]);
+    expect(steps(undefined, vpnDraftInput, "output-error")).toEqual([]);
+  });
+
+  it("draws the card at the end of the reply, under the text that introduces it", () => {
+    const reply = agent([recordDecision("output-available"), tool("draftTicket", "c2", vpnDraftInput, { ok: true, draft, dueText: "hoje" }), text(aboveTheCard)]);
+    expect(blocksOf(liveTurns([user("u1", "Só eu"), reply], "ready"))).toEqual([
+      { kind: "text", key: "text-2", text: aboveTheCard },
+      { kind: "draft", key: "c2", draft },
+    ]);
+  });
+
+  it("draws only the last draft when the model drafted twice in one reply", () => {
+    const update = { ...draft, id: "draft-2", operation: "update" as const, ticketId: "INC-20311" };
+    const reply = agent([
+      tool("draftTicket", "c2", vpnDraftInput, { ok: false, reason: "possible_duplicate", message: "?", candidates: [notebook] }),
+      tool("draftTicket", "c3", { operation: "update", ticketId: "INC-20311" }, { ok: true, draft: update, dueText: "prazo vencido" }),
+      text("Já existe o INC-20311."),
+    ]);
+    expect(blocksOf(liveTurns([user("u1", "Só eu"), reply], "ready"))).toEqual([
+      { kind: "text", key: "text-2", text: "Já existe o INC-20311." },
+      { kind: "draft", key: "c3", draft: update },
+    ]);
+  });
+});
+
 const conversation = (count: number) =>
   ({ type: "data-conversation", data: { id: "conv-1", state: "with_agent", messageCount: count } }) as NexoUIMessage["parts"][number];
 
@@ -326,5 +413,33 @@ describe("messageCount", () => {
 
   it("does not count a message that never reached the server", () => {
     expect(messageCount([user("u1", "Oi"), agent([conversation(5)]), user("u2", "E?")], "error", 4)).toBe(5);
+  });
+});
+
+describe("currentDraft", () => {
+  const first = { ...draft, id: "draft-1" };
+  const second = { ...draft, id: "draft-2", number: 382 };
+
+  it("is the draft as last known, from the server or from an action of the card", () => {
+    const known = { "draft-1": { ...first, status: "confirmed" as const, ticketId: "INC-20320" } };
+    expect(currentDraft(first, known, "draft-1")).toMatchObject({ status: "confirmed", ticketId: "INC-20320" });
+  });
+
+  it("is the draft the agent showed when nothing newer is known", () => {
+    expect(currentDraft(first, {}, "draft-1")).toEqual(first);
+  });
+
+  it("reads a pending draft that is not the last of the conversation as superseded, as the server keeps it", () => {
+    expect(currentDraft(first, {}, "draft-2")).toMatchObject({ status: "superseded" });
+    expect(currentDraft(second, {}, "draft-2")).toMatchObject({ status: "pending" });
+  });
+});
+
+describe("lastDraftId", () => {
+  it("is the id of the last draft shown in the conversation", () => {
+    const reply = (id: string, toolCallId: string) =>
+      agent([tool("draftTicket", toolCallId, vpnDraftInput, { ok: true, draft: { ...draft, id }, dueText: "hoje" })]);
+    expect(lastDraftId([user("u1", "a"), reply("draft-1", "c1"), user("u2", "b"), reply("draft-2", "c2")])).toBe("draft-2");
+    expect(lastDraftId([user("u1", "a")])).toBeNull();
   });
 });

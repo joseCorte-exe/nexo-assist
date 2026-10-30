@@ -7,7 +7,7 @@ const NETWORK_MESSAGE = "Não foi possível falar com o servidor. Confira sua co
 
 /** Calls a web API route and reads the answer with the contract schema (z.undefined() for a 204). Never throws. */
 export async function callApi<T>(
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PATCH",
   url: string,
   schema: z.ZodType<T>,
   body?: unknown,

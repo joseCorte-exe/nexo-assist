@@ -82,3 +82,11 @@ export function formatTimeAgo(iso: string, since: string): string {
   if (hours >= 1) return hours === 1 ? "há 1 hora" : `há ${hours} horas`;
   return "agora há pouco";
 }
+
+/** "13:43", or "29 out, 10:00" when due on another day than the draft's: the "resposta até" of the draft card. */
+export function formatDueTime(dueAt: string, since: string): string {
+  const due = inSaoPaulo(dueAt);
+  const sameDay = Math.floor(due.getTime() / DAY_MS) === Math.floor(inSaoPaulo(since).getTime() / DAY_MS);
+  const time = `${twoDigits(due.getUTCHours())}:${twoDigits(due.getUTCMinutes())}`;
+  return sameDay ? time : `${formatDay(dueAt)}, ${time}`;
+}
