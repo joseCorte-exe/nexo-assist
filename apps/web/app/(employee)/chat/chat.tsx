@@ -171,11 +171,12 @@ export function Chat({
 function EmployeeMessage({ text, unsent, onRetry }: { text: string; unsent: boolean; onRetry: () => void }) {
   const bubble = useRef<HTMLDivElement>(null);
   useWholePixelWidth(bubble, text);
+  // The lines break where nexo.pen breaks them, word by word, without moving a word down to keep a short last line.
   return (
     <article aria-label="Você" className="message-enter flex flex-col items-end gap-1.5">
       <div
         ref={bubble}
-        className="max-w-[520px] rounded-[12px_12px_4px_12px] bg-ink px-4 py-[11px] text-14.5 leading-[21px] text-pretty wrap-anywhere whitespace-pre-line text-white">
+        className="max-w-[520px] rounded-[12px_12px_4px_12px] bg-ink px-4 py-[11px] text-14.5 leading-[21px] wrap-anywhere whitespace-pre-line text-white">
         {text}
       </div>
       {unsent ? (

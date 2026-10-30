@@ -13,6 +13,7 @@ import {
 import { ChevronDown, CircleAlert, LoaderCircle } from "lucide-react";
 import { type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { CheckIcon } from "@/components/design-icons";
+import { WholePixel } from "@/components/whole-pixel";
 import { callApi } from "@/lib/api-client";
 import { formatDueTime } from "@/lib/format";
 import type { Shortcut } from "@/lib/shortcut";
@@ -152,7 +153,7 @@ export function DraftCard({ draft, busy, shortcut, onChange, onDone }: Props) {
             <p className="text-13.5 leading-5 text-pretty whitespace-pre-line text-ink-2">{draft.description}</p>
           </div>
           <Fields draft={draft} overdue={overdue} />
-          <div className="relative h-[53px] border-t border-rule bg-desk">
+          <div className={bar}>
             {open ? (
               <div key="actions" className="fade-enter flex h-full items-center gap-1.5 py-2 pr-3.5 pl-2">
                 <button
@@ -217,6 +218,13 @@ export function DraftCard({ draft, busy, shortcut, onChange, onDone }: Props) {
   );
 }
 
+/**
+ * The bar of the card: 52 px, its rule straddling the top edge as nexo.pen draws strokes, half a pixel on each side,
+ * so the fields above it end where the design ends them.
+ */
+const bar =
+  "relative h-[52px] bg-desk before:absolute before:inset-x-0 before:-top-[0.5px] before:h-px before:bg-rule";
+
 /** The buttons of the bar: 36 px, reaching 44 px of hit area above and below. */
 const actionBase =
   "relative flex h-9 shrink-0 items-center rounded-lg text-13.5 whitespace-nowrap transition-[background-color,scale] duration-150 ease-out after:absolute after:inset-x-0 after:-inset-y-1 active:scale-[0.96] aria-disabled:cursor-progress aria-disabled:active:scale-100";
@@ -265,11 +273,13 @@ const STATE: Record<DraftView["status"], { dot: string; tone: string; label: (dr
 
 function DraftState({ draft, editing = false }: { draft: DraftView; editing?: boolean }) {
   const look = editing ? { dot: "bg-primary", tone: "text-primary-text", label: () => "Editando" } : STATE[draft.status];
+  // Rounded up to a whole pixel, as nexo.pen lays out text that hugs its content: aligned against the right edge, a
+  // fractional width would leave it a fraction of a pixel off.
   return (
-    <span key={editing ? "editing" : draft.status} className="fade-enter flex items-center gap-1.5">
+    <WholePixel key={editing ? "editing" : draft.status} text={look.label(draft)} className="fade-enter flex items-center gap-1.5">
       <span aria-hidden className={`${dot} ${look.dot}`} />
       <span className={`text-12.5 font-medium whitespace-nowrap ${look.tone}`}>{look.label(draft)}</span>
-    </span>
+    </WholePixel>
   );
 }
 
@@ -501,7 +511,7 @@ function DraftEditor({ draft, kind, reference, shortcut, busy, onSaved, onClose 
           {problem}
         </p>
       ) : null}
-      <div className="flex h-[53px] items-center gap-1.5 border-t border-rule bg-desk py-2 pr-3.5 pl-2">
+      <div className={`${bar} flex items-center gap-1.5 py-2 pr-3.5 pl-2`}>
         <button
           type="button"
           onClick={save}
