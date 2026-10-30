@@ -4,7 +4,7 @@ import type { MastraModelConfig } from "@mastra/core/llm";
 import { LibSQLStore } from "@mastra/libsql";
 import { Memory } from "@mastra/memory";
 import { instructions, workingMemoryTemplate } from "./instructions";
-import { createTools, OFFER_TOOLS, type TicketDesk } from "./tools";
+import { createTools, type DraftStore, OFFER_TOOLS, type TicketDesk } from "./tools";
 
 // Explicit limits, so one reply never runs away with time or cost (ARQUITETURA.md, section 9).
 const MAX_STEPS = 5;
@@ -31,11 +31,14 @@ export function createNexoAgent({
   model,
   memory,
   ticketService,
+  drafts,
   now = () => new Date(),
 }: {
   model: AgentModel;
   memory: Memory;
   ticketService: TicketDesk;
+  /** Where draftTicket keeps the drafts: the conversations database. */
+  drafts: DraftStore;
   /** The clock of the overdue (RN-02) and of "há N dias". */
   now?: () => Date;
 }) {
@@ -51,7 +54,7 @@ export function createNexoAgent({
     },
     model,
     memory,
-    tools: createTools({ ticketService, now }),
+    tools: createTools({ ticketService, drafts, now }),
   });
 }
 
@@ -71,28 +74,38 @@ type Step = { text: string; toolResults: ReadonlyArray<ToolResult> };
 /** The Mastra tool the model calls to keep the summary of the case (the working memory). */
 const WORKING_MEMORY_TOOL = "updateWorkingMemory";
 
-/** An offer tool that ran and showed its offer (it answers ok). The model gets the output wrapped as { type: "json", value }. */
-function shownOffer({ toolName, output }: ToolResult) {
+/** A tool that ran and answered ok. The model gets the output wrapped as { type: "json", value }. */
+function answeredOk({ output }: ToolResult) {
   const wrapped = output as { type?: string; value?: { ok?: unknown } } | undefined;
-  return OFFER_TOOLS.has(toolName) && wrapped?.type === "json" && wrapped.value?.ok === true;
+  return wrapped?.type === "json" && wrapped.value?.ok === true;
 }
 
 /**
- * The reply is done: an offer was shown, or the model answered and only updated the working memory along with it.
- * Called again after that, the model writes the same answer a second time.
+ * The reply is done: an offer was shown; or the model answered and, along with it, only updated the working memory or
+ * showed the draft, which the screen draws under the answer. Called again after that, the model writes the same answer
+ * a second time. A draft shown without text goes on: the model still says what it decided, above the card.
  */
 function replyDone(step: Step | undefined) {
   if (!step) return false;
-  if (step.toolResults.some(shownOffer)) return true;
-  return step.text.trim() !== "" && step.toolResults.every(({ toolName }) => toolName === WORKING_MEMORY_TOOL);
+  if (step.toolResults.some((result) => OFFER_TOOLS.has(result.toolName) && answeredOk(result))) return true;
+  return (
+    step.text.trim() !== "" &&
+    step.toolResults.every(
+      (result) => result.toolName === WORKING_MEMORY_TOOL || (result.toolName === "draftTicket" && answeredOk(result)),
+    )
+  );
 }
 
 /** One reply of the agent: the Mastra stream, which the route turns into the chat stream and saves at the end. */
 export function streamReply(agent: NexoAgent, { conversationId, employeeId, text }: Turn) {
   return agent.stream(text, {
     memory: { thread: conversationId, resource: employeeId },
-    // Whose tickets the tools read: the employee of the session, never a value the model writes.
-    requestContext: new RequestContext([["employeeId", employeeId]]),
+    // Whose tickets the tools read: the employee of the session, never a value the model writes. A draft belongs to
+    // the conversation of the turn.
+    requestContext: new RequestContext([
+      ["employeeId", employeeId],
+      ["conversationId", conversationId],
+    ]),
     maxSteps: MAX_STEPS,
     // An offer that was shown hands the turn to the employee, who answers with a click: calling the model again would
     // only cost. One that could not be shown (refused input, no ticket of hers, service down) lets the model explain.

@@ -1,18 +1,57 @@
 import { createTool } from "@mastra/core/tools";
 import {
+  type Affected,
+  CATEGORY_LABEL,
+  canReopen,
+  type Category,
+  type DraftOperation,
+  type DraftTicketInput,
+  type DraftTicketOutput,
+  type DraftView,
+  deadlineWords,
+  dueAt,
+  type Impact,
   isOverdue,
   nexoToolSchemas,
   type OutOfScopeArea,
+  type Priority,
+  priorityFor,
   slaText,
   type Ticket,
   type TicketCard,
   type TicketServiceClient,
   type TicketSummary,
+  type TicketType,
+  type Urgency,
 } from "@nexo/shared";
 import { z } from "zod";
 
-/** The part of the ticket-service the tools use: the help center and the employee's tickets. */
-export type TicketDesk = Pick<TicketServiceClient, "searchArticles" | "listEmployeeTickets" | "getTicket">;
+/** The part of the ticket-service the tools use: the help center, the employee's tickets and the duplicate lookup. */
+export type TicketDesk = Pick<TicketServiceClient, "searchArticles" | "listEmployeeTickets" | "getTicket" | "listCandidates">;
+
+/** A draft as the tool hands it to be saved: what the card shows, plus what the console and the analyst need. */
+export type DraftRecord = {
+  conversationId: string;
+  operation: DraftOperation;
+  /** The ticket followed up or reopened; null for a new one. */
+  ticketId: string | null;
+  type: TicketType;
+  title: string;
+  description: string;
+  category: Category;
+  subcategory: string | null;
+  priority: Priority;
+  affected: Affected;
+  /** What RN-01 read, for a new ticket. A follow-up and a reopening keep the priority of the ticket. */
+  impact: Impact | null;
+  urgency: Urgency | null;
+  notDuplicateReason: string | null;
+  dueAt: Date;
+  createdAt: Date;
+};
+
+/** Where drafts are kept: the conversations database, which the web owns. Saving one replaces the pending one. */
+export type DraftStore = { save: (draft: DraftRecord) => Promise<DraftView> };
 
 const HELP_CENTER_DOWN = "A central de ajuda não respondeu.";
 const TICKETS_DOWN = "O serviço de chamados não respondeu.";
@@ -34,7 +73,14 @@ type EmployeeContext = z.infer<typeof employeeContext>;
 const employeeOf = (context: { requestContext: { get: (key: "employeeId") => EmployeeContext["employeeId"] } }) =>
   context.requestContext.get("employeeId");
 
-export function createTools({ ticketService, now }: { ticketService: TicketDesk; now: () => Date }) {
+/** A draft also needs the conversation it belongs to, which the route puts in the context too. */
+const turnContext = employeeContext.extend({ conversationId: z.string().min(1) });
+type TurnContext = z.infer<typeof turnContext>;
+
+type DraftFailure = Extract<DraftTicketOutput, { ok: false }>;
+const failure = (reason: DraftFailure["reason"], message: string): DraftFailure => ({ ok: false, reason, message });
+
+export function createTools({ ticketService, drafts, now }: { ticketService: TicketDesk; drafts: DraftStore; now: () => Date }) {
   const summarize = (ticket: Ticket, at: Date): TicketSummary => ({
     id: ticket.id,
     title: ticket.title,
@@ -163,7 +209,117 @@ export function createTools({ ticketService, now }: { ticketService: TicketDesk;
     execute: async () => ({ ok: true as const }),
   });
 
-  return { recordDecision, searchArticles, redirectOutOfScope, listMyTickets, getTicket, offerTicketChoice, offerReplies };
+  /** A new ticket: type and priority from the impact (RN-01), and no draft over an open ticket that may be the same. */
+  async function draftNew(input: DraftTicketInput, { employeeId, conversationId }: TurnContext): Promise<DraftTicketOutput> {
+    // The schema already made sure a create carries these.
+    const { title, category, impact, urgency, affected } = input as Required<DraftTicketInput>;
+    const candidates = await ticketService.listCandidates(employeeId, category);
+    if (!candidates.ok) return failure("unavailable", TICKETS_DOWN);
+    const at = now();
+    if (candidates.data.length > 0 && !input.notDuplicateReason) {
+      return {
+        ...failure(
+          "possible_duplicate",
+          `O funcionário já tem chamados abertos de ${CATEGORY_LABEL[category]}. Se for o mesmo problema, monte um update desse chamado. Se não for, chame de novo com notDuplicateReason.`,
+        ),
+        candidates: candidates.data.map((ticket) => summarize(ticket, at)),
+      };
+    }
+    const priority = priorityFor({ impact, urgency, affected });
+    const due = dueAt({ priority, createdAt: at, lastItResponseAt: null });
+    const draft = await drafts.save({
+      conversationId,
+      operation: "create",
+      ticketId: null,
+      type: impact === "request" ? "REQ" : "INC",
+      title,
+      description: input.description,
+      category,
+      subcategory: input.subcategory ?? null,
+      priority,
+      affected,
+      impact,
+      urgency,
+      notDuplicateReason: input.notDuplicateReason ?? null,
+      dueAt: due,
+      createdAt: at,
+    });
+    return { ok: true, draft, dueText: deadlineWords(due, at) };
+  }
+
+  /**
+   * A follow-up of an open ticket, or the reopening of one resolved up to 7 days ago. Both keep the classification of
+   * the ticket; only the reopening restarts the deadline, as a new opening. The service checks the same again when
+   * the employee confirms.
+   */
+  async function draftChange(input: DraftTicketInput, { employeeId, conversationId }: TurnContext): Promise<DraftTicketOutput> {
+    const ticketId = input.ticketId!;
+    const result = await ticketService.getTicket(ticketId, employeeId);
+    if (!result.ok) return failure("unavailable", TICKETS_DOWN);
+    const ticket = result.data;
+    if (!ticket) return failure("not_found", `Não encontrei o ${ticketId} entre os seus chamados.`);
+    const at = now();
+    const resolved = ticket.status === "resolved";
+
+    let due: Date;
+    if (input.operation === "update") {
+      if (resolved) {
+        return failure("resolved", `O ${ticket.id} está resolvido. Se o problema voltou, monte um reopen; ele vale até 7 dias depois da resolução.`);
+      }
+      due = new Date(ticket.dueAt);
+    } else {
+      if (!resolved || !ticket.resolvedAt) {
+        return failure("not_resolved", `O ${ticket.id} não está resolvido. Para acrescentar uma informação, monte um update.`);
+      }
+      if (!canReopen(new Date(ticket.resolvedAt), at)) {
+        return failure("reopen_window_closed", `O ${ticket.id} foi resolvido há mais de 7 dias e não pode ser reaberto. Monte um chamado novo (create).`);
+      }
+      due = dueAt({ priority: ticket.priority, createdAt: at, lastItResponseAt: null });
+    }
+
+    const draft = await drafts.save({
+      conversationId,
+      operation: input.operation,
+      ticketId: ticket.id,
+      type: ticket.type,
+      title: ticket.title,
+      description: input.description,
+      category: ticket.category,
+      subcategory: ticket.subcategory,
+      priority: ticket.priority,
+      affected: ticket.affected,
+      impact: null,
+      urgency: null,
+      notDuplicateReason: null,
+      dueAt: due,
+      createdAt: at,
+    });
+    const overdue = input.operation === "update" && isOverdue({ status: ticket.status, dueAt: due }, at);
+    return { ok: true, draft, dueText: overdue ? "prazo vencido" : deadlineWords(due, at) };
+  }
+
+  const draftTicket = createTool({
+    id: "draftTicket",
+    description:
+      "Monta o rascunho de um chamado novo (create), do complemento de um chamado aberto (update) ou da reabertura de um chamado resolvido há até 7 dias (reopen). O funcionário vê o card e confere: nada é criado antes de ele clicar em Confirmar. O código calcula o tipo, a prioridade e o prazo e confere duplicidade e a janela de reabertura.",
+    ...nexoToolSchemas.draftTicket,
+    requestContextSchema: turnContext,
+    execute: async (input, context) => {
+      const turn = { employeeId: employeeOf(context), conversationId: context.requestContext.get("conversationId") };
+      return input.operation === "create" ? draftNew(input, turn) : draftChange(input, turn);
+    },
+  });
+
+  return {
+    recordDecision,
+    searchArticles,
+    redirectOutOfScope,
+    listMyTickets,
+    getTicket,
+    offerTicketChoice,
+    offerReplies,
+    draftTicket,
+  };
 }
 
 /** The tools that hand the turn to the employee: once one of them runs, the reply ends. */

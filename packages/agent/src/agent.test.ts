@@ -1,8 +1,8 @@
-import type { DecisionRecord, KbArticle, Ticket } from "@nexo/shared";
+import { type DecisionRecord, type KbArticle, slaText, type Ticket } from "@nexo/shared";
 import { describe, expect, it } from "vitest";
 import { createNexoAgent, createMemory } from "./agent";
 import { promptText, replyOf, scriptedModel } from "./testing";
-import type { TicketDesk } from "./tools";
+import type { DraftRecord, DraftStore, TicketDesk } from "./tools";
 
 const hours: KbArticle = {
   id: "kb-service-desk-hours",
@@ -42,6 +42,26 @@ const ticketService: TicketDesk = {
     lookups.push(employeeId);
     return { ok: true, data: null };
   },
+  listCandidates: async () => ({ ok: true, data: [] }),
+};
+
+/** The drafts saved by the agent, as the web would keep them. */
+const savedDrafts: DraftRecord[] = [];
+const drafts: DraftStore = {
+  save: async (draft) => {
+    savedDrafts.push(draft);
+    const { conversationId, impact, urgency, notDuplicateReason, ...shown } = draft;
+    return {
+      ...shown,
+      id: `draft-${savedDrafts.length}`,
+      number: 380 + savedDrafts.length,
+      status: "pending",
+      rejectedReason: null,
+      deadline: slaText(draft.priority),
+      dueAt: draft.dueAt.toISOString(),
+      createdAt: draft.createdAt.toISOString(),
+    };
+  },
 };
 
 const decision: DecisionRecord = {
@@ -61,7 +81,7 @@ const hoursScript = () => [
 function setup(steps: Parameters<typeof scriptedModel>[0]) {
   const model = scriptedModel(steps);
   const memory = createMemory({ url: ":memory:" });
-  const agent = createNexoAgent({ model, memory, ticketService });
+  const agent = createNexoAgent({ model, memory, ticketService, drafts });
   return { model, memory, agent };
 }
 
@@ -98,7 +118,7 @@ describe("streamReply", () => {
       { toolCalls: [{ toolName: "recordDecision", input: { ...decision, understanding: "Pergunta de seguimento" } }] },
       { text: "Sim, de segunda a sexta." },
     ]);
-    const agent = createNexoAgent({ model, memory: createMemory({ url: ":memory:" }), ticketService });
+    const agent = createNexoAgent({ model, memory: createMemory({ url: ":memory:" }), ticketService, drafts });
     await replyOf(agent, turn);
     await replyOf(agent, { ...turn, text: "E no sábado?" });
 
@@ -114,7 +134,7 @@ describe("streamReply", () => {
       { toolCalls: [{ toolName: "recordDecision", input: decision }] },
       { text: "Oi!" },
     ]);
-    const agent = createNexoAgent({ model, memory: createMemory({ url: ":memory:" }), ticketService });
+    const agent = createNexoAgent({ model, memory: createMemory({ url: ":memory:" }), ticketService, drafts });
     await replyOf(agent, turn);
     await replyOf(agent, { conversationId: "conv-2", employeeId: "emp-bruno", text: "Oi" });
     expect(promptText(model.calls[3]!)).not.toContain("Qual o horário do service desk?");
@@ -230,6 +250,50 @@ describe("streamReply", () => {
     ]);
     expect((await replyOf(agent, turn)).text).toBe("Quer que eu chame um analista?");
     expect(model.calls).toHaveLength(3);
+  });
+
+  const vpnDraft = {
+    operation: "create",
+    title: "VPN não conecta no notebook — erro 809",
+    description: "Desde ontem o notebook (Windows 11) não conecta na VPN e mostra o erro 809. Precisa dela para a reunião das 14h.",
+    category: "network_vpn",
+    subcategory: "VPN",
+    impact: "stopped",
+    urgency: "same_day",
+    affected: "only_me",
+  };
+  const aboveTheCard = "Coloquei prioridade alta por causa da reunião. Confira antes de eu criar:";
+
+  it("saves the draft in the conversation of the turn", async () => {
+    savedDrafts.length = 0;
+    const { agent } = setup([
+      { toolCalls: [{ toolName: "recordDecision", input: decision }] },
+      { toolCalls: [{ toolName: "draftTicket", input: vpnDraft }] },
+      { text: aboveTheCard },
+    ]);
+    await replyOf(agent, { ...turn, conversationId: "conv-7" });
+    expect(savedDrafts.map((draft) => draft.conversationId)).toEqual(["conv-7"]);
+  });
+
+  it("goes on after the draft, so the model writes the line above the card with the priority it got, then ends", async () => {
+    const { agent, model } = setup([
+      { toolCalls: [{ toolName: "recordDecision", input: decision }] },
+      { toolCalls: [{ toolName: "draftTicket", input: vpnDraft }] },
+      { text: aboveTheCard },
+    ]);
+    expect((await replyOf(agent, turn)).text).toBe(aboveTheCard);
+    expect(model.calls).toHaveLength(3);
+    // The model wrote it seeing what the code decided.
+    expect(promptText(model.calls[2]!)).toContain('"priority":"high"');
+  });
+
+  it("ends the reply when the line above the card came with the draft", async () => {
+    const { agent, model } = setup([
+      { toolCalls: [{ toolName: "recordDecision", input: decision }] },
+      { text: aboveTheCard, toolCalls: [{ toolName: "draftTicket", input: vpnDraft }] },
+    ]);
+    await replyOf(agent, turn);
+    expect(model.calls).toHaveLength(2);
   });
 
   it("ends the reply with the failure of the model", async () => {
