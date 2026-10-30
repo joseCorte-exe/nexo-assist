@@ -1,5 +1,6 @@
 import {
   createTicketServiceClient,
+  dueAt,
   IDEMPOTENCY_KEY_HEADER,
   SERVICE_SECRET_HEADER,
   type Ticket,
@@ -172,6 +173,13 @@ describe("POST /tickets/:id/reopen", () => {
     const reopened = (await (await reopen("INC-20150")).json()) as Ticket;
     // Medium: 3 business days from Monday 10:00 is Thursday 10:00 in São Paulo.
     expect(reopened.dueAt).toBe("2026-10-29T13:00:00.000Z");
+  });
+
+  it("keeps when it was reopened, so any later count of the deadline starts there too (RN-02)", async () => {
+    await reopen("INC-20150");
+    const saved = await row("INC-20150");
+    expect(saved.reopenedAt).toEqual(start);
+    expect(dueAt(saved)).toEqual(saved.dueAt);
   });
 
   it("refuses a ticket resolved more than 7 days ago, and changes nothing", async () => {

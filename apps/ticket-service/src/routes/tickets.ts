@@ -115,8 +115,9 @@ export function ticketRoutes(deps: Deps) {
             status: "waiting_for_analyst",
             assignedTo: null,
             resolvedAt: null,
+            reopenedAt: now,
             updatedAt: now,
-            dueAt: dueAt({ priority: ticket.priority, createdAt: now, lastItResponseAt: null }),
+            dueAt: dueAt({ ...ticket, reopenedAt: now }),
           })
           .where(eq(tickets.id, ticket.id))
           .returning();
@@ -239,7 +240,7 @@ async function nextTicketId(tx: Transaction, type: TicketType) {
   return `${type}-${(result?.max ?? start) + 1}`;
 }
 
-export function toTicket(row: typeof tickets.$inferSelect): Ticket {
+export function toTicket({ reopenedAt: _reopenedAt, ...row }: typeof tickets.$inferSelect): Ticket {
   return {
     ...row,
     createdAt: row.createdAt.toISOString(),

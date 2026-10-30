@@ -281,7 +281,13 @@ export function createTools({ ticketService, drafts, now }: { ticketService: Tic
       if (!canReopen(new Date(ticket.resolvedAt), at)) {
         return failure("reopen_window_closed", `O ${ticket.id} foi resolvido há mais de 7 dias e não pode ser reaberto. Monte um chamado novo (create).`);
       }
-      due = dueAt({ priority: ticket.priority, createdAt: at, lastItResponseAt: null });
+      // The deadline the service will set: the reopening counts as a new opening.
+      due = dueAt({
+        priority: ticket.priority,
+        createdAt: new Date(ticket.createdAt),
+        lastItResponseAt: ticket.lastItResponseAt ? new Date(ticket.lastItResponseAt) : null,
+        reopenedAt: at,
+      });
     }
 
     const draft = await drafts.save({

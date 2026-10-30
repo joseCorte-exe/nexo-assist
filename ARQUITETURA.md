@@ -115,7 +115,7 @@ nexo-assist/
 |---|---|
 | employees | id, name, email, department, password_changed_at |
 | analysts | id, name, email, level (N1, N2), available |
-| tickets | id (INC-xxxxx ou REQ-xxxxx), type (INC, REQ), title, description, category, subcategory, priority, affected (only_me, my_team, company), status, opened_by, assigned_to, created_at, updated_at, last_it_response_at, due_at, resolved_at |
+| tickets | id (INC-xxxxx ou REQ-xxxxx), type (INC, REQ), title, description, category, subcategory, priority, affected (only_me, my_team, company), status, opened_by, assigned_to, created_at, updated_at, last_it_response_at, due_at, resolved_at, reopened_at |
 | ticket_updates | id, ticket_id, author (employee, agent, analyst), text, created_at |
 | kb_articles | id, title, content, category, keywords |
 | idempotency_keys | key, response, created_at (gravada na mesma transação do chamado) |
@@ -139,7 +139,7 @@ Status do chamado e o que muda cada um (só o que o design mostra):
 | "Encerrar atendimento" | Não muda o chamado, só fecha a conversa |
 | `in_progress`, `approved` e `resolved` | Vêm dos dados de exemplo |
 
-`due_at` é calculado a partir de `last_it_response_at` (ou de `created_at`, se a TI ainda não respondeu), somando o prazo da prioridade em horas úteis (RN-02). A reabertura conta como uma nova abertura: o prazo recomeça dela, e um recálculo futuro de `due_at` precisa partir do mais recente entre a reabertura e a última resposta da TI. O complemento do funcionário não muda `due_at` nem `updated_at`.
+`due_at` é calculado a partir de `last_it_response_at` (ou de `created_at`, se a TI ainda não respondeu), somando o prazo da prioridade em horas úteis (RN-02). A reabertura conta como uma nova abertura: o chamado guarda `reopened_at`, e o prazo conta do mais recente entre a reabertura e a última resposta da TI. O complemento do funcionário não muda `due_at` nem `updated_at`.
 
 ### Banco das conversas (web + agent)
 

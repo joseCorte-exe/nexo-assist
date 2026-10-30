@@ -38,6 +38,8 @@ export const tickets = sqliteTable("tickets", {
   lastItResponseAt: timestamp("last_it_response_at"),
   dueAt: timestamp("due_at").notNull(),
   resolvedAt: timestamp("resolved_at"),
+  /** The last reopening: a new opening for the deadline (RN-02), until IT answers after it. */
+  reopenedAt: timestamp("reopened_at"),
 }, (table) => [
   // The tickets of an employee, most recent first: the list and the lookup of the chat both start here.
   index("tickets_opened_by_created_at_idx").on(table.openedBy, table.createdAt),

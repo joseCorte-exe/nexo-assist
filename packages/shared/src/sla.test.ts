@@ -40,6 +40,20 @@ describe("addBusinessHours", () => {
 });
 
 describe("RN-02 dueAt", () => {
+  it("counts a reopened ticket from the reopening, as a new opening, not from an older answer of IT", () => {
+    const createdAt = at("2026-10-19T10:00");
+    expect(
+      dueAt({ priority: "high", createdAt, lastItResponseAt: at("2026-10-20T10:00"), reopenedAt: at("2026-10-26T10:00") }),
+    ).toEqual(at("2026-10-26T14:00"));
+  });
+
+  it("counts from an answer of IT that came after the reopening", () => {
+    const createdAt = at("2026-10-19T10:00");
+    expect(
+      dueAt({ priority: "high", createdAt, lastItResponseAt: at("2026-10-27T09:00"), reopenedAt: at("2026-10-26T10:00") }),
+    ).toEqual(at("2026-10-27T13:00"));
+  });
+
   const createdAt = at("2026-10-26T10:00");
 
   it("gives critical 1 hour around the clock", () => {
