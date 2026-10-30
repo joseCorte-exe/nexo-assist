@@ -49,7 +49,7 @@ export function ticketRoutes(deps: Deps) {
       const body = await parseWrite(c, createTicketInput);
       if (!body.ok) return body.response;
       const input = body.data;
-      return idempotent(deps, c, { key: body.key, scope: "POST /tickets", status: 201 }, async (tx, now) => {
+      return idempotent(deps, c, { key: body.key, scope: `POST /tickets for ${input.employeeId}`, status: 201 }, async (tx, now) => {
         const [employee] = await tx.select({ id: employees.id }).from(employees).where(eq(employees.id, input.employeeId));
         if (!employee) throw new Refusal(400, "unknown_employee", "Employee not found");
         const [row] = await tx
@@ -85,7 +85,7 @@ export function ticketRoutes(deps: Deps) {
       const body = await parseWrite(c, ticketFollowUpInput);
       if (!body.ok) return body.response;
       const { employeeId, text } = body.data;
-      return idempotent(deps, c, { key: body.key, scope: `PATCH /tickets/${id.data}`, status: 200 }, async (tx, now) => {
+      return idempotent(deps, c, { key: body.key, scope: `PATCH /tickets/${id.data} for ${employeeId}`, status: 200 }, async (tx, now) => {
         const ticket = await ticketOf(tx, id.data, employeeId);
         if (ticket.status === "resolved") throw new Refusal(409, "ticket_resolved", "The ticket is resolved");
         await addUpdate(tx, { ticketId: ticket.id, text, now });
@@ -100,7 +100,7 @@ export function ticketRoutes(deps: Deps) {
       const body = await parseWrite(c, ticketFollowUpInput);
       if (!body.ok) return body.response;
       const { employeeId, text } = body.data;
-      const scope = `POST /tickets/${id.data}/reopen`;
+      const scope = `POST /tickets/${id.data}/reopen for ${employeeId}`;
       return idempotent(deps, c, { key: body.key, scope, status: 200 }, async (tx, now) => {
         const ticket = await ticketOf(tx, id.data, employeeId);
         if (ticket.status !== "resolved" || !ticket.resolvedAt) {
@@ -144,7 +144,8 @@ async function parseWrite<T>(
 /**
  * Runs a write once per idempotency key. The answer is saved with the key in the write's own transaction, so a retry
  * (the client's, after an outage that fell after writing) gets what was written, and two requests at once do it once.
- * A key reused for another request is refused rather than answered with a ticket that is not the one asked for.
+ * A key reused for another request, or by another employee, is refused rather than answered with a ticket that is not
+ * the one asked for: the scope names the route, the ticket and the employee.
  */
 async function idempotent(
   deps: Deps,

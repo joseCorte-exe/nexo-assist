@@ -65,8 +65,8 @@ export const kbArticles = sqliteTable("kb_articles", {
 export const idempotencyKeys = sqliteTable("idempotency_keys", {
   key: text("key").primaryKey(),
   /**
-   * The request the key was used for ("PATCH /tickets/INC-20311"): reused for another one, it is refused. The default
-   * only covers the keys saved before the column, which were all ticket creations.
+   * The request the key was used for and whose it was ("PATCH /tickets/INC-20311 for emp-ana"): reused for another one,
+   * it is refused. The default only marks the keys saved before the column, which no new request replays.
    */
   scope: text("scope").notNull().default("POST /tickets"),
   response: text("response", { mode: "json" }).notNull(),

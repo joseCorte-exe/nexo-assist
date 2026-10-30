@@ -220,6 +220,28 @@ describe("idempotency across the writes", () => {
     expect((await row("INC-20150")).status).toBe("resolved");
   });
 
+  it("never answers one employee with what another one wrote under the same key", async () => {
+    await followUp("INC-20311", undefined, "draft-1");
+    const other = await followUp("INC-20311", { employeeId: "emp-diego", text: "Oi" }, "draft-1");
+    expect(other.status).toBe(422);
+    expect(JSON.stringify(await other.json())).not.toContain("INC-20311");
+  });
+
+  it("never answers a ticket created by another employee under the same key", async () => {
+    const body = (employeeId: string) => ({
+      employeeId,
+      type: "INC",
+      title: "VPN",
+      description: "Erro 809.",
+      category: "network_vpn",
+      subcategory: null,
+      priority: "high",
+      affected: "only_me",
+    });
+    expect((await write("POST", "/tickets", body("emp-ana"), "draft-1")).status).toBe(201);
+    expect((await write("POST", "/tickets", body("emp-diego"), "draft-1")).status).toBe(422);
+  });
+
   it("refuses the key of a follow-up sent to another ticket", async () => {
     await followUp("INC-20311", undefined, "draft-1");
     expect((await followUp("INC-20298", undefined, "draft-1")).status).toBe(422);
