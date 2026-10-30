@@ -42,8 +42,12 @@ export type MessageAuthor = z.infer<typeof messageAuthor>;
 export const draftOperation = z.enum(["create", "update", "reopen"]);
 export type DraftOperation = z.infer<typeof draftOperation>;
 
-/** superseded: the agent drafted again in the same conversation. rejected: the ticket-service refused the confirmation. */
-export const draftStatus = z.enum(["pending", "confirmed", "cancelled", "superseded", "rejected"]);
+/**
+ * confirming: the confirmation reached for the ticket-service and its answer did not come back; it may have written,
+ * so only confirming again is allowed. superseded: the agent drafted again in the same conversation. rejected: the
+ * ticket-service refused the confirmation.
+ */
+export const draftStatus = z.enum(["pending", "confirming", "confirmed", "cancelled", "superseded", "rejected"]);
 export type DraftStatus = z.infer<typeof draftStatus>;
 
 export const transferReason = z.enum(["employee_request", "critical", "overdue", "agent_unsure"]);

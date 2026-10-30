@@ -84,7 +84,11 @@ function toTicket({ openedDaysAgo, itAnsweredDaysAgo, resolvedDaysAgo, category 
 
 /** A write the fake service received: the route, the body and the idempotency key. */
 export type ServiceWrite = { method: string; path: string; body: unknown; key: string | null };
-export type FakeTicketService = TicketServiceClient & { writes: ServiceWrite[] };
+export type FakeTicketService = TicketServiceClient & {
+  writes: ServiceWrite[];
+  /** Takes the writes down, or brings them back. */
+  setWritesDown: (down: boolean) => void;
+};
 
 const notFound = () => Response.json({ error: { code: "ticket_not_found", message: "Ticket not found" } }, { status: 404 });
 const refused = (code: string, message: string) => Response.json({ error: { code, message } }, { status: 409 });
@@ -93,7 +97,16 @@ const refused = (code: string, message: string) => Response.json({ error: { code
  * The real ticket-service client, answering from the sample people and tickets instead of the network,
  * so tests go through the same lookup rules the app uses. As the service, it never answers another person's ticket.
  */
-export function fakeTicketService({ down = false, writesDown = false } = {}): FakeTicketService {
+export function fakeTicketService({
+  down = false,
+  writesDown = false,
+  onWrite,
+}: {
+  down?: boolean;
+  writesDown?: boolean;
+  /** Runs while a write is on its way, before the service answers: what happens meanwhile elsewhere. */
+  onWrite?: () => Promise<void>;
+} = {}): FakeTicketService {
   const employees: Employee[] = sampleEmployees.map((employee) => ({
     ...employee,
     passwordChangedAt: ana.passwordChangedAt,
@@ -107,6 +120,7 @@ export function fakeTicketService({ down = false, writesDown = false } = {}): Fa
     const method = init?.method ?? "GET";
     if (method !== "GET") {
       if (writesDown) return Response.json({}, { status: 503 });
+      await onWrite?.();
       const body: unknown = JSON.parse(String(init?.body));
       const key = (init?.headers as Record<string, string> | undefined)?.["idempotency-key"] ?? null;
       writes.push({ method, path: pathname, body, key });
@@ -177,7 +191,12 @@ export function fakeTicketService({ down = false, writesDown = false } = {}): Fa
   }
 
   const client = createTicketServiceClient({ baseUrl: "http://tickets.test", secret: "s", fetch, sleep: async () => {} });
-  return Object.assign(client, { writes });
+  return Object.assign(client, {
+    writes,
+    setWritesDown: (value: boolean) => {
+      writesDown = value;
+    },
+  });
 }
 
 /**

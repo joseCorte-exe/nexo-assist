@@ -3,10 +3,10 @@ import { toAISdkStream } from "@mastra/ai-sdk";
 import { streamReply } from "@nexo/agent";
 import { chatInput, type ConversationPart, type NexoUIMessage, summarizeTurn, textOf, withToolErrors } from "@nexo/shared";
 import { consumeStream, createUIMessageStream, createUIMessageStreamResponse, type InferUIMessageChunk } from "ai";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import type { Db } from "@/db";
-import { conversations, decisions, messages } from "@/db/schema";
+import { conversations, decisions, drafts, messages } from "@/db/schema";
 import { activeConversationOf } from "./conversation";
 import type { Deps } from "./deps";
 import { jsonError, readBody, readEmployeeSession } from "./http";
@@ -108,6 +108,18 @@ async function saveReply(
 }
 
 /**
+ * A reply that failed is not saved, so no card would ever show the drafts it made: they are discarded, never left
+ * pending without a way to confirm or cancel them.
+ */
+async function discardDrafts(db: Db, reply: NexoUIMessage) {
+  const ids = reply.parts.flatMap((part) =>
+    part.type === "tool-draftTicket" && part.state === "output-available" && part.output.ok ? [part.output.draft.id] : [],
+  );
+  if (ids.length === 0) return;
+  await db.update(drafts).set({ status: "cancelled" }).where(and(inArray(drafts.id, ids), eq(drafts.status, "pending")));
+}
+
+/**
  * POST /api/chat. Answers in parts: first the conversation with the new counter, then the agent stream in the
  * AI SDK v7 format. The reply is saved when it ends, even if the employee closes the tab: a copy of the stream is
  * read to the end on the server, and the platform waits for it.
@@ -138,6 +150,7 @@ export async function chat(request: NextRequest, deps: Deps) {
       // step or token limits did finish, and is saved as it is.
       if (finishReason === undefined || finishReason === "error") {
         console.error("agent reply not saved", { conversationId: conversation.id, finishReason });
+        await discardDrafts(deps.db, responseMessage);
         return;
       }
       await saveReply(deps.db, { conversationId: conversation.id, startedAt, now: deps.now(), reply: responseMessage });

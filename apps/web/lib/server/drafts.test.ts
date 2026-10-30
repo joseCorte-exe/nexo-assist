@@ -234,7 +234,8 @@ describe("POST /api/drafts/:id/confirm", () => {
     expect(deps.ticketService.writes).toHaveLength(1);
   });
 
-  it("keeps the draft pending when the service does not answer, so confirming again is safe", async () => {
+  it("keeps a confirmation the service did not answer as under way: only confirming again, which cannot duplicate", async () => {
+    // The service may have written before falling: discarding or editing the draft now could hide a ticket that exists.
     const deps = await testDeps({ ticketService: fakeTicketService({ writesDown: true }) });
     const draft = await anaWithDraft(deps);
     const response = await confirm(deps, draft.id);
@@ -242,9 +243,42 @@ describe("POST /api/drafts/:id/confirm", () => {
     expect(await response.json()).toEqual({
       error: { code: "service_unavailable", message: "O serviço de chamados não respondeu. Tente de novo em instantes." },
     });
-    expect(await statusOf(deps, draft.id)).toBe("pending");
+    expect(await statusOf(deps, draft.id)).toBe("confirming");
     expect(await systemMessages(deps)).toEqual([]);
     expect(deps.notes).toEqual([]);
+
+    const underWay = { error: { code: "draft_confirming", message: "A confirmação deste rascunho já começou. Confirme de novo; o chamado não será duplicado." } };
+    const cancelled = await cancel(deps, draft.id);
+    expect(cancelled.status).toBe(409);
+    expect(await cancelled.json()).toEqual(underWay);
+    expect((await edit(deps, draft.id, { title: "Outro" })).status).toBe(409);
+
+    deps.ticketService.setWritesDown(false);
+    expect(await (await confirm(deps, draft.id)).json()).toMatchObject({ status: "confirmed", ticketId: "INC-20320" });
+  });
+
+  it("never lets a cancel land while the ticket is being written", async () => {
+    let meanwhile: Response | undefined;
+    const deps = await testDeps({
+      ticketService: fakeTicketService({
+        onWrite: async () => {
+          meanwhile = await cancel(deps, draft.id);
+        },
+      }),
+    });
+    const draft = await anaWithDraft(deps);
+    const confirmed = await confirm(deps, draft.id);
+    expect(meanwhile?.status).toBe(409);
+    expect(await confirmed.json()).toMatchObject({ status: "confirmed", ticketId: "INC-20320" });
+    expect(deps.notes).toEqual([expect.stringContaining("O chamado INC-20320 foi criado")]);
+  });
+
+  it("does not supersede a draft whose confirmation is under way when the agent drafts again", async () => {
+    const deps = await testDeps({ ticketService: fakeTicketService({ writesDown: true }) });
+    const draft = await anaWithDraft(deps);
+    await confirm(deps, draft.id);
+    await createDraftStore(deps.db).save(vpn);
+    expect(await statusOf(deps, draft.id)).toBe("confirming");
   });
 
   it("refuses a draft that was cancelled or replaced", async () => {
@@ -285,6 +319,21 @@ describe("PATCH /api/drafts/:id", () => {
     expect(deps.notes).toEqual([
       '(ação na tela) Editei o rascunho D-381: título "VPN cai com erro 809", descrição "Erro 809 desde ontem.", categoria Software.',
     ]);
+  });
+
+  it("refuses a category where she has a ticket that may be the same problem: that check is the agent's", async () => {
+    const deps = await testDeps();
+    const draft = await anaWithDraft(deps);
+    // In access, INC-20298 is open and INC-20150 was resolved 4 days ago.
+    const response = await edit(deps, draft.id, { category: "access" });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "possible_duplicate",
+        message: "Em Acesso você já tem o INC-20298 e o INC-20150, que podem ser o mesmo problema. Peça ao Nexo para conferir antes de mudar a categoria.",
+      },
+    });
+    expect((await deps.db.select({ category: drafts.category }).from(drafts).where(eq(drafts.id, draft.id)))[0]?.category).toBe("network_vpn");
   });
 
   it("never changes the priority, which comes from the rule", async () => {

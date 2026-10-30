@@ -11,7 +11,7 @@ export type Deps = {
   db: Db;
   ticketService: Pick<
     TicketServiceClient,
-    "findPersonByEmail" | "listAnalysts" | "createTicket" | "addFollowUp" | "reopenTicket"
+    "findPersonByEmail" | "listAnalysts" | "createTicket" | "addFollowUp" | "reopenTicket" | "listCandidates"
   >;
   agent: NexoAgent;
   /** The agent memory, for the notes of what the employee did outside the agent. */

@@ -407,6 +407,19 @@ describe("POST /api/chat opening a ticket (feature 4)", () => {
     expect(types).toEqual(["tool-recordDecision", "dynamic-tool", "tool-draftTicket", "text"]);
   });
 
+  it("discards the draft of a reply that failed after it, which no card will show", async () => {
+    const deps = await testDeps({
+      model: scriptedModel([
+        { toolCalls: [{ toolName: "recordDecision", input: decision }] },
+        { toolCalls: [{ toolName: "draftTicket", input: vpnDraft }] },
+        new Error("overloaded"),
+      ]),
+    });
+    await readStream(await chat(await say("Só eu. Tenho reunião às 14h."), deps));
+    await deps.settled();
+    expect((await deps.db.select({ status: drafts.status }).from(drafts)).map((row) => row.status)).toEqual(["cancelled"]);
+  });
+
   it("does not take a note of the screen as the answer to a message that is still unanswered", async () => {
     // The reply failed; meanwhile she cancelled a draft in the card, which left a note; then "Tentar de novo".
     const deps = await testDeps({ agent: testAgent(scriptedModel([new Error("overloaded"), ...vpnScript()])) });

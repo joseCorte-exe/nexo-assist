@@ -13,7 +13,7 @@ import {
   type Ticket,
   type TicketServiceResult,
 } from "@nexo/shared";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import type { Db } from "@/db";
 import { conversations, drafts, messages } from "@/db/schema";
@@ -96,6 +96,8 @@ async function draftOf(db: Db, id: string, employeeId: string) {
 
 const draftNotFound = () => jsonError(404, "draft_not_found", "Rascunho não encontrado.");
 const draftNotPending = () => jsonError(409, "draft_not_pending", "Este rascunho não vale mais. Confira o mais recente.");
+const draftConfirming = () =>
+  jsonError(409, "draft_confirming", "A confirmação deste rascunho já começou. Confirme de novo; o chamado não será duplicado.");
 const viewOf = (row: DraftRow) => NextResponse.json<DraftView>(toDraftView(row));
 
 /** What the draft is, in the words of a note: "o rascunho D-381", "o complemento do INC-20311". */
@@ -112,30 +114,42 @@ const REJECTED_BECAUSE: Record<DraftRejection, string> = {
   reopen_window_closed: "ele foi resolvido há mais de 7 dias e não pode mais ser reaberto",
 };
 
+type Settle = {
+  draft: DraftRow;
+  employeeId: string;
+  /** The states the draft may move from: a confirmation leaves confirming, everything else leaves pending. */
+  from: DraftRow["status"][];
+  event: string;
+  set: Partial<DraftRow>;
+  note: string;
+};
+
 /**
- * Moves a pending draft to its next state, and only then notes it: in the conversation, in the same batch, and in the
- * agent memory after. A draft that left pending meanwhile (two clicks, two tabs) is answered as it is, noted once.
+ * Moves the draft to its next state and notes it in the conversation in one batch, so a draft never changes without
+ * its note; then copies the note to the agent memory. A draft that already left the states it moves from (two clicks,
+ * two tabs) is answered as it is, and its note, under the same id, is never written twice.
  */
-async function settle(
-  deps: Deps,
-  { draft, employeeId, event, set, note }: { draft: DraftRow; employeeId: string; event: string; set: Partial<DraftRow>; note: string },
-) {
-  const [row] = await deps.db
-    .update(drafts)
-    .set(set)
-    .where(and(eq(drafts.id, draft.id), eq(drafts.status, "pending")))
-    .returning();
+async function settle(deps: Deps, { draft, employeeId, from, event, set, note }: Settle) {
+  const id = `note-${draft.id}-${event}`;
+  const at = deps.now();
+  const status = set.status ?? draft.status;
+  const [[row]] = await deps.db.batch([
+    deps.db
+      .update(drafts)
+      .set(set)
+      .where(and(eq(drafts.id, draft.id), inArray(drafts.status, from)))
+      .returning(),
+    // Only if the draft is now in the state this note tells.
+    deps.db.run(sql`
+      insert into ${messages} (id, conversation_id, author, text, parts, created_at)
+      select ${id}, ${draft.conversationId}, 'system', ${note}, null, ${at.getTime()}
+      where exists (select 1 from ${drafts} d where d.id = ${draft.id} and d.status = ${status})
+      on conflict (id) do nothing`),
+  ]);
   if (!row) {
     const [current] = await deps.db.select().from(drafts).where(eq(drafts.id, draft.id));
     return current ?? draft;
   }
-
-  const id = `note-${draft.id}-${event}`;
-  const at = deps.now();
-  await deps.db
-    .insert(messages)
-    .values({ id, conversationId: draft.conversationId, author: "system", text: note, parts: null, createdAt: at })
-    .onConflictDoNothing();
   try {
     await saveNote(deps.memory, { id, conversationId: draft.conversationId, employeeId, text: note, at });
   } catch (error) {
@@ -175,9 +189,10 @@ function confirmedNote(draft: DraftRow, ticket: Ticket, now: Date) {
 
 /**
  * POST /api/drafts/:id/confirm. Creates, follows up or reopens the ticket in the ticket-service, without the model.
- * Confirming again answers what the first one did. If the service does not answer, the draft stays pending, and
- * confirming again cannot duplicate anything: the key of the write is the draft. If the service refuses (the ticket
- * changed since the draft), the refusal is kept on the draft.
+ * The draft moves to confirming before the call: from then on it cannot be discarded, edited or superseded, since the
+ * service may write even when its answer is lost. If the service does not answer, it stays confirming, and confirming
+ * again cannot duplicate anything: the key of the write is the draft. Confirming a confirmed draft answers what the
+ * first one did. If the service refuses (the ticket changed since the draft), the refusal is kept on the draft.
  */
 export async function confirmDraftHandler(request: NextRequest, deps: Deps, id: string) {
   const session = await readEmployeeSession(request, deps);
@@ -185,17 +200,27 @@ export async function confirmDraftHandler(request: NextRequest, deps: Deps, id: 
   const employeeId = session.session.id;
   const found = await draftOf(deps.db, id, employeeId);
   if (!found) return draftNotFound();
-  const { draft, conversationState } = found;
-  if (draft.status === "confirmed" || draft.status === "rejected") return viewOf(draft);
-  if (draft.status !== "pending") return draftNotPending();
+  const { conversationState } = found;
+  if (found.draft.status === "confirmed" || found.draft.status === "rejected") return viewOf(found.draft);
+  if (found.draft.status !== "pending" && found.draft.status !== "confirming") return draftNotPending();
   if (conversationState === "closed") return jsonError(409, "conversation_closed", "Esta conversa foi encerrada.");
 
+  const [draft] = await deps.db
+    .update(drafts)
+    .set({ status: "confirming" })
+    .where(and(eq(drafts.id, id), inArray(drafts.status, ["pending", "confirming"])))
+    .returning();
+  // It left pending meanwhile: answer it as it is now.
+  if (!draft) return confirmDraftHandler(request, deps, id);
+
   const result = await writeTicket(deps, draft, employeeId);
+  const from: DraftRow["status"][] = ["confirming"];
   if (!result.ok) {
     const rejection = draftRejection.safeParse(result.error.serviceCode);
     if (rejection.success) {
       const note = `Tentei confirmar ${nameOf(draft)}, mas ${REJECTED_BECAUSE[rejection.data]}.`;
-      return viewOf(await settle(deps, { draft, employeeId, event: "rejected", set: { status: "rejected", rejectedReason: rejection.data }, note }));
+      const set = { status: "rejected" as const, rejectedReason: rejection.data };
+      return viewOf(await settle(deps, { draft, employeeId, from, event: "rejected", set, note }));
     }
     console.error("draft not confirmed", { draftId: draft.id, error: result.error.code, status: result.error.status });
     return result.error.code === "unavailable" || result.error.code === "timeout"
@@ -206,7 +231,7 @@ export async function confirmDraftHandler(request: NextRequest, deps: Deps, id: 
   const ticket = result.data;
   const set = { status: "confirmed" as const, ticketId: ticket.id, dueAt: new Date(ticket.dueAt) };
   const note = confirmedNote(draft, ticket, deps.now());
-  return viewOf(await settle(deps, { draft, employeeId, event: "confirmed", set, note }));
+  return viewOf(await settle(deps, { draft, employeeId, from, event: "confirmed", set, note }));
 }
 
 /** POST /api/drafts/:id/cancel. Discards a pending draft; asked again, answers the same. */
@@ -218,9 +243,11 @@ export async function cancelDraftHandler(request: NextRequest, deps: Deps, id: s
   if (!found) return draftNotFound();
   const { draft } = found;
   if (draft.status === "confirmed") return jsonError(409, "draft_confirmed", "Este chamado já foi criado.");
+  if (draft.status === "confirming") return draftConfirming();
   if (draft.status !== "pending") return viewOf(draft);
   const note = `Descartei o rascunho ${draftLabel(draft.number)}. Nada foi enviado.`;
-  return viewOf(await settle(deps, { draft, employeeId, event: "cancelled", set: { status: "cancelled" }, note }));
+  const row = await settle(deps, { draft, employeeId, from: ["pending"], event: "cancelled", set: { status: "cancelled" }, note });
+  return row.status === "confirming" ? draftConfirming() : viewOf(row);
 }
 
 const quote = (text: string) => `"${text.length > 200 ? `${text.slice(0, 199)}…` : text}"`;
@@ -238,6 +265,7 @@ export async function editDraftHandler(request: NextRequest, deps: Deps, id: str
   const found = await draftOf(deps.db, id, employeeId);
   if (!found) return draftNotFound();
   const { draft } = found;
+  if (draft.status === "confirming") return draftConfirming();
   if (draft.status !== "pending") return jsonError(409, "draft_not_pending", "Este rascunho não pode mais ser editado.");
   const { title, description, category } = body.data;
   if (draft.operation !== "create" && (title !== undefined || category !== undefined)) {
@@ -255,6 +283,18 @@ export async function editDraftHandler(request: NextRequest, deps: Deps, id: str
     said.push(`descrição ${quote(description)}`);
   }
   if (category !== undefined && category !== draft.category) {
+    // The agent checked duplicates in the category it chose; a new one needs the same check, which is its to judge.
+    const candidates = await deps.ticketService.listCandidates(employeeId, category);
+    if (!candidates.ok) return serviceUnavailable();
+    if (candidates.data.length > 0) {
+      const tickets = candidates.data.map((ticket) => `o ${ticket.id}`);
+      const list = tickets.length > 1 ? `${tickets.slice(0, -1).join(", ")} e ${tickets.at(-1)}` : tickets[0];
+      return jsonError(
+        409,
+        "possible_duplicate",
+        `Em ${CATEGORY_LABEL[category]} você já tem ${list}, que podem ser o mesmo problema. Peça ao Nexo para conferir antes de mudar a categoria.`,
+      );
+    }
     // The subcategory belonged to the old category.
     Object.assign(set, { category, subcategory: null });
     said.push(`categoria ${CATEGORY_LABEL[category]}`);
@@ -262,7 +302,8 @@ export async function editDraftHandler(request: NextRequest, deps: Deps, id: str
   if (said.length === 0) return viewOf(draft);
 
   const note = `Editei o rascunho ${draftLabel(draft.number)}: ${said.join(", ")}.`;
-  const row = await settle(deps, { draft, employeeId, event: `edited-${randomUUID()}`, set, note });
+  const row = await settle(deps, { draft, employeeId, from: ["pending"], event: `edited-${randomUUID()}`, set, note });
+  if (row.status === "confirming") return draftConfirming();
   return row.status === "pending" ? viewOf(row) : jsonError(409, "draft_not_pending", "Este rascunho não pode mais ser editado.");
 }
 
