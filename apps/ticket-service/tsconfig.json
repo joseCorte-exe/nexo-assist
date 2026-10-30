@@ -1,6 +1,11 @@
 {
   "extends": "../../tsconfig.base.json",
+  // The Vercel builder reads this file without its "extends". Keep module here: it is the only key the builder checks
+  // before applying its own defaults (strict off among them). Its checker also does not get Response from @types/node,
+  // so the shared client's fetch needs DOM, as in packages/shared.
   "compilerOptions": {
+    "module": "ESNext",
+    "lib": ["ES2022", "DOM"],
     "types": ["node"]
   },
   "include": ["src"]
