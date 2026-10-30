@@ -387,7 +387,7 @@ function draftStep(intent: Extract<Intent, { kind: "draft" }>, answer: string, d
   if (last === undefined) return { toolCalls: [{ toolName: "draftTicket", input: ticket }] };
   const result = draftTicketOutput.safeParse(last);
   if (!result.success) return { text: TICKETS_DOWN };
-  if (result.data.ok) return { text: lineAboveTheCard(result.data, drafts.length > 1) };
+  if (result.data.ok) return { text: lineAboveTheCard(result.data, drafts.length > 1, ticket) };
   if (result.data.reason !== "possible_duplicate") return { text: TICKETS_DOWN };
 
   const candidates: TicketSummary[] = result.data.candidates ?? [];
@@ -401,8 +401,19 @@ function draftStep(intent: Extract<Intent, { kind: "draft" }>, answer: string, d
   return { toolCalls: [{ toolName: "draftTicket", input: { ...ticket, notDuplicateReason } }] };
 }
 
-/** The sentence above the card: what was decided, with the deadline the tool computed. */
-function lineAboveTheCard({ draft, dueText }: { draft: { operation: string; ticketId: string | null; priority: keyof typeof PRIORITY_LABEL }; dueText: string }, afterDuplicate: boolean) {
+/** Why RN-01 gave that priority, in the words of what the employee said. */
+function priorityReason(ticket: DraftTicketInput | undefined) {
+  if (ticket?.urgency === "same_day") return " por causa do compromisso de hoje";
+  if (ticket?.impact === "stopped" && ticket.affected !== "only_me") return " porque está parado para mais gente";
+  return "";
+}
+
+/** The sentence above the card: what was decided and why, with the deadline the tool computed. */
+function lineAboveTheCard(
+  { draft, dueText }: { draft: { operation: string; ticketId: string | null; priority: keyof typeof PRIORITY_LABEL }; dueText: string },
+  afterDuplicate: boolean,
+  ticket?: DraftTicketInput,
+) {
   if (draft.operation === "reopen") return `O ${draft.ticketId} foi resolvido há pouco e ainda pode ser reaberto. Confira antes de eu reabrir:`;
   if (draft.operation === "update") {
     return afterDuplicate
@@ -410,7 +421,7 @@ function lineAboveTheCard({ draft, dueText }: { draft: { operation: string; tick
       : `Confira o que vou acrescentar ao ${draft.ticketId} antes de eu enviar:`;
   }
   const priority = PRIORITY_LABEL[draft.priority].toLowerCase();
-  return `Coloquei prioridade ${priority}${dueText.startsWith("hoje") ? " por causa do compromisso de hoje" : ""}: a resposta chega ${dueText}. Confira antes de eu criar:`;
+  return `Coloquei prioridade ${priority}${priorityReason(ticket)}: a resposta chega ${dueText}. Confira antes de eu criar:`;
 }
 
 /** The problem is back: reopen the resolved ticket about it; past the 7 days, start a new one. */

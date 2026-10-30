@@ -276,6 +276,14 @@ describe("simulatedModel opening and following up tickets (feature 4)", () => {
     expect(result.text).toBe("Coloquei prioridade alta por causa do compromisso de hoje: a resposta chega hoje, até 14:00. Confira antes de eu criar:");
   });
 
+  it("says why the priority is what it is: something stopped for the team is critical, with no meeting involved", async () => {
+    const say = conversation();
+    await say("O sistema de pedidos parou de funcionar desde cedo.");
+    const result = await say("Minha equipe");
+    expect(savedDrafts.at(-1)?.priority).toBe("critical");
+    expect(result.text).toBe("Coloquei prioridade crítica porque está parado para mais gente: a resposta chega hoje, até 11:00. Confira antes de eu criar:");
+  });
+
   it("follows up the open ticket about the same problem instead of opening another", async () => {
     const say = conversation();
     await say("Meu notebook continua muito lento desde a atualização.");
