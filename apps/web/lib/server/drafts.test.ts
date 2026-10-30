@@ -1,6 +1,6 @@
 import type { DraftRecord } from "@nexo/agent";
 import type { DraftView } from "@nexo/shared";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { conversations, drafts, messages } from "@/db/schema";
 import { loadConversation } from "./conversation";
@@ -423,5 +423,64 @@ describe("loadConversation with drafts", () => {
     const draft = await anaWithDraft(deps);
     await cancel(deps, draft.id);
     expect((await loadConversation(deps.db, ana.id)).messages).toEqual([]);
+  });
+});
+
+describe("the cost of a draft in the database", () => {
+  /** Counts the round trips to the database while the work runs: each query, batch or transaction is one. */
+  async function roundTrips(deps: TestDeps, work: () => Promise<unknown>) {
+    const client = deps.db.$client;
+    let count = 0;
+    const originals = { execute: client.execute, batch: client.batch, transaction: client.transaction };
+    for (const name of ["execute", "batch", "transaction"] as const) {
+      const original = originals[name] as (...args: unknown[]) => Promise<unknown>;
+      (client as unknown as Record<string, unknown>)[name] = (...args: unknown[]) => {
+        count++;
+        return original.apply(client, args);
+      };
+    }
+    try {
+      await work();
+    } finally {
+      Object.assign(client, originals);
+    }
+    return count;
+  }
+
+  it("saves a draft, superseding the one before and numbering it, in one round trip", async () => {
+    const deps = await testDeps();
+    await anaWithDraft(deps);
+    expect(await roundTrips(deps, () => createDraftStore(deps.db).save(vpn))).toBe(1);
+  });
+
+  it("confirms in three: read it, mark it confirming, and move it with its note", async () => {
+    const deps = await testDeps();
+    const draft = await anaWithDraft(deps);
+    expect(await roundTrips(deps, () => confirm(deps, draft.id))).toBe(3);
+  });
+
+  it("cancels and edits in two", async () => {
+    const deps = await testDeps();
+    const draft = await anaWithDraft(deps);
+    expect(await roundTrips(deps, () => edit(deps, draft.id, { title: "VPN cai" }))).toBe(2);
+    expect(await roundTrips(deps, () => cancel(deps, draft.id))).toBe(2);
+  });
+
+  it("loads the conversation with its messages and drafts in two", async () => {
+    const deps = await testDeps();
+    await anaWithDraft(deps);
+    expect(await roundTrips(deps, () => loadConversation(deps.db, ana.id))).toBe(2);
+  });
+
+  it("reads the drafts of a conversation and a draft of an employee through indexes, never scanning the table", async () => {
+    const deps = await testDeps();
+    const plan = async (query: ReturnType<typeof sql>) =>
+      (await deps.db.all<{ detail: string }>(sql`explain query plan ${query}`)).map((step) => step.detail).join(" | ");
+    expect(await plan(sql`select * from drafts where conversation_id = 'conv-ana' order by created_at`)).toContain(
+      "USING INDEX drafts_conversation_created",
+    );
+    expect(
+      await plan(sql`select * from drafts d join conversations c on c.id = d.conversation_id where d.id = 'x' and c.employee_id = 'emp-ana'`),
+    ).toMatch(/SEARCH d USING INDEX sqlite_autoindex_drafts_1|SEARCH d USING PRIMARY KEY/);
   });
 });
