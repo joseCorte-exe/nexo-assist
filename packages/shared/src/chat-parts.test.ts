@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { NexoUIMessage } from "./chat";
-import { decisionOf, textOf, summarizeTurn } from "./chat-parts";
+import { decisionOf, summarizeTurn, textOf, withToolErrors } from "./chat-parts";
 
 const decision = {
   understanding: "Quer saber o horário do service desk",
@@ -81,5 +81,20 @@ describe("decisionOf", () => {
   it("waits while the record is still streaming, since its input may be partial", () => {
     const streaming = { type: "tool-recordDecision", toolCallId: "c1", state: "input-streaming", input: decision } as Part;
     expect(decisionOf([streaming])).toBeNull();
+  });
+});
+
+describe("withToolErrors", () => {
+  it("saves a tool input the agent refused as an error of the tool, so the reply stays valid", () => {
+    const refused = tool("draftTicket", { operation: "create" }, { error: true, message: "Faltam: título." });
+    expect(withToolErrors([refused, text("Pronto.")])).toEqual([
+      { type: "tool-draftTicket", toolCallId: "call-draftTicket", state: "output-error", input: { operation: "create" }, errorText: "Faltam: título." },
+      text("Pronto."),
+    ]);
+  });
+
+  it("keeps every other part as it was", () => {
+    const parts = [tool("searchArticles", { query: "vpn" }, { ok: false, message: "fora do ar" }), text("Oi")];
+    expect(withToolErrors(parts)).toEqual(parts);
   });
 });

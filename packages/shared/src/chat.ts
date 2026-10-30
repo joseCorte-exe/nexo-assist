@@ -2,7 +2,8 @@ import type { UIMessage } from "ai";
 import { z } from "zod";
 import { category, conversationState, priority, ticketStatus, ticketType } from "./domain";
 import { kbArticleSchema } from "./help-center";
-import { ticketId } from "./tickets";
+import { draftTicketInput, draftTicketOutput } from "./drafts";
+import { ticketId, ticketSummary } from "./tickets";
 
 // Contracts of the chat (ARQUITETURA.md, section 7): the route body, the parts of the stream and the conversation
 // the screen loads. The agent tools take their schemas from here too, so the screen reads the same shapes.
@@ -71,16 +72,6 @@ export type RedirectOutOfScopeOutput = z.infer<typeof redirectOutOfScopeOutput>;
 
 // Tools of the ticket lookup (feature 3). Whose tickets they are never comes from the model: the route puts the
 // employee of the session in the request context, and the inputs have no field for it.
-
-/** A ticket as a line of a list: what the employee needs to recognize it and whether it is late. */
-export const ticketSummary = z.object({
-  id: z.string(),
-  title: z.string(),
-  status: ticketStatus,
-  createdAt: z.iso.datetime(),
-  overdue: z.boolean(),
-});
-export type TicketSummary = z.infer<typeof ticketSummary>;
 
 export const listMyTicketsInput = z.object({
   scope: z
@@ -179,6 +170,7 @@ export const nexoToolSchemas = {
   getTicket: { inputSchema: getTicketInput, outputSchema: getTicketOutput },
   offerTicketChoice: { inputSchema: offerTicketChoiceInput, outputSchema: offerTicketChoiceOutput },
   offerReplies: { inputSchema: offerRepliesInput, outputSchema: offerRepliesOutput },
+  draftTicket: { inputSchema: draftTicketInput, outputSchema: draftTicketOutput },
 };
 
 /** First part of every chat stream: the conversation the message went to, with the new counter. */

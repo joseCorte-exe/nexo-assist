@@ -32,3 +32,23 @@ export function summarizeTurn(parts: Parts): StoredDecision {
   const toolsUsed = [...new Set(tools)].filter((tool) => !INTERNAL_TOOLS.has(tool));
   return { record: decisionOf(parts), toolsUsed };
 }
+
+/** What Mastra hands the model when a tool input fails its schema, so the model can fix the call. */
+const isRefusedInput = (output: unknown): output is { error: true; message: string } =>
+  typeof output === "object" &&
+  output !== null &&
+  (output as { error?: unknown }).error === true &&
+  typeof (output as { message?: unknown }).message === "string";
+
+/**
+ * A tool input the agent refused streams as a normal result with { error: true }, which matches no output schema: the
+ * saved reply would no longer read back. It is saved as what it is, an error of that tool, with the message the model got.
+ */
+export function withToolErrors(parts: Parts): Parts {
+  return parts.map((part) => {
+    if (!part.type.startsWith("tool-") || !("state" in part) || part.state !== "output-available") return part;
+    if (!isRefusedInput(part.output)) return part;
+    const { output, ...rest } = part;
+    return { ...rest, state: "output-error", errorText: output.message } as Parts[number];
+  });
+}

@@ -10,3 +10,6 @@ export * from "./help-center";
 export * from "./chat";
 export * from "./chat-parts";
 export * from "./labels";
+export * from "./drafts";
+export * from "./reopen";
+export * from "./deadline";

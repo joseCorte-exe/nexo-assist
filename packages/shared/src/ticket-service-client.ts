@@ -1,9 +1,11 @@
 import { z } from "zod";
 import { kbArticleSchema } from "./help-center";
 import { analystSchema, employeeSchema, type Person } from "./people";
+import type { Category } from "./domain";
 import {
   type CreateTicketInput,
   type EmployeeTicketsStatus,
+  type TicketFollowUpInput,
   type TicketDetail,
   ticketDetailSchema,
   ticketSchema,
@@ -16,6 +18,8 @@ export const IDEMPOTENCY_KEY_HEADER = "idempotency-key";
 export type TicketServiceError = {
   code: "unavailable" | "timeout" | "http_error" | "invalid_response";
   status?: number;
+  /** The code the service answered with a refusal, such as reopen_window_closed. */
+  serviceCode?: string;
   message: string;
 };
 
@@ -85,7 +89,7 @@ export function createTicketServiceClient(options: Options) {
       const json: unknown = await response.json().catch(() => undefined);
 
       if (!response.ok) {
-        return { ok: false, error: { code: "http_error", status: response.status, message: errorMessage(json) } };
+        return { ok: false, error: { code: "http_error", status: response.status, ...serviceError(json) } };
       }
 
       const parsed = schema.safeParse(json);
@@ -147,15 +151,29 @@ export function createTicketServiceClient(options: Options) {
       request(z.array(kbArticleSchema), "GET", `/kb/search?${new URLSearchParams({ q: query })}`),
     createTicket: (input: CreateTicketInput, idempotencyKey: string) =>
       request(ticketSchema, "POST", "/tickets", { body: input, idempotencyKey }),
+    /** The open tickets of the employee in a category: the ones a new ticket could duplicate. */
+    listCandidates: (employeeId: string, category: Category) =>
+      request(
+        z.array(ticketSchema),
+        "GET",
+        `/employees/${encodeURIComponent(employeeId)}/tickets/candidates?${new URLSearchParams({ category })}`,
+      ),
+    /** Adds a follow-up of the employee to an open ticket of hers. The key is the draft, so a retry adds it once. */
+    addFollowUp: (ticketId: string, input: TicketFollowUpInput, idempotencyKey: string) =>
+      request(ticketSchema, "PATCH", `/tickets/${encodeURIComponent(ticketId)}`, { body: input, idempotencyKey }),
+    /** Reopens a ticket of hers resolved up to 7 days ago. The key is the draft, so a retry reopens it once. */
+    reopenTicket: (ticketId: string, input: TicketFollowUpInput, idempotencyKey: string) =>
+      request(ticketSchema, "POST", `/tickets/${encodeURIComponent(ticketId)}/reopen`, { body: input, idempotencyKey }),
   };
 }
 
 export type TicketServiceClient = ReturnType<typeof createTicketServiceClient>;
 
-function errorMessage(json: unknown): string {
-  if (typeof json === "object" && json !== null && "error" in json) {
-    const { error } = json as { error: { message?: unknown } };
-    if (typeof error.message === "string") return error.message;
-  }
-  return "Ticket service rejected the request";
+function serviceError(json: unknown): { serviceCode?: string; message: string } {
+  const error = typeof json === "object" && json !== null && "error" in json ? (json as { error: unknown }).error : null;
+  const { code, message } = (typeof error === "object" && error !== null ? error : {}) as { code?: unknown; message?: unknown };
+  return {
+    ...(typeof code === "string" ? { serviceCode: code } : {}),
+    message: typeof message === "string" ? message : "Ticket service rejected the request",
+  };
 }
