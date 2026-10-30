@@ -206,6 +206,28 @@ test("when the ticket service falls at the confirmation, the draft waits and the
   expect(outlook).toHaveLength(1);
 });
 
+test.describe("on a Mac", () => {
+  test.use({
+    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36",
+  });
+
+  test("the shortcut chip of Confirmar is drawn as nexo.pen draws it, 28 by 16 px", async ({ page }) => {
+    await signInAsAna(page);
+    await ask(page, "O monitor do notebook não liga desde cedo.");
+    await replies(page).last().getByRole("button", { name: "Só eu" }).click();
+    await idle(page);
+    const confirm = lastDraft(page).getByRole("button", { name: "Confirmar" });
+    await expect(confirm).toHaveAttribute("aria-keyshortcuts", "Meta+Enter");
+    const chip = await confirm.locator("kbd").boundingBox();
+    expect(chip!.width).toBeGreaterThan(27.5);
+    expect(chip!.width).toBeLessThan(28.6);
+    expect(chip!.height).toBe(16);
+    // The button is as wide as in nexo.pen: 126 px.
+    const button = await confirm.boundingBox();
+    expect(Math.abs(button!.width - 126)).toBeLessThan(1);
+  });
+});
+
 test.describe("on a phone", () => {
   test.use({ viewport: { width: 375, height: 812 } });
 

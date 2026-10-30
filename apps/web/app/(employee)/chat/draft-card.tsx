@@ -12,10 +12,11 @@ import {
 } from "@nexo/shared";
 import { ChevronDown, CircleAlert, LoaderCircle } from "lucide-react";
 import { type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
-import { CheckIcon } from "@/components/design-icons";
+import { CheckIcon, CommandKeyIcon, ReturnKeyIcon } from "@/components/design-icons";
 import { WholePixel } from "@/components/whole-pixel";
 import { callApi } from "@/lib/api-client";
 import { formatDueTime } from "@/lib/format";
+import { useWholePixelWidth } from "@/lib/use-whole-pixel-width";
 import type { Shortcut } from "@/lib/shortcut";
 import { PRIORITY_DOT } from "@/lib/ticket-look";
 
@@ -69,6 +70,10 @@ export function DraftCard({ draft, busy, shortcut, onChange, onDone, onStale }: 
   const card = useRef<HTMLElement>(null);
   const editButton = useRef<HTMLButtonElement>(null);
   const confirmButton = useRef<HTMLButtonElement>(null);
+
+  // nexo.pen lays the buttons of the bar out on whole pixels, as it does the quick replies.
+  useWholePixelWidth(confirmButton, `${draft.status}:${pending}`);
+  useWholePixelWidth(editButton, `${draft.status}:${pending}`);
 
   const open = draft.status === "pending";
   // The confirmation went out and its answer did not come back: confirming again is all that is left.
@@ -191,7 +196,7 @@ export function DraftCard({ draft, busy, shortcut, onChange, onDone, onStale }: 
                     aria-hidden
                     className="rounded-md bg-white/14 px-[5px] py-px font-ui text-11.5 text-white/80 [@media(hover:none)_and_(pointer:coarse)]:hidden"
                   >
-                    {shortcut.label}
+                    <ShortcutKeys shortcut={shortcut} />
                   </kbd>
                 </button>
                 {confirming ? null : (
@@ -546,7 +551,7 @@ function DraftEditor({ draft, kind, reference, shortcut, busy, onSaved, onClose,
             Salvar
           </Working>
           <kbd aria-hidden className="rounded-md bg-white/14 px-[5px] py-px font-ui text-11.5 text-white/80 [@media(hover:none)_and_(pointer:coarse)]:hidden">
-            {shortcut.label}
+            <ShortcutKeys shortcut={shortcut} />
           </kbd>
         </button>
         <button type="button" onClick={onClose} className={`${actionBase} px-3.5 font-medium text-ink-2 hover:bg-ink/5`}>
@@ -596,5 +601,19 @@ function EditField({
         </p>
       ) : null}
     </div>
+  );
+}
+
+/** The keys of the chip on Confirmar and Salvar: ⌘↵ drawn as in nexo.pen, or Ctrl and the same ↵ outside Apple. */
+function ShortcutKeys({ shortcut }: { shortcut: Shortcut }) {
+  return shortcut.keys === "Meta+Enter" ? (
+    <>
+      <CommandKeyIcon />
+      <ReturnKeyIcon />
+    </>
+  ) : (
+    <>
+      Ctrl <ReturnKeyIcon />
+    </>
   );
 }
