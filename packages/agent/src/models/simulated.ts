@@ -18,6 +18,7 @@ import {
   type TicketSummary,
   type Urgency,
 } from "@nexo/shared";
+import { SCREEN_NOTE } from "../agent";
 import { codedModel, type ModelStep } from "./stream";
 
 // A stand-in for the LLM with fixed rules, for the end-to-end tests and for running the app without a key
@@ -73,8 +74,6 @@ const OFFER_ANSWERS: Record<string, { decision: DecisionRecord; text: string }> 
 
 const TICKETS_DOWN = "O serviço de chamados não respondeu agora. Tente de novo em instantes.";
 const ASK_TO_ADD = /^O que você quer acrescentar ao ((?:INC|REQ)-\d{5})\?$/;
-/** The notes the chat leaves in the memory for what happened on the screen: not something the employee said. */
-const SCREEN_NOTE = "(ação na tela)";
 
 // The words of a problem, to tell the category and whether an open ticket is about the same thing.
 const CATEGORY_WORDS: Array<[Category, RegExp]> = [

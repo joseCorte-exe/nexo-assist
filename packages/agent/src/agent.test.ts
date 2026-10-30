@@ -1,6 +1,6 @@
 import { type DecisionRecord, type KbArticle, slaText, type Ticket } from "@nexo/shared";
 import { describe, expect, it } from "vitest";
-import { createNexoAgent, createMemory } from "./agent";
+import { createNexoAgent, createMemory, saveNote } from "./agent";
 import { promptText, replyOf, scriptedModel } from "./testing";
 import type { DraftRecord, DraftStore, TicketDesk } from "./tools";
 
@@ -299,5 +299,31 @@ describe("streamReply", () => {
   it("ends the reply with the failure of the model", async () => {
     const { agent } = setup([new Error("overloaded")]);
     await expect(replyOf(agent, turn)).rejects.toThrow();
+  });
+});
+
+describe("saveNote", () => {
+  it("puts what happened on the screen in the conversation, so the model reads it on the next turn", async () => {
+    const { agent, model, memory } = setup([...hoursScript(), ...hoursScript()]);
+    await replyOf(agent, turn);
+    await saveNote(memory, {
+      id: "note-draft-1-confirmed",
+      conversationId: "conv-1",
+      employeeId: "emp-ana",
+      text: "Confirmei o rascunho D-381. O chamado INC-20320 foi criado.",
+      at: new Date("2026-10-26T13:05:00Z"),
+    });
+    await replyOf(agent, { ...turn, text: "Qual o número?" });
+    expect(promptText(model.calls[3]!)).toContain("(ação na tela) Confirmei o rascunho D-381. O chamado INC-20320 foi criado.");
+  });
+
+  it("keeps a note once when it is saved again under the same id", async () => {
+    const { agent, model, memory } = setup([...hoursScript(), ...hoursScript()]);
+    await replyOf(agent, turn);
+    const note = { id: "note-1", conversationId: "conv-1", employeeId: "emp-ana", text: "Descartei o rascunho D-381.", at: new Date() };
+    await saveNote(memory, note);
+    await saveNote(memory, note);
+    await replyOf(agent, { ...turn, text: "E agora?" });
+    expect(promptText(model.calls[3]!).split("Descartei o rascunho D-381.")).toHaveLength(2);
   });
 });

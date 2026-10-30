@@ -24,6 +24,34 @@ export function createMemory({ url, authToken }: { url: string; authToken?: stri
   });
 }
 
+export type AgentMemory = ReturnType<typeof createMemory>;
+
+/** Prefix of the notes of what happened on the screen, which the instructions tell the model how to read. */
+export const SCREEN_NOTE = "(ação na tela)";
+
+/**
+ * Copies to the conversation's memory something the employee did outside the agent (confirmed, edited or cancelled a
+ * draft), so the model knows it next turn. It goes in as her message: Mastra leaves system messages out of what the
+ * model reads. The same id saved again replaces the note instead of repeating it.
+ */
+export async function saveNote(
+  memory: Pick<AgentMemory, "saveMessages">,
+  { id, conversationId, employeeId, text, at }: { id: string; conversationId: string; employeeId: string; text: string; at: Date },
+) {
+  await memory.saveMessages({
+    messages: [
+      {
+        id,
+        role: "user",
+        createdAt: at,
+        threadId: conversationId,
+        resourceId: employeeId,
+        content: { format: 2, parts: [{ type: "text", text: `${SCREEN_NOTE} ${text}` }] },
+      },
+    ],
+  });
+}
+
 /** Any model Mastra takes: a "provider/model" id, or a model object such as the simulated one. */
 export type AgentModel = MastraModelConfig;
 
