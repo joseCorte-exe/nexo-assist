@@ -191,11 +191,16 @@ test("when the ticket service falls at the confirmation, the draft waits and the
   expect(outage.ok()).toBe(true);
   await draft.getByRole("button", { name: "Confirmar" }).click();
   await expect(draft.getByRole("alert")).toContainText("O serviço de chamados não respondeu. Tente de novo; o chamado não será duplicado.");
-  await expect(draft).toContainText("Aguardando confirmação");
+  // The service may have written before falling: nothing but confirming again, which cannot duplicate.
+  await expect(draft).toContainText("Confirmação pendente");
+  await expect(draft.getByRole("button")).toHaveCount(1);
+  await expect(draft.getByRole("button", { name: "Tentar de novo" })).toBeVisible();
+  await page.reload();
+  await expect(lastDraft(page)).toContainText("Confirmação pendente");
 
-  await page.waitForTimeout(4_500);
-  await draft.getByRole("button", { name: "Tentar de novo" }).click();
-  await expect(draft).toContainText(/Chamado INC-\d{5} criado\./);
+  await page.waitForTimeout(4_000);
+  await lastDraft(page).getByRole("button", { name: "Tentar de novo" }).click();
+  await expect(lastDraft(page)).toContainText(/Chamado INC-\d{5} criado\./);
   const tickets = await (await request.get(`${e2eEnv.TICKET_SERVICE_URL}/employees/emp-ana/tickets`, { headers: serviceHeaders })).json();
   const outlook = tickets.filter((ticket: { title: string }) => /Outlook/.test(ticket.title) && ticket.title !== "Outlook não sincroniza no celular");
   expect(outlook).toHaveLength(1);
