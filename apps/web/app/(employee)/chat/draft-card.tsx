@@ -70,8 +70,7 @@ export function DraftCard({ draft, busy, shortcut, onChange, onDone, onStale }: 
   const card = useRef<HTMLElement>(null);
   const editButton = useRef<HTMLButtonElement>(null);
   const confirmButton = useRef<HTMLButtonElement>(null);
-
-  // nexo.pen lays the buttons of the bar out on whole pixels, as it does the quick replies.
+  // On whole pixels, as nexo.pen lays out the buttons of the bar.
   useWholePixelWidth(confirmButton, `${draft.status}:${pending}`);
   useWholePixelWidth(editButton, `${draft.status}:${pending}`);
 
@@ -169,7 +168,7 @@ export function DraftCard({ draft, busy, shortcut, onChange, onDone, onStale }: 
             <p className="text-13.5 leading-5 text-pretty whitespace-pre-line text-ink-2">{draft.description}</p>
           </div>
           <Fields draft={draft} overdue={overdue} />
-          {/* Above the bar, next to the button it is about, and never under the composer. */}
+          {/* Above the bar, next to the button it is about: under it, the composer would cover it. */}
           {confirming || problem ? (
             <p role="alert" className="fade-enter flex items-start gap-2 border-t border-rule bg-desk px-[18px] py-3 text-13.5 leading-5 text-ink-2">
               <CircleAlert aria-hidden className="mt-[3px] size-3.5 shrink-0 text-danger-text" />
@@ -242,10 +241,7 @@ export function DraftCard({ draft, busy, shortcut, onChange, onDone, onStale }: 
   );
 }
 
-/**
- * The bar of the card: 52 px, its rule straddling the top edge as nexo.pen draws strokes, half a pixel on each side,
- * so the fields above it end where the design ends them.
- */
+/** The bar of the card: 52 px under a 1 px rule that nexo.pen centres on its top edge, half a pixel on each side. */
 const bar =
   "relative h-[52px] bg-desk before:absolute before:inset-x-0 before:-top-[0.5px] before:h-px before:bg-rule";
 
@@ -298,8 +294,8 @@ const STATE: Record<DraftView["status"], { dot: string; tone: string; label: (dr
 
 function DraftState({ draft, editing = false }: { draft: DraftView; editing?: boolean }) {
   const look = editing ? { dot: "bg-primary", tone: "text-primary-text", label: () => "Editando" } : STATE[draft.status];
-  // Rounded up to a whole pixel, as nexo.pen lays out text that hugs its content: aligned against the right edge, a
-  // fractional width would leave it a fraction of a pixel off.
+  // On whole pixels, as nexo.pen lays out text that hugs its content: against the right edge, a fractional width
+  // would put it a fraction of a pixel off.
   return (
     <WholePixel key={editing ? "editing" : draft.status} text={look.label(draft)} className="fade-enter flex items-center gap-1.5">
       <span aria-hidden className={`${dot} ${look.dot}`} />
@@ -604,7 +600,7 @@ function EditField({
   );
 }
 
-/** The keys of the chip on Confirmar and Salvar: ⌘↵ drawn as in nexo.pen, or Ctrl and the same ↵ outside Apple. */
+/** The keys of the chip on Confirmar and Salvar: ⌘↵ drawn as nexo.pen draws them, or Ctrl and the same ↵ elsewhere. */
 function ShortcutKeys({ shortcut }: { shortcut: Shortcut }) {
   return shortcut.keys === "Meta+Enter" ? (
     <>

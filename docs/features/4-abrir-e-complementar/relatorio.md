@@ -11,7 +11,7 @@ O plano está em [plano.md](plano.md). Este arquivo junta o que foi pedido, a pr
 | Lógica do back | Nada é criado sem o clique em Confirmar, e a confirmação não passa pelo modelo. Tipo e prioridade (RN-01), prazo (RN-02), duplicidade e a janela de 7 dias ficam no código. As três escritas são idempotentes, com a chave amarrada à rota, ao chamado e ao funcionário. O rascunho de outra pessoa responde o mesmo 404 de um que não existe. |
 | Desempenho | A conversa e os rascunhos saem numa ida ao banco; um rascunho novo substitui o anterior e ganha número num batch só; um teste fixa quantas idas ao banco cada ação faz (salvar uma, editar e cancelar duas, confirmar três). As rotas novas usam o índice de `(opened_by, created_at)`, com teste do plano da consulta. A lista de chamados traz abertos e reabríveis numa chamada. Medições abaixo. |
 | Padrão do contrato | Os schemas Zod de `packages/shared` servem ao serviço, ao agent, às rotas e à tela. Uma entrada que o Mastra recusa é gravada como erro da ferramenta, e a resposta continua válida ao recarregar. |
-| Testes primeiro | Regras, rotas, ferramenta, banco e cada correção da revisão começaram por um teste que falhou pelo motivo certo. Algumas correções do simulado e do card vieram antes do teste, no meio da medição. Para essas, cada correção foi tirada do código e o teste dela falhou pelo motivo certo (tabela abaixo); quatro ajustes do card não tinham teste e ganharam um. |
+| Testes primeiro | Regras, rotas, ferramenta, banco e cada correção da revisão começaram por um teste que falhou pelo motivo certo. Os ajustes do card feitos antes do teste foram apagados do código e escritos de novo a partir de testes que falharam, um vermelho por vez (abaixo). |
 | Ponta a ponta | Playwright com build de produção e o modelo simulado, conferindo no ticket-service o que foi gravado, e o Haiku 5.5 de verdade em rodadas medidas. |
 
 ## Testes
@@ -23,9 +23,11 @@ O plano está em [plano.md](plano.md). Este arquivo junta o que foi pedido, a pr
 
 Todas passam, e os tipos fecham nos quatro pacotes. Por pacote: shared 133, ticket-service 72, agent 82, web 173.
 
-### Cada teste pega a sua correção
+### Os ajustes do card, refeitos a partir dos testes
 
-Para as correções feitas antes do teste, a correção foi tirada do código e o teste rodou sem ela. Todos falharam pelo motivo que a correção resolve, e passaram com ela de volta.
+Cinco ajustes do card tinham sido feitos medindo contra o design, antes do teste: a barra, o estado, o erro, o chip e a quebra da bolha. Foram apagados do código, e cada um voltou só depois de um teste no navegador falhar por ele. Nesse ciclo, o teste do chip ficou mais justo: ele aceitava 1 px de folga na largura de Confirmar, e a folga escondia os botões fora do pixel inteiro (125,19 px em vez de 126). A quebra por palavra na bolha do Nexo não voltou, porque nenhum teste nem a medição contra o design pediram: a tela ficou idêntica, pixel a pixel, à entrega anterior.
+
+Nas correções do agent e do contrato, o teste já existia; para conferir, cada correção foi tirada do código e o teste falhou pelo motivo que ela resolve.
 
 | Correção | Sem ela, o teste diz |
 |---|---|
@@ -39,6 +41,7 @@ Para as correções feitas antes do teste, a correção foi tirada do código e 
 | O erro da confirmação fica acima da barra (teste novo) | o erro termina em 799 px, abaixo do botão, que começa em 710 px |
 | A bolha quebra palavra por palavra, como o Pencil (teste novo) | as linhas começam em "da" e "reiniciei" em vez de "empresa" e "tudo." |
 | O chip ⌘↵ desenhado com os contornos da Noto | o chip mede 32,25 px de largura em vez de 28 |
+| Os botões da barra em pixel inteiro (teste mais justo) | Confirmar mede 125,1875 px em vez de 126 |
 
 ## Fidelidade ao design
 

@@ -60,9 +60,9 @@ export function LogOutIcon(props: IconProps) {
 }
 
 /**
- * The keys of the shortcut chip, as nexo.pen draws them: ⌘ from Noto Sans Symbols 2 and ↵ from Noto Sans Math, the
- * fallback fonts Pencil uses for them. Drawn from their outlines instead of loading 430 KB of fonts for two
- * characters. One em high with the baseline 0.2 em above the bottom, so they sit on the line of the text around them.
+ * The keys of the shortcut chip as nexo.pen draws them: ⌘ from Noto Sans Symbols 2 and ↵ from Noto Sans Math, the
+ * fonts Pencil falls back to for them. Their outlines instead of 430 KB of fonts for two characters, one em high with
+ * the font's advance and baseline, so they sit in the text around them as the characters would.
  */
 function KeyGlyph({ advance, d, ...props }: IconProps & { advance: number; d: string }) {
   return (

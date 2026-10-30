@@ -85,8 +85,7 @@ export function AgentReply({ turn, renderDraft, failures, onRetry, onChoose }: P
         // The quick replies go inside the bubble: under its text, their question in bold, as in nexo.pen.
         return (
           <div key={block.key} className={`${bubble} mt-1.5 flex flex-col gap-3`}>
-            {/* Lines break where nexo.pen breaks them, word by word, as in the bubble of the employee. */}
-            <p className="text-14.5 leading-[22px] whitespace-pre-line text-ink">{block.text}</p>
+            <p className="text-14.5 leading-[22px] text-pretty whitespace-pre-line text-ink">{block.text}</p>
             {replies?.question ? <p className="text-14.5 font-semibold text-pretty text-ink">{replies.question}</p> : null}
             {replies ? <QuickReplies {...replies} onChoose={onChoose} /> : null}
           </div>

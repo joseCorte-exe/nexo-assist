@@ -250,11 +250,41 @@ test.describe("on a Mac", () => {
     expect(chip!.width).toBeGreaterThan(27.5);
     expect(chip!.width).toBeLessThan(28.6);
     expect(chip!.height).toBe(16);
-    // The button is as wide as in nexo.pen: 126 px.
+    // The buttons are as wide as in nexo.pen, on whole pixels: Confirmar 126 px, and Editar 6 px after it, where
+    // the design starts it.
     const button = await confirm.boundingBox();
-    expect(Math.abs(button!.width - 126)).toBeLessThan(1);
+    expect(button!.width).toBe(126);
+    const edit = await lastDraft(page).getByRole("button", { name: "Editar" }).boundingBox();
+    expect(Number.isInteger(edit!.width)).toBe(true);
+    expect(edit!.x - (button!.x + button!.width)).toBe(6);
   });
 });
+
+/** The word each line of a bubble starts with, as drawn and as the plain word-by-word wrapping would draw it. */
+function lineStarts(element: HTMLElement) {
+  const text = element.firstChild as Text;
+  const starts = () => {
+    const words: string[] = [];
+    let top = Number.NaN;
+    let at = 0;
+    for (const word of text.data.split(" ")) {
+      const range = document.createRange();
+      range.setStart(text, at);
+      range.setEnd(text, at + word.length);
+      const wordTop = Math.round(range.getBoundingClientRect().top);
+      if (wordTop !== top) words.push(word);
+      top = wordTop;
+      at += word.length + 1;
+    }
+    return words;
+  };
+  const drawn = starts();
+  const before = element.style.textWrap;
+  element.style.textWrap = "wrap";
+  const greedy = starts();
+  element.style.textWrap = before;
+  return { drawn, greedy };
+}
 
 test("a bubble breaks its lines word by word, as nexo.pen does, never moving a word down for a longer last line", async ({ page }) => {
   // Carla, so that Ana's conversation stays as the tests above left it.
@@ -265,34 +295,14 @@ test("a bubble breaks its lines word by word, as nexo.pen does, never moving a w
   await page.waitForURL("/");
   // Left to the browser's balanced wrapping, "tudo." would not end alone on the last line.
   await ask(page, "O notebook novo que recebi semana passada não conecta na VPN da empresa quando estou em casa, só funciona no escritório. Já reiniciei tudo.");
-  const bubble = page.getByRole("article", { name: "Você" }).last().locator("div").first();
-  const lines = await bubble.evaluate((element) => {
-    const text = element.firstChild as Text;
-    // The word each line starts with.
-    const starts = () => {
-      const words: string[] = [];
-      let top = Number.NaN;
-      let at = 0;
-      for (const word of text.data.split(" ")) {
-        const range = document.createRange();
-        range.setStart(text, at);
-        range.setEnd(text, at + word.length);
-        const wordTop = Math.round(range.getBoundingClientRect().top);
-        if (wordTop !== top) words.push(word);
-        top = wordTop;
-        at += word.length + 1;
-      }
-      return words;
-    };
-    const drawn = starts();
-    const before = element.style.textWrap;
-    element.style.textWrap = "wrap";
-    const greedy = starts();
-    element.style.textWrap = before;
-    return { drawn, greedy };
-  });
-  expect(lines.drawn.length).toBeGreaterThan(1);
-  expect(lines.drawn).toEqual(lines.greedy);
+
+  const mine = await page.getByRole("article", { name: "Você" }).last().locator("div").first().evaluate(lineStarts);
+  expect(mine.drawn.length).toBeGreaterThan(1);
+  expect(mine.drawn).toEqual(mine.greedy);
+
+  const reply = await replies(page).last().locator("p").first().evaluate(lineStarts);
+  expect(reply.drawn.length).toBeGreaterThan(1);
+  expect(reply.drawn).toEqual(reply.greedy);
 });
 
 test.describe("on a phone", () => {
