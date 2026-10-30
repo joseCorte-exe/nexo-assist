@@ -1,7 +1,8 @@
 import { type KbArticle, SERVICE_SECRET_HEADER } from "@nexo/shared";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../app";
-import { createDb, migrateDb } from "../db";
+import { createDb } from "../db";
+import { migrateDb } from "../db/migrate";
 import { seed } from "../seed";
 
 const SECRET = "service-secret";

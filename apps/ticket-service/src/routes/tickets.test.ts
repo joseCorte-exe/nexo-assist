@@ -2,7 +2,8 @@ import { SERVICE_SECRET_HEADER, type Ticket, type TicketDetail } from "@nexo/sha
 import { sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../app";
-import { createDb, type Db, migrateDb } from "../db";
+import { createDb, type Db } from "../db";
+import { migrateDb } from "../db/migrate";
 import { seed } from "../seed";
 
 const SECRET = "service-secret";

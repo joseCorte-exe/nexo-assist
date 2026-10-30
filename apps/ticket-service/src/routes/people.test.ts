@@ -1,7 +1,8 @@
 import { type Analyst, type Employee, SERVICE_SECRET_HEADER } from "@nexo/shared";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../app";
-import { createDb, type Db, migrateDb } from "../db";
+import { createDb, type Db } from "../db";
+import { migrateDb } from "../db/migrate";
 import { seed } from "../seed";
 
 const SECRET = "service-secret";
