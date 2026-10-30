@@ -212,6 +212,35 @@ describe("POST /tickets/:id/reopen", () => {
   it("needs the idempotency key", async () => {
     expect((await write("POST", "/tickets/INC-20150/reopen", { employeeId: "emp-ana", text: "De novo." })).status).toBe(400);
   });
+
+  it("answers the reopening to a retry that arrives while the first one is still being written, never a refusal", async () => {
+    // The order of the race, played step by step: the retry checks the key, finds nothing, and the first request
+    // commits the reopening before the retry's transaction starts. The ticket is no longer resolved by then.
+    const body = { employeeId: "emp-ana", text: "De novo." };
+    let first: Response | undefined;
+    const racing = new Proxy(db, {
+      get(target, property) {
+        if (property === "transaction") {
+          return async (...args: Parameters<Db["transaction"]>) => {
+            first ??= await write("POST", "/tickets/INC-20150/reopen", body, "draft-same");
+            return target.transaction(...args);
+          };
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const retry = await createApp({ db: racing, serviceSecret: SECRET, adminKey: "admin", outageRate: 0, now: () => clock, random: () => 0.99 })
+      .request("/tickets/INC-20150/reopen", {
+        method: "POST",
+        headers: { [SERVICE_SECRET_HEADER]: SECRET, "content-type": "application/json", [IDEMPOTENCY_KEY_HEADER]: "draft-same" },
+        body: JSON.stringify(body),
+      });
+    expect(first?.status).toBe(200);
+    expect(retry.status).toBe(200);
+    expect(await retry.json()).toEqual(await first!.json());
+    expect((await updatesOf("INC-20150")).filter((update) => update.author === "employee")).toHaveLength(1);
+  });
 });
 
 describe("idempotency across the writes", () => {

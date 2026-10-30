@@ -161,13 +161,17 @@ async function idempotent(
   const saved = await savedResponse(deps.db, key);
   if (saved) return replay(saved);
   try {
-    const ticket = await deps.db.transaction(async (tx) => {
+    const outcome = await deps.db.transaction(async (tx) => {
+      // Again inside the write lock: a request with the same key may have written since the check above, and the
+      // rules would then refuse what it already did (a reopened ticket is no longer resolved).
+      const [written] = await tx.select().from(idempotencyKeys).where(eq(idempotencyKeys.key, key));
+      if (written) return { saved: { scope: written.scope, response: written.response as Ticket } };
       const now = deps.now();
       const response = await write(tx, now);
       await tx.insert(idempotencyKeys).values({ key, scope, response, createdAt: now });
-      return response;
+      return { saved: null, response };
     });
-    return c.json(ticket, status);
+    return outcome.saved ? replay(outcome.saved) : c.json(outcome.response, status);
   } catch (error) {
     if (error instanceof Refusal) return c.json(errorBody(error.code, error.message), error.status);
     // Two requests with the same key at once: the second loses on the key and answers what the first one wrote.
