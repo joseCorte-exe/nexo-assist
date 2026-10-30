@@ -139,7 +139,7 @@ Status do chamado e o que muda cada um (só o que o design mostra):
 | "Encerrar atendimento" | Não muda o chamado, só fecha a conversa |
 | `in_progress`, `approved` e `resolved` | Vêm dos dados de exemplo |
 
-`due_at` é calculado a partir de `last_it_response_at` (ou de `created_at`, se a TI ainda não respondeu), somando o prazo da prioridade em horas úteis (RN-02).
+`due_at` é calculado a partir de `last_it_response_at` (ou de `created_at`, se a TI ainda não respondeu), somando o prazo da prioridade em horas úteis (RN-02). A reabertura conta como uma nova abertura: o prazo recomeça dela, e um recálculo futuro de `due_at` precisa partir do mais recente entre a reabertura e a última resposta da TI. O complemento do funcionário não muda `due_at` nem `updated_at`.
 
 ### Banco das conversas (web + agent)
 
