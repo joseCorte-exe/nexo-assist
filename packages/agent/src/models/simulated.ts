@@ -129,9 +129,10 @@ function intentOf(question: string, previous: PreviousTurn): Intent {
   const answer = question.trim().toLowerCase();
   const offered = previous.toolCalls.find((call) => call.toolName === "offerReplies")?.input as { question?: string } | undefined;
 
-  // An answer to the question that opens a ticket: the problem is what the employee said before it.
-  if (offered?.question === AFFECTED_QUESTION && previous.said) {
-    const affected = AFFECTED_REPLIES.find(([words]) => answer.startsWith(words))?.[1] ?? "only_me";
+  // An answer to the question that opens a ticket (one of its replies, maybe with more said): the problem is what the
+  // employee said before it. Anything else is a new subject.
+  const affected = AFFECTED_REPLIES.find(([words]) => answer.startsWith(words))?.[1];
+  if (offered?.question === AFFECTED_QUESTION && previous.said && affected) {
     return { kind: "draft", problem: previous.said, affected };
   }
   const asked = previous.text.trim().match(ASK_TO_ADD);
@@ -336,8 +337,11 @@ function stepFromList(value: unknown): ModelStep {
 function askAffected(question: string, results: Map<string, unknown>): ModelStep {
   const list = listMyTicketsOutput.safeParse(results.get("listMyTickets"));
   const search = searchArticlesOutput.safeParse(results.get("searchArticles"));
-  const open = list.success && list.data.ok ? list.data.tickets : [];
-  const article = search.success && search.data.ok ? search.data.articles[0] : undefined;
+  // Without knowing her tickets or the help center, nothing is offered: it says what did not answer.
+  if (!search.success || !search.data.ok) return { text: answerFromSearch(results.get("searchArticles")) };
+  if (!list.success || !list.data.ok) return { text: TICKETS_DOWN };
+  const open = list.data.tickets;
+  const article = search.data.articles[0];
   const same = similar(question, open);
   const text = same
     ? `Você já tem o ${same.id} aberto sobre algo parecido.`

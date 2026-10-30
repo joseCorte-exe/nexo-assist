@@ -333,6 +333,19 @@ describe("simulatedModel opening and following up tickets (feature 4)", () => {
     expect(argsOf(result, "offerReplies")).toEqual([{ question: "Quem está sendo afetado?", options: AFFECTED }]);
   });
 
+  it("explains that it could not check, instead of offering a ticket, when the services did not answer", async () => {
+    const result = await reply("A impressora do 3º andar não imprime", helpCenter("down"));
+    expect(result.text).toBe("A central de ajuda não respondeu agora. Tente de novo em instantes; se for urgente, ligue no ramal 4000.");
+    expect(argsOf(result, "offerReplies")).toEqual([]);
+  });
+
+  it("takes a message that does not answer who is affected as a new subject", async () => {
+    const say = conversation();
+    await say("Meu notebook não conecta na VPN desde ontem. Aparece o erro 809.");
+    const result = await say("Qual o status do meu chamado?");
+    expect(result.decision.toolsUsed).toEqual(["recordDecision", "listMyTickets", "offerTicketChoice"]);
+  });
+
   it("still answers a plain question from the help center, without opening anything", async () => {
     const result = await reply("Minha VPN dá erro 809");
     expect(result.decision.toolsUsed).toEqual(["recordDecision", "searchArticles"]);
