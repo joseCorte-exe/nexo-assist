@@ -81,7 +81,15 @@ export const listMyTicketsInput = z.object({
 });
 export type ListMyTicketsInput = z.infer<typeof listMyTicketsInput>;
 export const listMyTicketsOutput = z.discriminatedUnion("ok", [
-  z.object({ ok: z.literal(true), tickets: z.array(ticketSummary) }),
+  z.object({
+    ok: z.literal(true),
+    tickets: z.array(ticketSummary),
+    /**
+     * With scope open: the tickets resolved up to 7 days ago, which are reopened if the problem came back. Optional so
+     * that replies saved before it still read back.
+     */
+    recentlyResolved: z.array(ticketSummary).optional(),
+  }),
   z.object({ ok: z.literal(false), message: z.string() }),
 ]);
 export type ListMyTicketsOutput = z.infer<typeof listMyTicketsOutput>;

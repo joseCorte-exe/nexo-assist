@@ -1,4 +1,4 @@
-import { type Analyst, candidatesQuery, corporateEmail, type Employee, employeeTicketsStatus } from "@nexo/shared";
+import { type Analyst, candidatesQuery, canReopen, corporateEmail, type Employee, employeeTicketsStatus } from "@nexo/shared";
 import { and, asc, desc, eq, ne } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -38,8 +38,8 @@ export function employeeRoutes(deps: Deps) {
       }
       return c.json(rows.map(toTicket));
     })
-    // The open tickets of the employee in a category: what a new ticket could duplicate. Resolved ones are left out,
-    // since those are reopened. Same index as the list, narrowed by category and status.
+    // The tickets of the employee in a category that a new ticket could duplicate (Annex A): the open ones, which get
+    // the information instead, and the ones resolved up to 7 days ago, which are reopened. Same index as the list.
     .get("/:id/tickets/candidates", async (c) => {
       const parsed = candidatesQuery.safeParse(c.req.query());
       if (!parsed.success) return c.json(errorBody("invalid_query", "category must be one of the ticket categories"), 400);
@@ -48,12 +48,15 @@ export function employeeRoutes(deps: Deps) {
       const rows = await deps.db
         .select()
         .from(tickets)
-        .where(and(eq(tickets.openedBy, employeeId), eq(tickets.category, parsed.data.category), ne(tickets.status, "resolved")))
+        .where(and(eq(tickets.openedBy, employeeId), eq(tickets.category, parsed.data.category)))
         .orderBy(desc(tickets.createdAt), desc(tickets.id));
       if (rows.length === 0 && !(await employeeExists(deps, employeeId))) {
         return c.json(errorBody("employee_not_found", "Employee not found"), 404);
       }
-      return c.json(rows.map(toTicket));
+      // The window counts calendar days in São Paulo, so it is checked here, by the same rule the reopening uses.
+      const now = deps.now();
+      const candidates = rows.filter((row) => row.status !== "resolved" || (row.resolvedAt !== null && canReopen(row.resolvedAt, now)));
+      return c.json(candidates.map(toTicket));
     });
 }
 

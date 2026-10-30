@@ -214,7 +214,12 @@ const monitor = ticket(
 type Calls = { list: Array<[string, unknown]>; get: Array<[string, string]>; candidates: Array<[string, string]> };
 
 /** A ticket-service with Ana's tickets, recording who each call was made for. */
-function ticketDesk({ state = "up", tickets = [notebook, sharepoint, monitor], details = {} as Record<string, TicketDetail> } = {}) {
+function ticketDesk({
+  state = "up",
+  tickets = [notebook, sharepoint, monitor],
+  details = {} as Record<string, TicketDetail>,
+  candidates = undefined as Ticket[] | undefined,
+} = {}) {
   const calls: Calls = { list: [], get: [], candidates: [] };
   const desk: TicketDesk = {
     searchArticles: unexpected,
@@ -231,7 +236,7 @@ function ticketDesk({ state = "up", tickets = [notebook, sharepoint, monitor], d
     listCandidates: async (employeeId, category) => {
       calls.candidates.push([employeeId, category]);
       if (state === "down") return down;
-      const open = tickets.filter((one) => one.status !== "resolved" && one.category === category);
+      const open = candidates ?? tickets.filter((one) => one.status !== "resolved" && one.category === category);
       return { ok: true, data: employeeId === "emp-ana" ? open : [] };
     },
   };
@@ -249,8 +254,22 @@ describe("listMyTickets", () => {
         { id: "INC-20298", title: sharepoint.title, status: "in_progress", createdAt: sharepoint.createdAt, overdue: false },
         { id: "REQ-10442", title: monitor.title, status: "approved", createdAt: monitor.createdAt, overdue: false },
       ],
+      recentlyResolved: [],
     });
-    expect(calls.list).toEqual([["emp-ana", { status: "open" }]]);
+    // One call for both lists: the open tickets and the ones resolved in the last days.
+    expect(calls.list).toEqual([["emp-ana", {}]]);
+  });
+
+  it("brings apart the tickets resolved up to 7 days ago, which can be reopened, and never the older ones", async () => {
+    const resolvedAgo = (days: number) => new Date(NOW.getTime() - days * DAY).toISOString();
+    const sap = ticket({ id: "INC-20150", title: "Senha do SAP bloqueada", priority: "medium", status: "resolved", resolvedAt: resolvedAgo(4) }, 5, 4);
+    const outlook = ticket({ id: "INC-19877", title: "Outlook não sincroniza no celular", priority: "low", status: "resolved", resolvedAt: resolvedAgo(12) }, 15, 12);
+    const { desk } = ticketDesk({ tickets: [notebook, sap, outlook] });
+    expect(await runAs("emp-ana", tools(desk).listMyTickets, { scope: "open" })).toEqual({
+      ok: true,
+      tickets: [{ id: "INC-20311", title: notebook.title, status: "waiting_for_analyst", createdAt: notebook.createdAt, overdue: true }],
+      recentlyResolved: [{ id: "INC-20150", title: "Senha do SAP bloqueada", status: "resolved", createdAt: sap.createdAt, overdue: false }],
+    });
   });
 
   it("asks for every ticket, resolved included, with scope all", async () => {
@@ -479,13 +498,33 @@ describe("draftTicket", () => {
       ok: false,
       reason: "possible_duplicate",
       message:
-        "O funcionário já tem chamados abertos de Hardware. Se for o mesmo problema, monte um update desse chamado. Se não for, chame de novo com notDuplicateReason.",
+        "O funcionário já tem chamados de Hardware que podem ser o mesmo problema. Se for o mesmo de um aberto, monte um update dele; de um resolvido, um reopen. Se não for, chame de novo com notDuplicateReason.",
       candidates: [
         { id: "INC-20311", title: notebook.title, status: "waiting_for_analyst", createdAt: notebook.createdAt, overdue: true },
         { id: "REQ-10442", title: monitor.title, status: "approved", createdAt: monitor.createdAt, overdue: false },
       ],
     });
     expect(drafts.saved).toEqual([]);
+  });
+
+  it("shows a ticket resolved in the last days as a candidate too, for the model to reopen it", async () => {
+    const sapResolved = ticket(
+      { id: "INC-20150", title: "Senha do SAP bloqueada", category: "access", priority: "medium", status: "resolved", resolvedAt: new Date(NOW.getTime() - 4 * DAY).toISOString() },
+      5,
+      4,
+    );
+    const { desk } = ticketDesk({ tickets: [sharepoint], candidates: [sapResolved, sharepoint] });
+    const result = await runInTurn(tools(desk).draftTicket, {
+      ...vpnTicket,
+      title: "Senha do SAP bloqueada de novo",
+      description: "A senha do SAP bloqueou de novo hoje cedo e não consigo entrar para lançar as notas.",
+      category: "access",
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "possible_duplicate",
+      candidates: [{ id: "INC-20150", status: "resolved" }, { id: "INC-20298", status: "in_progress" }],
+    });
   });
 
   it("drafts it anyway once the model says why it is another problem, and keeps the reason", async () => {

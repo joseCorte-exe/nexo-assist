@@ -67,12 +67,15 @@ describe("GET /employees/:id/tickets/candidates?category=", () => {
   const ids = async (response: Response) => ((await response.json()) as Ticket[]).map((ticket) => ticket.id);
 
   it("returns the open tickets of the employee in that category, most recent first", async () => {
+    // INC-19410, also hardware, was resolved 30 days ago: too late to be the same case.
     expect(await ids(await get("/employees/emp-ana/tickets/candidates?category=hardware"))).toEqual(["INC-20311", "REQ-10442"]);
   });
 
-  it("leaves the resolved ones out: those are reopened, not duplicated", async () => {
-    // INC-20150, resolved 4 days ago, is also access.
-    expect(await ids(await get("/employees/emp-ana/tickets/candidates?category=access"))).toEqual(["INC-20298"]);
+  it("brings the ones resolved up to 7 days ago too, which are reopened rather than duplicated", async () => {
+    // INC-20150 was resolved 4 days ago and is also access.
+    expect(await ids(await get("/employees/emp-ana/tickets/candidates?category=access"))).toEqual(["INC-20150", "INC-20298"]);
+    // INC-19877 was resolved 12 days ago.
+    expect(await ids(await get("/employees/emp-ana/tickets/candidates?category=email"))).toEqual([]);
   });
 
   it("answers an empty list when nothing open looks like it", async () => {

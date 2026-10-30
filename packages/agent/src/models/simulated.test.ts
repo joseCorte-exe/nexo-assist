@@ -77,7 +77,7 @@ const details: Record<string, TicketDetail> = {
  * The ticket-service of these tests: a help center that answers by the first word it recognizes in the question,
  * and Ana's open tickets.
  */
-const helpCenter = (state: "up" | "down" = "up", open: Ticket[] = [notebook, sharepoint, monitor]): TicketDesk => ({
+const helpCenter = (state: "up" | "down" = "up", open: Ticket[] = [notebook, sharepoint, monitor], candidates?: Ticket[]): TicketDesk => ({
   searchArticles: async (query) => {
     if (state === "down") return down;
     if (/vpn|809/i.test(query)) return { ok: true, data: [vpn] };
@@ -88,7 +88,7 @@ const helpCenter = (state: "up" | "down" = "up", open: Ticket[] = [notebook, sha
     state === "down" ? down : { ok: true, data: options?.status === "open" ? open : [...open, sap, outlook] },
   getTicket: async (id) => (state === "down" ? down : { ok: true, data: details[id] ?? null }),
   listCandidates: async (_employeeId, category) =>
-    state === "down" ? down : { ok: true, data: open.filter((one) => one.category === category) },
+    state === "down" ? down : { ok: true, data: (candidates ?? open).filter((one) => one.category === category) },
 });
 
 /** Every draft the agent saved, as the web would keep it. */
@@ -299,6 +299,16 @@ describe("simulatedModel opening and following up tickets (feature 4)", () => {
       operation: "create",
       notDuplicateReason: "Os chamados abertos de hardware tratam de outro problema: INC-20311, REQ-10442.",
     });
+  });
+
+  it("reopens the resolved ticket the draft found as the same problem, instead of opening another", async () => {
+    const say = conversation(helpCenter("up", [notebook, sharepoint, monitor], [sharepoint, sap]));
+    await say("Não consigo entrar no SAP, a senha está bloqueada.");
+    const result = await say("Só eu");
+    expect(argsOf(result, "draftTicket")).toEqual([
+      expect.objectContaining({ operation: "create", category: "access" }),
+      { operation: "reopen", ticketId: "INC-20150", description: "Não consigo entrar no SAP, a senha está bloqueada." },
+    ]);
   });
 
   it("asks what to add when the employee picks Adicionar informação, then drafts the follow-up", async () => {

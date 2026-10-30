@@ -118,8 +118,10 @@ export function fakeTicketService({ down = false, writesDown = false } = {}): Fa
     const candidates = pathname.match(/^\/employees\/([^/]+)\/tickets\/candidates$/);
     if (candidates) {
       const category = searchParams.get("category");
+      // Open, or resolved recently enough to be reopened, as the service answers.
+      const sameCase = (ticket: Ticket) => ticket.status !== "resolved" || canReopen(new Date(ticket.resolvedAt!), NOW);
       return Response.json(
-        tickets.filter((ticket) => ticket.openedBy === decodeURIComponent(candidates[1]!) && ticket.category === category && ticket.status !== "resolved"),
+        tickets.filter((ticket) => ticket.openedBy === decodeURIComponent(candidates[1]!) && ticket.category === category && sameCase(ticket)),
       );
     }
     const list = pathname.match(/^\/employees\/([^/]+)\/tickets$/);

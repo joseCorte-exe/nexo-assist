@@ -393,7 +393,9 @@ function draftStep(intent: Extract<Intent, { kind: "draft" }>, answer: string, d
   const candidates: TicketSummary[] = result.data.candidates ?? [];
   const same = similar(intent.problem, candidates);
   if (same) {
-    return { toolCalls: [{ toolName: "draftTicket", input: { operation: "update", ticketId: same.id, description: intent.problem.trim() } }] };
+    // The same problem: an open ticket gets the information, one resolved in the last days is reopened.
+    const operation = same.status === "resolved" ? "reopen" : "update";
+    return { toolCalls: [{ toolName: "draftTicket", input: { operation, ticketId: same.id, description: intent.problem.trim() } }] };
   }
   const notDuplicateReason = `Os chamados abertos de ${CATEGORY_LABEL[ticket.category!].toLowerCase()} tratam de outro problema: ${candidates.map((one) => one.id).join(", ")}.`;
   return { toolCalls: [{ toolName: "draftTicket", input: { ...ticket, notDuplicateReason } }] };

@@ -127,17 +127,21 @@ export function createTools({ ticketService, drafts, now }: { ticketService: Tic
   const listMyTickets = createTool({
     id: "listMyTickets",
     description:
-      "Lista os chamados do funcionário, do mais recente para o mais antigo, com o status e se está vencido. Use quando ele falar de um chamado sem dizer o número.",
+      "Lista os chamados do funcionário, do mais recente para o mais antigo, com o status e se está vencido. Com scope open, traz à parte (recentlyResolved) os resolvidos há até 7 dias, que são reabertos se o problema voltou. Use quando ele falar de um chamado sem dizer o número, e antes de abrir um chamado.",
     ...nexoToolSchemas.listMyTickets,
     requestContextSchema: employeeContext,
     execute: async ({ scope }, context) => {
-      const result = await ticketService.listEmployeeTickets(
-        employeeOf(context),
-        scope === "open" ? { status: "open" } : {},
-      );
+      // Every ticket in one call: the open ones and, apart, the ones that can still be reopened.
+      const result = await ticketService.listEmployeeTickets(employeeOf(context), {});
       if (!result.ok) return { ok: false as const, message: TICKETS_DOWN };
       const at = now();
-      return { ok: true as const, tickets: result.data.map((ticket) => summarize(ticket, at)) };
+      const summaries = (tickets: Ticket[]) => tickets.map((ticket) => summarize(ticket, at));
+      if (scope === "all") return { ok: true as const, tickets: summaries(result.data) };
+      const open = result.data.filter((ticket) => ticket.status !== "resolved");
+      const reopenable = result.data.filter(
+        (ticket) => ticket.status === "resolved" && ticket.resolvedAt !== null && canReopen(new Date(ticket.resolvedAt), at),
+      );
+      return { ok: true as const, tickets: summaries(open), recentlyResolved: summaries(reopenable) };
     },
   });
 
@@ -209,7 +213,10 @@ export function createTools({ ticketService, drafts, now }: { ticketService: Tic
     execute: async () => ({ ok: true as const }),
   });
 
-  /** A new ticket: type and priority from the impact (RN-01), and no draft over an open ticket that may be the same. */
+  /**
+   * A new ticket: type and priority from the impact (RN-01), and no draft over a ticket that may be the same: an open
+   * one of the category, or one resolved up to 7 days ago, which is reopened instead.
+   */
   async function draftNew(input: DraftTicketInput, { employeeId, conversationId }: TurnContext): Promise<DraftTicketOutput> {
     // The schema already made sure a create carries these.
     const { title, category, impact, urgency, affected } = input as Required<DraftTicketInput>;
@@ -220,7 +227,7 @@ export function createTools({ ticketService, drafts, now }: { ticketService: Tic
       return {
         ...failure(
           "possible_duplicate",
-          `O funcionário já tem chamados abertos de ${CATEGORY_LABEL[category]}. Se for o mesmo problema, monte um update desse chamado. Se não for, chame de novo com notDuplicateReason.`,
+          `O funcionário já tem chamados de ${CATEGORY_LABEL[category]} que podem ser o mesmo problema. Se for o mesmo de um aberto, monte um update dele; de um resolvido, um reopen. Se não for, chame de novo com notDuplicateReason.`,
         ),
         candidates: candidates.data.map((ticket) => summarize(ticket, at)),
       };
