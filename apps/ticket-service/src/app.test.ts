@@ -9,7 +9,8 @@ import {
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "./app";
-import { createDb, type Db, migrateDb } from "./db";
+import { createDb, type Db } from "./db";
+import { migrateDb } from "./db/migrate";
 import { tickets } from "./db/schema";
 import { seed } from "./seed";
 
