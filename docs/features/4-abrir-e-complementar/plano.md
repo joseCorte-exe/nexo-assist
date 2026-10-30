@@ -10,7 +10,8 @@ Tela do design: "Chat — Novo chamado (desktop)", no nexo.pen. Desta feature sa
 |---|---|
 | O chamado só é criado, complementado ou reaberto depois do clique em Confirmar, pelo código, sem passar pelo modelo | rota `POST /api/drafts/:id/confirm` |
 | A prioridade vem do RN-01 (impacto, urgência e afetados que o modelo identifica). O tipo também sai do impacto: pedido é REQ, o resto é INC | `draftTicket`, com `priorityFor` do `shared` |
-| Antes de criar, o código busca os chamados abertos da mesma categoria. Havendo algum, o rascunho só sai se o modelo disser por que não é o mesmo problema; se for, ele monta o complemento desse chamado | `draftTicket` + `GET /employees/:id/tickets/candidates` |
+| Antes de criar, o código busca os chamados da mesma categoria que podem ser o mesmo problema: os abertos e os resolvidos há até 7 dias. Havendo algum, o rascunho só sai se o modelo disser por que não é o mesmo problema; se for, ele monta o complemento do aberto ou a reabertura do resolvido | `draftTicket` + `GET /employees/:id/tickets/candidates` |
+| Depois que o rascunho aparece, a resposta não oferece respostas rápidas: o card já tem Confirmar, Editar e Cancelar | `prepareStep` do agent |
 | Complemento: só em chamado aberto do funcionário. Entra como atualização do funcionário e não reinicia o prazo nem muda a "última atualização", que é a da TI (RN-02) | `PATCH /tickets/:id` |
 | Reabrir: só chamado resolvido há até 7 dias corridos, contando o sétimo dia, no horário de São Paulo. Volta para "Aguardando analista" e o prazo recomeça da reabertura, que conta como uma nova abertura | `canReopen` no `shared`, conferido na ferramenta e de novo no serviço |
 | Uma conversa tem no máximo um rascunho pendente. Um rascunho novo substitui o anterior | índice único parcial em `drafts` |
@@ -37,6 +38,8 @@ Tela do design: "Chat — Novo chamado (desktop)", no nexo.pen. Desta feature sa
    - a queda que grava e cai antes de responder passa a valer para as três escritas.
 3. O agent:
    - `draftTicket` recebe do contexto o funcionário e a conversa, calcula tipo, prioridade e prazo, busca os candidatos, confere a janela de reabertura e grava o rascunho por uma porta (`DraftStore`) que o web implementa;
+   - `listMyTickets` traz, à parte e na mesma chamada, os resolvidos há até 7 dias. Medindo com o Haiku, "a senha do SAP bloqueou de novo" virava um chamado novo porque o modelo só via os abertos;
+   - depois de um rascunho, os passos seguintes da resposta ficam sem as ferramentas de oferta. Medindo, o Haiku mostrou "Confirmar / Cancelar" como respostas rápidas, que só mandariam a palavra como mensagem;
    - a resposta não termina no rascunho: o modelo vê a prioridade e o prazo calculados e escreve a frase que vai acima do card. A tela desenha o card no fim da resposta;
    - instruções: quando abrir, o que perguntar (uma coisa por vez, com respostas rápidas), o que a descrição precisa ter para o analista, duplicidade, complemento, reabertura, e nunca dizer que criou antes do Confirmar;
    - "Adicionar informação" deixa de receber a resposta franca da feature 3 e vira o complemento;

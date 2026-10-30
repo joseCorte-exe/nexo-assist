@@ -224,7 +224,7 @@ Toda rota exige o cabeçalho com o segredo compartilhado entre os dois projetos.
 | PATCH /analysts/:id | status Disponível |
 | GET /employees/:id/tickets?status= | chamados do funcionário |
 | GET /tickets/:id?employeeId= | detalhe; recusa se o chamado não for desse funcionário |
-| GET /employees/:id/tickets/candidates?category= | chamados abertos parecidos, usados na checagem de duplicidade |
+| GET /employees/:id/tickets/candidates?category= | chamados da mesma categoria que podem ser o mesmo problema: os abertos e os resolvidos há até 7 dias, usados na checagem de duplicidade |
 | POST /tickets | cria (exige `Idempotency-Key` = id do rascunho) |
 | PATCH /tickets/:id | atualiza ou complementa |
 | POST /tickets/:id/reopen | reabre se foi resolvido há até 7 dias |
@@ -246,9 +246,9 @@ Ferramentas:
 |---|---|
 | recordDecision | Obrigatória no primeiro passo de toda resposta. Grava o que o agent entendeu, a ação que vai tomar, a confiança (0 a 1) e o motivo |
 | searchArticles | Procura na central de ajuda |
-| listMyTickets | Chamados do funcionário logado. O id vem da sessão, nunca do modelo |
+| listMyTickets | Chamados do funcionário logado. O id vem da sessão, nunca do modelo. Junto com os abertos, traz à parte os resolvidos há até 7 dias, que podem ser reabertos |
 | getTicket | Detalhe e situação do prazo (vencido ou não) |
-| draftTicket | Monta o rascunho para criar, atualizar ou reabrir. Antes de criar, o código busca os chamados abertos parecidos e exige que o rascunho diga por que não é duplicado |
+| draftTicket | Monta o rascunho para criar, atualizar ou reabrir. Antes de criar, o código busca os chamados que podem ser o mesmo problema (abertos e resolvidos há até 7 dias) e exige que o rascunho diga por que não é duplicado. Depois de um rascunho, as ofertas saem da resposta: o card tem os próprios botões |
 | transferToAnalyst | Muda o estado da conversa, escolhe N1 ou N2 pela regra, calcula a espera e grava o resumo do caso |
 | redirectOutOfScope | Responde a assuntos de RH, financeiro e facilities indicando o canal |
 | offerTicketChoice | Mostra a pergunta e a lista dos chamados do funcionário para ele escolher um. Encerra a resposta |
