@@ -17,7 +17,7 @@ describe("GET /api/conversation", () => {
     const response = await conversationHandler(get(await sessionCookieFor({ role: "employee", ...ana })), await testDeps());
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("private, no-store");
-    expect(await response.json()).toEqual({ conversation: null, messages: [] });
+    expect(await response.json()).toEqual({ conversation: null, messages: [], drafts: [] });
   });
 });
 
@@ -83,7 +83,7 @@ describe("loadConversation", () => {
   it("leaves out closed conversations", async () => {
     // Elisa only has closed conversations.
     const { db } = await testDeps();
-    expect(await loadConversation(db, "emp-elisa")).toEqual({ conversation: null, messages: [] });
+    expect(await loadConversation(db, "emp-elisa")).toEqual({ conversation: null, messages: [], drafts: [] });
   });
 
   it("never returns the messages of another employee", async () => {

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { toAISdkStream } from "@mastra/ai-sdk";
 import { streamReply } from "@nexo/agent";
-import { chatInput, type ConversationPart, type NexoUIMessage, textOf, summarizeTurn } from "@nexo/shared";
+import { chatInput, type ConversationPart, type NexoUIMessage, summarizeTurn, textOf, withToolErrors } from "@nexo/shared";
 import { consumeStream, createUIMessageStream, createUIMessageStreamResponse, type InferUIMessageChunk } from "ai";
 import { eq, sql } from "drizzle-orm";
 import type { NextRequest } from "next/server";
@@ -65,9 +65,10 @@ async function startTurn(db: Db, { employeeId, id, text, now }: { employeeId: st
           select 1 from ${messages} m
           where m.id = ${id} and m.conversation_id = ${conversations}.id and m.author = 'employee' and m.text = ${text}
         )`,
-        // Something came after it: it was already answered.
+        // A reply came after it: it was already answered. A note of what she did in a card is not a reply.
         answered: sql<number>`exists (
-          select 1 from ${messages} m join ${messages} r on r.conversation_id = m.conversation_id and r.created_at > m.created_at
+          select 1 from ${messages} m join ${messages} r
+            on r.conversation_id = m.conversation_id and r.created_at > m.created_at and r.author in ('agent', 'analyst')
           where m.id = ${id}
         )`,
       })
@@ -91,8 +92,9 @@ async function saveReply(
   db: Db,
   { conversationId, startedAt, now, reply }: { conversationId: string; startedAt: Date; now: Date; reply: NexoUIMessage },
 ) {
-  // The counter belongs to the moment the reply streamed; the conversation has the current one.
-  const parts = reply.parts.filter((part) => part.type !== "data-conversation");
+  // The counter belongs to the moment the reply streamed; the conversation has the current one. A tool input the
+  // agent refused is saved as the error it was, so the reply still matches the schemas when it is read back.
+  const parts = withToolErrors(reply.parts.filter((part) => part.type !== "data-conversation"));
   const { record, toolsUsed } = summarizeTurn(parts);
   const at = new Date(Math.max(now.getTime(), startedAt.getTime() + 1));
   await db.batch([

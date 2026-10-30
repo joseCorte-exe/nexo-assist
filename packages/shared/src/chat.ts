@@ -2,7 +2,7 @@ import type { UIMessage } from "ai";
 import { z } from "zod";
 import { category, conversationState, priority, ticketStatus, ticketType } from "./domain";
 import { kbArticleSchema } from "./help-center";
-import { draftTicketInput, draftTicketOutput } from "./drafts";
+import { type DraftView, draftTicketInput, draftTicketOutput } from "./drafts";
 import { ticketId, ticketSummary } from "./tickets";
 
 // Contracts of the chat (ARQUITETURA.md, section 7): the route body, the parts of the stream and the conversation
@@ -195,8 +195,12 @@ export type NexoTools = {
  */
 export type NexoUIMessage = UIMessage<never, { conversation: ConversationPart }, NexoTools>;
 
-/** GET /api/conversation: the active conversation, or none, with its messages in order. */
+/**
+ * GET /api/conversation: the active conversation, or none, with its messages in order and its drafts as they are now.
+ * A saved reply keeps the draft as it was shown; the card draws the current one, confirmed, edited or cancelled since.
+ */
 export type ConversationResponse = {
   conversation: ConversationPart | null;
   messages: NexoUIMessage[];
+  drafts: DraftView[];
 };

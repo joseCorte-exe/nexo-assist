@@ -5,6 +5,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import type { Db } from "@/db";
 import { conversations, messages } from "@/db/schema";
 import type { Deps } from "./deps";
+import { draftsOf, toDraftView } from "./drafts";
 import { readEmployeeSession } from "./http";
 
 /** Each employee has at most one conversation that is not closed. The partial unique index answers this lookup. */
@@ -12,7 +13,7 @@ export const activeConversationOf = (employeeId: string) =>
   and(eq(conversations.employeeId, employeeId), ne(conversations.state, "closed"));
 
 /**
- * The active conversation of the employee with its messages, in two queries. An agent reply comes with the parts it
+ * The active conversation of the employee with its messages and drafts, in two round trips. An agent reply comes with the parts it
  * streamed, decision included, so the chat draws it as it did live. The chat page and GET /api/conversation both
  * read it from here.
  */
@@ -22,17 +23,22 @@ export async function loadConversation(db: Db, employeeId: string): Promise<Conv
     .from(conversations)
     .where(activeConversationOf(employeeId))
     .limit(1);
-  if (!conversation) return { conversation: null, messages: [] };
+  if (!conversation) return { conversation: null, messages: [], drafts: [] };
 
-  const rows = await db
-    .select({ id: messages.id, author: messages.author, text: messages.text, parts: messages.parts })
-    .from(messages)
-    .where(and(eq(messages.conversationId, conversation.id), inArray(messages.author, ["employee", "agent"])))
-    .orderBy(asc(messages.createdAt));
+  // One round trip for both. The notes of what she did in a card are system messages: the card shows it instead.
+  // Analyst messages come with the console, in feature 5.
+  const [rows, draftRows] = await db.batch([
+    db
+      .select({ id: messages.id, author: messages.author, text: messages.text, parts: messages.parts })
+      .from(messages)
+      .where(and(eq(messages.conversationId, conversation.id), inArray(messages.author, ["employee", "agent"])))
+      .orderBy(asc(messages.createdAt)),
+    draftsOf(db, conversation.id),
+  ]);
 
-  // Analyst and system messages come with the console, in feature 5.
   return {
     conversation,
+    drafts: draftRows.map(toDraftView),
     messages: await Promise.all(
       rows.map(async ({ id, author, text, parts }): Promise<NexoUIMessage> => {
         const asText: NexoUIMessage = { id, role: author === "employee" ? "user" : "assistant", parts: [{ type: "text", text }] };
