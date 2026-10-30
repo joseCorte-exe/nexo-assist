@@ -76,6 +76,12 @@ export function Chat({
     },
   });
 
+  /** The drafts as the server has them now, when a card learned it was showing an old state. */
+  async function refreshDrafts() {
+    const response = await fetch("/api/conversation", { cache: "no-store" }).catch(() => null);
+    if (response?.ok) setDrafts(byId(((await response.json()) as ConversationResponse).drafts));
+  }
+
   async function showSavedConversation() {
     const response = await fetch("/api/conversation", { cache: "no-store" }).catch(() => null);
     if (!response?.ok) return setFailures((count) => count + 1);
@@ -100,6 +106,7 @@ export function Chat({
         shortcut={shortcut}
         onChange={(draft) => setDrafts((known) => ({ ...known, [draft.id]: draft }))}
         onDone={() => inputRef.current?.focus()}
+        onStale={refreshDrafts}
       />
     );
   }

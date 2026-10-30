@@ -50,12 +50,17 @@ type Props = {
   onChange: (draft: DraftView) => void;
   /** The card is done with the focus: confirmed or discarded, the next step is the composer. */
   onDone: () => void;
+  /** The server says the draft is no longer what the card shows (another tab, a newer draft): load it again. */
+  onStale: () => void;
 };
 
 type Pending = null | "confirm" | "cancel" | "save";
-type Problem = { message: string; retry: boolean } | null;
+type Problem = string | null;
 
-export function DraftCard({ draft, busy, shortcut, onChange, onDone }: Props) {
+/** What the server answers when the draft changed elsewhere since the card last saw it. */
+const STALE = new Set(["draft_not_pending", "draft_confirmed", "draft_confirming"]);
+
+export function DraftCard({ draft, busy, shortcut, onChange, onDone, onStale }: Props) {
   const [editing, setEditing] = useState(false);
   const [pending, setPending] = useState<Pending>(null);
   const [problem, setProblem] = useState<Problem>(null);
@@ -66,11 +71,13 @@ export function DraftCard({ draft, busy, shortcut, onChange, onDone }: Props) {
   const confirmButton = useRef<HTMLButtonElement>(null);
 
   const open = draft.status === "pending";
+  // The confirmation went out and its answer did not come back: confirming again is all that is left.
+  const confirming = draft.status === "confirming";
   const blocked = busy || pending !== null;
   const isNew = draft.operation === "create";
 
   async function act(kind: "confirm" | "cancel") {
-    if (blocked || !open) return;
+    if (blocked || !(open || (confirming && kind === "confirm"))) return;
     setPending(kind);
     setProblem(null);
     const result = await callApi("POST", `/api/drafts/${draft.id}/${kind}`, draftView);
@@ -82,23 +89,22 @@ export function DraftCard({ draft, busy, shortcut, onChange, onDone }: Props) {
       onDone();
       return;
     }
-    if (result.code === "draft_not_pending") return onChange({ ...draft, status: "superseded" });
+    if (STALE.has(result.code)) return onStale();
     const tries = failures + 1;
     setFailures(tries);
-    const unavailable = result.code === "service_unavailable" || result.code === "network";
     requestAnimationFrame(() => card.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
-    setProblem({
-      message: unavailable
-        ? `O serviço de chamados não respondeu. Tente de novo; o chamado não será duplicado.${tries > 1 ? " Se continuar, ligue no ramal 4000." : ""}`
-        : result.message,
-      retry: kind === "confirm" && unavailable,
-    });
+    // A confirmation without an answer may have written: the server keeps the draft confirming, and so does the card.
+    if (kind === "confirm" && result.status !== 400 && result.status !== 404 && result.status !== 409) {
+      onChange({ ...draft, status: "confirming" });
+      return setProblem(null);
+    }
+    setProblem(result.message);
   }
 
   // ⌘↵ (Ctrl ↵ outside Apple systems) confirms the draft waiting, from inside the card or from an empty composer.
   // With text in the composer the keys send the text, as Enter does.
   useEffect(() => {
-    if (!open || editing) return;
+    if (!(open || confirming) || editing) return;
     function onKeyDown(event: KeyboardEvent) {
       const modifier = shortcut.keys === "Meta+Enter" ? event.metaKey : event.ctrlKey;
       if (event.key !== "Enter" || !modifier || event.defaultPrevented) return;
@@ -140,6 +146,10 @@ export function DraftCard({ draft, busy, shortcut, onChange, onDone }: Props) {
             setEditing(false);
             requestAnimationFrame(() => editButton.current?.focus());
           }}
+          onStale={() => {
+            setEditing(false);
+            onStale();
+          }}
         />
       ) : (
         <>
@@ -155,14 +165,16 @@ export function DraftCard({ draft, busy, shortcut, onChange, onDone }: Props) {
           </div>
           <Fields draft={draft} overdue={overdue} />
           {/* Above the bar, next to the button it is about, and never under the composer. */}
-          {problem ? (
+          {confirming || problem ? (
             <p role="alert" className="fade-enter flex items-start gap-2 border-t border-rule bg-desk px-[18px] py-3 text-13.5 leading-5 text-ink-2">
               <CircleAlert aria-hidden className="mt-[3px] size-3.5 shrink-0 text-danger-text" />
-              {problem.message}
+              {confirming
+                ? `O serviço de chamados não respondeu. Tente de novo; o chamado não será duplicado.${failures > 1 ? " Se continuar, ligue no ramal 4000." : ""}`
+                : problem}
             </p>
           ) : null}
           <div className={bar}>
-            {open ? (
+            {open || confirming ? (
               <div key="actions" className="fade-enter flex h-full items-center gap-1.5 py-2 pr-3.5 pl-2">
                 <button
                   ref={confirmButton}
@@ -173,7 +185,7 @@ export function DraftCard({ draft, busy, shortcut, onChange, onDone }: Props) {
                   className={`${actionBase} gap-2 bg-cta pr-2.5 pl-3.5 font-semibold text-white hover:bg-cta-hover`}
                 >
                   <Working active={pending === "confirm"} label={draft.operation === "create" ? "Criando…" : draft.operation === "update" ? "Enviando…" : "Reabrindo…"}>
-                    {problem?.retry ? "Tentar de novo" : "Confirmar"}
+                    {confirming ? "Tentar de novo" : "Confirmar"}
                   </Working>
                   <kbd
                     aria-hidden
@@ -182,11 +194,14 @@ export function DraftCard({ draft, busy, shortcut, onChange, onDone }: Props) {
                     {shortcut.label}
                   </kbd>
                 </button>
+                {confirming ? null : (
+                  <>
                 <button
                   ref={editButton}
                   type="button"
                   onClick={() => {
                     if (blocked) return;
+                    setProblem(null);
                     setEditing(true);
                     // The fields make the card taller: keep its bar in sight, above the composer.
                     requestAnimationFrame(() => card.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
@@ -206,6 +221,8 @@ export function DraftCard({ draft, busy, shortcut, onChange, onDone }: Props) {
                     Cancelar
                   </Working>
                 </button>
+                  </>
+                )}
               </div>
             ) : (
               <StatusLine key={draft.status} draft={draft} />
@@ -259,6 +276,7 @@ function Eyebrow({ kind, reference, children }: { kind: string; reference: strin
 
 const STATE: Record<DraftView["status"], { dot: string; tone: string; label: (draft: DraftView) => string }> = {
   pending: { dot: "bg-warning", tone: "text-warning-text", label: () => "Aguardando confirmação" },
+  confirming: { dot: "bg-warning", tone: "text-warning-text", label: () => "Confirmação pendente" },
   confirmed: {
     dot: "bg-success",
     tone: "text-success-text",
@@ -323,6 +341,7 @@ function Field({ label, className = "", children }: { label: string; className?:
 function StatusLine({ draft }: { draft: DraftView }) {
   const lines: Record<DraftView["status"], string> = {
     pending: "",
+    confirming: "",
     confirmed:
       draft.operation === "create"
         ? `Chamado ${draft.ticketId} criado.`
@@ -364,10 +383,11 @@ type EditorProps = {
   busy: boolean;
   onSaved: (draft: DraftView) => void;
   onClose: () => void;
+  onStale: () => void;
 };
 
 /** Editar: the title, the description and the category become fields where they are. Never the priority. */
-function DraftEditor({ draft, kind, reference, shortcut, busy, onSaved, onClose }: EditorProps) {
+function DraftEditor({ draft, kind, reference, shortcut, busy, onSaved, onClose, onStale }: EditorProps) {
   const isNew = draft.operation === "create";
   const [title, setTitle] = useState(draft.title);
   const [description, setDescription] = useState(draft.description);
@@ -408,8 +428,9 @@ function DraftEditor({ draft, kind, reference, shortcut, busy, onSaved, onClose 
     const result = await callApi("PATCH", `/api/drafts/${draft.id}`, draftView, changes);
     setSaving(false);
     if (result.ok) return onSaved(result.data);
-    if (result.code === "draft_not_pending") return onSaved({ ...draft, status: "superseded" });
-    setProblem(result.code === "invalid_body" ? result.message : "Não foi possível salvar. Tente de novo.");
+    if (STALE.has(result.code)) return onStale();
+    // The reasons the server gives (an empty field, a category with a possible duplicate) are said as they are.
+    setProblem(result.status === 0 || result.status >= 500 ? "Não foi possível salvar. Tente de novo." : result.message);
   }
 
   function onKeyDown(event: ReactKeyboardEvent) {
