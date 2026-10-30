@@ -38,8 +38,7 @@ Para as correções feitas antes do teste, a correção foi tirada do código e 
 | O estado do card ocupa pixels inteiros (teste novo) | "Aguardando confirmação" mede 161,125 px |
 | O erro da confirmação fica acima da barra (teste novo) | o erro termina em 799 px, abaixo do botão, que começa em 710 px |
 | A bolha quebra palavra por palavra, como o Pencil (teste novo) | as linhas começam em "da" e "reiniciei" em vez de "empresa" e "tudo." |
-
-O chip ⌘↵ já tinha o seu teste, que falhava antes de a correção existir.
+| O chip ⌘↵ desenhado com os contornos da Noto | o chip mede 32,25 px de largura em vez de 28 |
 
 ## Fidelidade ao design
 
