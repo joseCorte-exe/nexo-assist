@@ -1,4 +1,4 @@
-import { type Analyst, analystPart, chatNote, type ConsoleDetail, type ConsoleMessage, shownDraft } from "@nexo/shared";
+import { type Analyst, analystPart, chatNote, type ConsoleDetail, type ConsoleMessage, replyText, shownDraft } from "@nexo/shared";
 import { asc, eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { conversations, decisions, messages } from "@/db/schema";
@@ -41,7 +41,8 @@ export async function loadDetail(deps: Deps, conversationId: string, analystId: 
       return {
         id: message.id,
         author: message.author,
-        text: message.text,
+        // Replies saved before their text column said the offer and the card are read from their parts.
+        text: message.author === "agent" && message.parts ? replyText(message.parts) || message.text : message.text,
         at: message.createdAt.toISOString(),
         analyst: sign?.success && message.authorId ? { id: message.authorId, ...sign.data } : null,
         decision:

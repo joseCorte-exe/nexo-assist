@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { toAISdkStream } from "@mastra/ai-sdk";
 import { saveNote, streamReply } from "@nexo/agent";
-import { chatInput, type ConversationPart, type NexoUIMessage, shownDraft, summarizeTurn, textOf, withToolErrors } from "@nexo/shared";
+import { chatInput, type ConversationPart, type NexoUIMessage, replyText, shownDraft, summarizeTurn, withToolErrors } from "@nexo/shared";
 import { consumeStream, createUIMessageStream, createUIMessageStreamResponse, type InferUIMessageChunk } from "ai";
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import type { NextRequest } from "next/server";
@@ -102,7 +102,8 @@ async function saveReply(
   const at = new Date(Math.max(now.getTime(), startedAt.getTime() + 1));
   const transferred = parts.some((part) => part.type === "tool-transferToAnalyst" && part.state === "output-available" && part.output.ok);
   await db.batch([
-    db.insert(messages).values({ id: reply.id, conversationId, author: "agent", text: textOf(parts), parts, createdAt: at }),
+    // The text column is the reply as a person reads it outside the chat: the console and the list show it.
+    db.insert(messages).values({ id: reply.id, conversationId, author: "agent", text: replyText(parts), parts, createdAt: at }),
     db.insert(decisions).values({ id: `dec-${randomUUID()}`, messageId: reply.id, toolsUsed, ...record }),
     db
       .update(conversations)

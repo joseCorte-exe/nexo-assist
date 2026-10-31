@@ -217,6 +217,15 @@ describe("GET /api/console/conversations/:id", () => {
     expect(body.messages[6]?.analyst).toEqual({ id: "analyst-rafael", name: "Rafael Lima", level: "N2" });
   });
 
+  it("shows a reply that was only a card and an offer by what it asked, never as an empty bubble", async () => {
+    const deps = await testDeps();
+    const conversation = await anaTransferred(deps);
+    const { body } = await detail(deps, conversation.id);
+    const offer = body.messages.find((message) => message.author === "agent" && message.text.includes("Quer que eu chame um analista?"));
+    expect(offer?.text).toMatch(/^Chamado INC-20311 · Notebook lento após atualização do Windows\nEstá sem atualização há \d+ dias/);
+    expect(body.messages.filter((message) => message.author === "agent").every((message) => message.text.trim() !== "")).toBe(true);
+  });
+
   it("answers 404 for a conversation that does not exist", async () => {
     const deps = await testDeps();
     expect((await detail(deps, "conv-nobody")).status).toBe(404);

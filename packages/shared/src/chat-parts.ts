@@ -59,3 +59,22 @@ export function withToolErrors(parts: Parts): Parts {
     return { ...rest, state: "output-error", errorText: output.message } as Parts[number];
   });
 }
+
+/**
+ * A reply as a person reads it outside the chat, in the console and in the list: its text, the question of an offer the
+ * text does not already ask, and, before them, the ticket it showed when the card was all it said.
+ */
+export function replyText(parts: Parts): string {
+  const text = textOf(parts).trim();
+  const lines: string[] = [];
+  for (const part of parts) {
+    if (part.type === "tool-getTicket" && part.state === "output-available" && !isRefusedInput(part.output) && part.output.ok && !text) {
+      lines.push(`Chamado ${part.output.ticket.id} · ${part.output.ticket.title}`);
+    }
+    if ((part.type === "tool-offerReplies" || part.type === "tool-offerTicketChoice") && part.state === "output-available") {
+      const question = part.input.question.trim();
+      if (!text.includes(question)) lines.push(question);
+    }
+  }
+  return [text, ...lines].filter(Boolean).join("\n");
+}
