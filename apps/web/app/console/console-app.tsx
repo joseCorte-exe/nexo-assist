@@ -56,7 +56,7 @@ export function ConsoleApp({
           {waiting > 0 ? (
             <span
               aria-hidden
-              className="absolute top-1 left-6 grid h-4 min-w-4 place-items-center rounded-full bg-cta px-[5px] text-[10px]/[normal] font-bold text-white tabular-nums outline-2 outline-desk"
+              className="absolute top-1 left-6 grid h-4 min-w-4 place-items-center rounded-full bg-cta px-[5px] text-10 font-bold text-white tabular-nums outline-2 outline-desk"
             >
               {waiting}
             </span>

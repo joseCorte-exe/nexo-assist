@@ -33,7 +33,7 @@ export function ConversationList({ state, viewerId, now }: { state: ConsoleState
     >
       <div className="flex flex-col gap-3 px-4 pt-4 pb-2.5">
         <div className="flex items-center gap-2">
-          <h1 className="flex-1 text-[20px]/[normal] font-bold tracking-[-0.3px] text-ink">Conversas</h1>
+          <h1 className="flex-1 text-20 font-bold tracking-[-0.3px] text-ink">Conversas</h1>
           <Availability available={state.available} onToggle={state.toggleAvailable} />
         </div>
         <label className="flex h-9 items-center gap-2.5 rounded-full bg-desk px-3 focus-within:outline-2 focus-within:outline-cta">

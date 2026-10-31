@@ -139,7 +139,7 @@ function Summary({
                 <p className="text-13.5 text-ink-3">{`${CATEGORY_LABEL[current.category]} · prioridade ${PRIORITY_LABEL[current.priority].toLowerCase()}`}</p>
               </div>
               {event ? (
-                <div className="-mt-[0.5px] flex items-center gap-2 border-t border-rule pt-3">
+                <div className="-mt-[0.5px] flex h-[28.5px] items-center gap-2 border-t border-rule pt-3">
                   {event.icon === "transfer" ? (
                     <ArrowRightLeftIcon aria-hidden className="size-[15px] shrink-0 text-ink-3" />
                   ) : (
@@ -179,7 +179,7 @@ function Summary({
 
 function TicketList({ tickets, onOpen }: { tickets: PanelTicket[]; onOpen: (id: string) => void }) {
   return (
-    <ul className="flex flex-col">
+    <ul className="flex flex-col gap-1">
       {tickets.map((ticket, index) => (
         <li key={ticket.id}>
           <button

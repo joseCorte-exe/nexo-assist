@@ -78,7 +78,8 @@ test("Rafael finds her in Para você, opens the history and her tickets, and ass
   await expect(open.getByPlaceholder("Assuma o atendimento para responder")).toBeDisabled();
 
   const panel = rafael.getByRole("complementary", { name: "Chamados de Ana" });
-  await expect(panel).toContainText("3 abertos");
+  // How many depends on the files before this one, which open tickets for her.
+  await expect(panel).toContainText(/\d+ abertos? · \d+ encerrados?/);
   await expect(panel.getByRole("group", { name: "Desta conversa" })).toContainText("INC-20311");
   await expect(panel.getByRole("group", { name: "Desta conversa" })).toContainText("Transferido para um analista");
 
@@ -113,6 +114,17 @@ test("they talk: his message reaches her chat, and hers reaches the console, wit
   await ana.getByLabel(/Mensagem para/).fill("Posso sim, está ligado.");
   await ana.getByLabel(/Mensagem para/).press("Enter");
   await expect(open.getByRole("article", { name: "Ana Souza" }).last()).toContainText("Posso sim, está ligado.", { timeout: 10_000 });
+  // As nexo.pen draws them: a short message on one line, a long one wrapped in a bubble of 420 px.
+  const short = open.getByRole("article", { name: "Ana Souza" }).last().locator("[data-wrapped]");
+  await expect(short).toHaveAttribute("data-wrapped", "false");
+  const long = open.getByRole("article", { name: "Rafael Lima" }).last().locator("[data-wrapped]");
+  await long.evaluate((element) => {
+    // Long enough to wrap at any width of the column.
+    (element.querySelector("p") as HTMLElement).textContent = "Vou iniciar o acesso remoto agora; é só aceitar o pedido que vai aparecer na tela do seu notebook.";
+  });
+  await rafael.setViewportSize({ width: 1441, height: 900 });
+  await expect(long).toHaveAttribute("data-wrapped", "true");
+  expect((await long.boundingBox())?.width).toBe(420);
   // Nobody but Rafael answered.
   await expect(replies(ana).last()).not.toContainText("Posso sim");
 });

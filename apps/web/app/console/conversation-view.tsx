@@ -330,7 +330,7 @@ function HistoryEntry({
   if (item.kind === "day") {
     return (
       <div className="flex justify-center pb-1">
-        <span className="rounded-full bg-day-pill px-2.5 py-1 text-[12px]/[normal] font-medium text-ink-3">{item.label}</span>
+        <span className="rounded-full bg-day-pill px-2.5 py-1 text-12 font-medium text-ink-3">{item.label}</span>
       </div>
     );
   }
@@ -352,9 +352,9 @@ function HistoryEntry({
   return (
     <article aria-label={analyst ? analyst.name : "Nexo Assist"} className="message-enter flex flex-col items-end gap-1 pt-4">
       <div className="flex items-center gap-1.5 px-1">
-        <span className="text-[12px]/[normal] font-semibold text-ink-2">{analyst ? analyst.name : "Nexo Assist"}</span>
+        <span className="text-12 font-semibold text-ink-2">{analyst ? analyst.name : "Nexo Assist"}</span>
         {analyst ? (
-          <span className="rounded-md bg-success-soft px-1.5 py-px text-[11px]/[normal] font-semibold text-success-text">
+          <span className="rounded-md bg-success-soft px-1.5 py-px text-11 font-semibold text-success-text">
             Suporte {analyst.level}
           </span>
         ) : (
@@ -373,18 +373,45 @@ const BUBBLE = {
   analyst: "bg-analyst-bubble rounded-[12px_4px_12px_12px]",
 } as const;
 
+/** The widest a bubble stays on one line, as wide as a bubble of the chat; past it, it wraps at 420 px. */
+const ONE_LINE_MAX = 520;
+/** The width nexo.pen gives a bubble whose text takes more than one line. */
+const WRAPPED_WIDTH = 420;
+
 /**
- * A bubble as the console draws it: the text and, on the same line when it fits, its time (and the double check of a
- * reply). When the text wraps, the bubble takes its 420 px and the time drops under it, against the right edge.
+ * A bubble as the console draws it: the text and its time (and the double check of a reply) on one line while that fits
+ * in 520 px and in the column; longer, the bubble takes its 420 px and the time drops under the text, against the right
+ * edge, as nexo.pen draws both. Measured before paint, again when the column changes width.
  */
 function Bubble({ message, tone, grouped }: { message: ConsoleMessage; tone: keyof typeof BUBBLE; grouped: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [wrapped, setWrapped] = useState(false);
+  useLayoutEffect(() => {
+    const bubble = ref.current;
+    const column = bubble?.parentElement;
+    if (!bubble || !column) return;
+    const measure = () => {
+      // On one line, at its natural width: does it fit the column?
+      bubble.dataset.measuring = "true";
+      const fits = bubble.getBoundingClientRect().width <= Math.min(ONE_LINE_MAX, column.getBoundingClientRect().width);
+      delete bubble.dataset.measuring;
+      setWrapped(!fits);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(column);
+    return () => observer.disconnect();
+  }, [message.text]);
   return (
     <div
-      className={`flex max-w-[420px] flex-wrap items-end justify-end gap-x-2.5 gap-y-0.5 px-3 pt-2 pb-1.5 shadow-bubble ${BUBBLE[tone]} ${grouped ? "rounded-xl" : ""}`}
+      ref={ref}
+      data-wrapped={wrapped}
+      style={wrapped ? { width: WRAPPED_WIDTH, maxWidth: "100%" } : undefined}
+      className={`group/bubble flex shadow-bubble data-[measuring=true]:!w-max data-[measuring=true]:!max-w-none data-[measuring=true]:!flex-row data-[wrapped=false]:items-end data-[wrapped=false]:gap-2.5 data-[wrapped=true]:flex-col data-[wrapped=true]:gap-0.5 ${BUBBLE[tone]} ${grouped ? "rounded-xl" : ""} px-3 pt-2 pb-1.5`}
     >
-      <p className="min-w-0 flex-[1_1_auto] text-14.5/[21px] wrap-anywhere whitespace-pre-line text-ink">{message.text}</p>
-      <p className="ml-auto flex items-center gap-[3px] pb-px">
-        <time dateTime={message.at} className="text-[11px]/[normal] text-ink-3">
+      <p className="text-14.5/[21px] wrap-anywhere whitespace-pre-line text-ink group-data-[measuring=true]/bubble:whitespace-pre">{message.text}</p>
+      <p className="flex items-center justify-end gap-[3px] pb-px">
+        <time dateTime={message.at} className="text-11 text-ink-3">
           {clockTime(new Date(message.at))}
         </time>
         {tone !== "employee" ? (
@@ -399,11 +426,12 @@ function Bubble({ message, tone, grouped }: { message: ConsoleMessage; tone: key
 function DecisionTag({ message }: { message: ConsoleMessage }) {
   const [open, setOpen] = useState(false);
   const record = message.decision?.record;
-  const tag = "rounded-md bg-primary-soft px-1.5 py-px text-[11px]/[normal] font-semibold text-primary-text";
+  const tag = "rounded-md bg-primary-soft px-1.5 py-px text-11 font-semibold text-primary-text";
   if (!record) return <span className={tag}>IA</span>;
   const confidence = formatConfidence(record.confidence);
   return (
-    <span className="relative">
+    // A flex box, not an inline span: an inline wrapper would give the sender row the line height of the page.
+    <span className="relative flex">
       <button
         type="button"
         aria-expanded={open}
@@ -481,7 +509,10 @@ function Bottom({ detail, state, viewerId, now }: { detail: ConsoleDetail; state
   const bar = takeoverBar(detail.conversation, viewerId, now);
   const name = firstName(detail.conversation.employee.name);
   return (
-    <div className="-mt-[0.5px] box-content flex shrink-0 flex-col gap-2.5 border-t border-rule bg-white px-5 pt-3 pb-3.5 max-md:px-3">
+    // 12 px above the bar that takes the conversation, 10 above the composer of who attends, as nexo.pen draws them.
+    <div
+      className={`-mt-[0.5px] box-content flex shrink-0 flex-col gap-2.5 border-t border-rule bg-white px-5 pb-3.5 max-md:px-3 ${bar.kind === "compose" ? "pt-2.5" : "pt-3"}`}
+    >
       {state.actionError ? (
         <p role="alert" className="text-12.5 text-danger-text">
           {state.actionError}

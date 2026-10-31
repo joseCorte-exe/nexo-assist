@@ -19,7 +19,7 @@ export function SystemNote({ event, text, className = "" }: { event: Conversatio
   return (
     <div role="separator" aria-label={text} className={`message-enter flex w-full items-center justify-center gap-3 ${className}`}>
       <span aria-hidden className="h-px min-w-4 flex-1 bg-note-line" />
-      <span aria-hidden className="flex items-center gap-1.5 text-center text-[12px]/[normal] font-medium text-balance text-ink-3">
+      <span aria-hidden className="flex items-center gap-1.5 text-center text-12 font-medium text-balance text-ink-3">
         {Icon ? <Icon className="size-[13px] shrink-0" /> : null}
         {text}
       </span>
