@@ -1,4 +1,4 @@
-import { type ConsoleFilter, type ConsoleListResponse, consoleListQuery } from "@nexo/shared";
+import { type ConsoleFilter, type ConsoleListQuery, type ConsoleListResponse, consoleListQuery } from "@nexo/shared";
 import { and, desc, eq, inArray, ne, or, type SQL, sql } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { conversations } from "@/db/schema";
@@ -22,15 +22,23 @@ export async function listHandler(request: NextRequest, deps: Deps) {
   if (!session.ok) return session.response;
   const query = consoleListQuery.safeParse(Object.fromEntries(request.nextUrl.searchParams));
   if (!query.success) return jsonError(400, "invalid_query", "Filtro ou busca inválidos.");
-  const analystId = session.session.id;
+  const list = await loadList(deps, session.session.id, query.data);
+  if (!list) return serviceUnavailable();
+  return NextResponse.json<ConsoleListResponse>(list, { headers: { "cache-control": "private, no-store" } });
+}
 
+/**
+ * The list as this analyst sees it, or null when the ticket-service, which owns the names, did not answer. The console
+ * page reads it here on the server, so it opens with the list instead of a spinner.
+ */
+export async function loadList(deps: Deps, analystId: string, query: ConsoleListQuery): Promise<ConsoleListResponse | null> {
   const analysts = await deps.directory.analysts();
   const me = analysts?.get(analystId);
-  if (!analysts || !me) return serviceUnavailable();
+  if (!analysts || !me) return null;
 
-  const { filter, search } = query.data;
+  const { filter, search } = query;
   const matching = search ? await searchCondition(deps, search) : undefined;
-  if (matching === null) return serviceUnavailable();
+  if (matching === null) return null;
 
   // The numbers of the chips and the page, in one round trip.
   const [[counts], rows] = await deps.db.batch([
@@ -49,18 +57,13 @@ export async function listHandler(request: NextRequest, deps: Deps) {
   ]);
 
   const employees = await deps.directory.employees(rows.map((row) => row.conversation.employeeId));
-  if (!employees) return serviceUnavailable();
+  if (!employees) return null;
   const now = deps.now();
-  return NextResponse.json<ConsoleListResponse>(
-    {
-      conversations: rows.map((row) =>
-        toConsoleConversation(row, { employee: employees.get(row.conversation.employeeId), analysts, now }),
-      ),
-      counts: { forYou: Number(counts?.forYou ?? 0), withAgent: Number(counts?.withAgent ?? 0), mine: Number(counts?.mine ?? 0) },
-      waiting: Number(counts?.waiting ?? 0),
-    },
-    { headers: { "cache-control": "private, no-store" } },
-  );
+  return {
+    conversations: rows.map((row) => toConsoleConversation(row, { employee: employees.get(row.conversation.employeeId), analysts, now })),
+    counts: { forYou: Number(counts?.forYou ?? 0), withAgent: Number(counts?.withAgent ?? 0), mine: Number(counts?.mine ?? 0) },
+    waiting: Number(counts?.waiting ?? 0),
+  };
 }
 
 function filterCondition(filter: ConsoleFilter, { analystId, level }: { analystId: string; level: string }): SQL | undefined {
