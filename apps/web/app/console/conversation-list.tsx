@@ -2,8 +2,10 @@
 
 import { type ConsoleConversation, type ConsoleFilter, conversationTag, listTime, type TagTone } from "@nexo/shared";
 import { CheckCheckIcon, SearchIcon } from "@/components/console-icons";
+import type { ComponentProps } from "react";
 import { avatarTone } from "@/lib/console-view";
 import { initials } from "@/lib/format";
+import { useWholePixelRef } from "@/lib/use-whole-pixel-width";
 import type { ConsoleState } from "./use-console";
 
 const FILTERS: Array<{ filter: ConsoleFilter; label: string; count?: "forYou" | "withAgent" | "mine" }> = [
@@ -54,18 +56,19 @@ export function ConversationList({ state, viewerId, now }: { state: ConsoleState
             const active = option === filter;
             const value = count ? list?.counts[count] : undefined;
             return (
-              <button
+              <FilterChip
                 key={option}
                 type="button"
                 aria-pressed={active}
                 onClick={() => state.setFilter(option)}
                 className="flex items-center gap-1.5 rounded-full bg-desk px-[9px] py-1.5 text-12.5 font-medium whitespace-nowrap text-ink-2 transition-[background-color,color,scale] duration-150 ease-out active:scale-[0.96] aria-pressed:bg-primary-soft aria-pressed:text-primary-text"
+                text={`${label}${value ?? ""}`}
               >
                 {label}
                 {value !== undefined ? (
                   <span className={`font-semibold tabular-nums ${active ? "text-primary-text" : "text-ink-3"}`}>{value}</span>
                 ) : null}
-              </button>
+              </FilterChip>
             );
           })}
         </div>
@@ -75,10 +78,18 @@ export function ConversationList({ state, viewerId, now }: { state: ConsoleState
   );
 }
 
+/** A chip of the filters, on a whole pixel: the next one starts where nexo.pen puts it. */
+function FilterChip({ text, ...props }: ComponentProps<"button"> & { text: string }) {
+  const ref = useWholePixelRef<HTMLButtonElement>(text);
+  return <button ref={ref} {...props} />;
+}
+
 /** "Disponível": a switch the analyst flips; the dot on the rail follows it. */
 function Availability({ available, onToggle }: { available: boolean; onToggle: () => void }) {
+  const ref = useWholePixelRef<HTMLButtonElement>(available ? "Disponível" : "Indisponível");
   return (
     <button
+      ref={ref}
       type="button"
       role="switch"
       aria-checked={available}

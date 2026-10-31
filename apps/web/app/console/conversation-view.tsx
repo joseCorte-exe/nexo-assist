@@ -25,6 +25,7 @@ import {
 import { SystemNote } from "@/components/system-note";
 import { avatarTone, conversationMeta, type HistoryItem, headerMode, historyItems, takeoverBar } from "@/lib/console-view";
 import { firstName, formatConfidence, initials } from "@/lib/format";
+import { useWholePixelRef } from "@/lib/use-whole-pixel-width";
 import type { ConsoleState, PendingMessage } from "./use-console";
 
 /** Closer than this to the bottom, new messages keep the view pinned; farther up, the analyst is reading. */
@@ -107,6 +108,10 @@ function Header({
   const { conversation } = detail;
   const tone = avatarTone(conversation.employee.id);
   const mode = headerMode(conversation, viewerId);
+  // Hugging their text, on whole pixels, as nexo.pen lays them out next to each other.
+  const pillRef = useWholePixelRef<HTMLParagraphElement>(mode.kind === "pill" ? mode.text : "");
+  const releaseRef = useWholePixelRef<HTMLButtonElement>("Devolver ao agent");
+  const closeRef = useWholePixelRef<HTMLButtonElement>("Encerrar atendimento");
   return (
     // 63.5 px and a rule straddling the edge, as the top bar of the chat.
     <header className="-mb-[0.5px] box-content flex h-[63.5px] shrink-0 items-center gap-3 border-b border-rule bg-white pr-4 pl-5 max-md:pl-2">
@@ -130,13 +135,14 @@ function Header({
         <p className="truncate text-12.5 text-ink-3">{conversationMeta(conversation)}</p>
       </div>
       {mode.kind === "pill" ? (
-        <p className={`flex shrink-0 items-center gap-[7px] rounded-full px-[11px] py-1.5 text-12.5 font-semibold whitespace-nowrap ${PILL[mode.tone]}`}>
+        <p ref={pillRef} className={`flex shrink-0 items-center gap-[7px] rounded-full px-[11px] py-1.5 text-12.5 font-semibold whitespace-nowrap ${PILL[mode.tone]}`}>
           <BotIcon aria-hidden className="size-3.5" />
           {mode.text}
         </p>
       ) : (
         <>
           <button
+            ref={releaseRef}
             type="button"
             onClick={() => void state.act("release")}
             aria-disabled={state.acting !== null}
@@ -146,6 +152,7 @@ function Header({
             Devolver ao agent
           </button>
           <button
+            ref={closeRef}
             type="button"
             onClick={() => void state.act("close")}
             aria-disabled={state.acting !== null}
@@ -509,6 +516,8 @@ function DraftLine({ draft }: { draft: DraftView }) {
 function Bottom({ detail, state, viewerId, now }: { detail: ConsoleDetail; state: ConsoleState; viewerId: string; now: Date }) {
   const bar = takeoverBar(detail.conversation, viewerId, now);
   const name = firstName(detail.conversation.employee.name);
+  const releaseRef = useWholePixelRef<HTMLButtonElement>("Devolver ao agent");
+  const assumeRef = useWholePixelRef<HTMLButtonElement>(state.acting === "assume" ? "Assumindo…" : "Assumir atendimento");
   return (
     // 12 px above the bar that takes the conversation, 10 above the composer of who attends, as nexo.pen draws them.
     <div
@@ -531,6 +540,7 @@ function Bottom({ detail, state, viewerId, now }: { detail: ConsoleDetail; state
             </div>
             {bar.release ? (
               <button
+                ref={releaseRef}
                 type="button"
                 onClick={() => void state.act("release")}
                 aria-disabled={state.acting !== null}
@@ -541,6 +551,7 @@ function Bottom({ detail, state, viewerId, now }: { detail: ConsoleDetail; state
               </button>
             ) : null}
             <button
+              ref={assumeRef}
               type="button"
               onClick={() => void state.act("assume")}
               aria-disabled={state.acting !== null}

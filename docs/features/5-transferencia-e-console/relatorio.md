@@ -57,18 +57,19 @@ Uma revisão de código separada achou seis defeitos. Cada um ganhou um teste qu
 
 Referência: as duas telas do nexo.pen exportadas pelo próprio pen.dev, a 100%. O app foi fotografado no mesmo tamanho (1440 × 900 e, para o assumido, 1567 × 900, a largura do quadro), com os mesmos textos, horários, chamados e o relógio do navegador parado às 10:13 do dia do design.
 
-| Região | Linhas de caixa a até 1 px | Linhas de texto a até 1 px | Pixels diferentes (desfoque de 1 px) |
-|---|---|---|---|
-| Conversa esperando | 12 de 13 (a outra, 2 px) | 20 de 21 | 1,99% |
-| Painel de chamados | 19 de 22 (as outras, 2 px) | 17 de 18 | 1,90% |
-| Topo da lista | 1 de 2 (a outra, 2 px) | 3 de 3 | 2,20% |
-| Trilho | – | 4 de 5 | 0,65% |
-| Conversa assumida | 8 de 8 | 26 de 27 | 1,75% |
-| Painel, assumido | 16 de 19 | 18 de 19 | 1,93% |
+| Medição | Resultado |
+|---|---|
+| Bordas de cima e de baixo de cada bolha, conversa esperando | 28 de 28 a até 0,2 px (mediana 0) |
+| Bordas de cada bolha, conversa assumida (1567 px) | 18 de 18 a até 0,58 px |
+| Fios entre os chamados do painel, nas duas telas | 6 de 6 a até 0,5 px |
+| Linhas de texto da conversa, pelo centro da tinta | 20 de 21 e 26 de 27 a até 1 px (mediana 0,69) |
+| Linhas de texto do painel | 17 de 18 e 18 de 19 a até 1,08 px |
+| Botões da barra de assumir, borda a borda | idênticos ao design, à esquerda e à direita |
+| Pixels diferentes depois de um desfoque de 1 px | conversa 1,73%, painel 1,90%, topo da lista 1,64%, trilho 0,65% |
 
-A linha de texto que fica fora, nas duas conversas, é um pixel solto do "ç" de "atualização" que a medição separa da linha dele. As linhas da lista, comparadas pessoa a pessoa, diferem de 0,03% a 1,06%; só a da Ana difere mais, porque no app ela já foi lida ao abrir e a prévia mostra a última resposta do Nexo.
+A linha de texto que fica fora, nas duas conversas, é um pixel solto do "ç" de "atualização" que a medição separa da linha dele. Os fios que pareciam a 2 px estão a meio pixel: o nexo.pen os desenha em meio pixel, espalhados em duas fileiras com metade da cor, e o navegador os põe num pixel inteiro. Os pixels que ainda diferem são o contorno das letras, que o Pencil e o Chrome suavizam de jeitos diferentes, mais os dados que diferem de propósito (o filtro "Todas" marcado e a linha da Ana já lida). As linhas da lista, comparadas pessoa a pessoa, diferem de 0,03% a 1,06%; só a da Ana difere mais, porque no app ela já foi lida ao abrir e a prévia mostra a última resposta do Nexo.
 
-Três acertos saíram dessa medição. O nexo.pen usa como altura "normal" 1,2 vez o tamanho, arredondada para cima; faltavam os tokens de 10, 11, 12 e 20 px. A etiqueta "IA", virando botão dentro de um `span` comum, dava 20 px à linha do remetente em vez de 16, e eram 4 px por resposta. E o painel separa os chamados por 4 px.
+Quatro acertos saíram dessa medição. O nexo.pen usa como altura "normal" 1,2 vez o tamanho, arredondada para cima; faltavam os tokens de 10, 11, 12 e 20 px. A etiqueta "IA", virando botão dentro de um `span` comum, dava 20 px à linha do remetente em vez de 16, e eram 4 px por resposta. O painel separa os chamados por 4 px. E o Pencil arredonda para cima a largura do que abraça o texto: os botões, as pílulas e os filtros do console passaram a ter largura em pixel inteiro, como os botões do rascunho da feature 4, e o "Assumir atendimento" deixou de ficar 1 px mais estreito.
 
 A largura das bolhas segue os dois quadros: numa linha enquanto cabe em 520 px; mais longa, a bolha tem 420 px e a hora desce. Um teste no navegador confere as duas.
 
