@@ -30,6 +30,8 @@ import {
   type TicketServiceClient,
   type TicketSummary,
   type TicketType,
+  type TransferToAnalystInput,
+  type TransferToAnalystOutput,
   type Urgency,
 } from "@nexo/shared";
 import { z } from "zod";
@@ -64,6 +66,8 @@ export type TransferStore = {
 
 /** Set in the request context by the agent when the decision came below 0.6: the transfer is the doubt of the agent. */
 export const FORCED_TRANSFER = "forcedTransfer";
+/** The transfer of the turn, kept in its request context: a second call in the same reply answers what the first did. */
+const TURN_TRANSFER = "turnTransfer";
 
 /** A draft as the tool hands it to be saved: what the card shows, plus what the console and the analyst need. */
 export type DraftRecord = {
@@ -365,58 +369,74 @@ export function createTools({
     ...nexoToolSchemas.transferToAnalyst,
     requestContextSchema: turnContext,
     execute: async (input, context) => {
-      const employeeId = employeeOf(context);
-      const conversationId = context.requestContext.get("conversationId");
-      const forced = (context.requestContext as { get: (key: string) => unknown }).get(FORCED_TRANSFER) === true;
-      let ticket: Ticket | null = null;
-      if (input.ticketId) {
-        const result = await ticketService.getTicket(input.ticketId, employeeId);
-        if (result.ok && !result.data) {
-          return {
-            ok: false as const,
-            reason: "ticket_not_found" as const,
-            message: `Não encontrei o ${input.ticketId} entre os chamados dele. Transfira sem o número.`,
-          };
-        }
-        if (result.ok) ticket = result.data;
-      }
-      const at = now();
-      const { impact, urgency, affected } = input;
-      const route = routeTransfer({
-        requested: forced ? "agent_unsure" : input.reason,
-        ticket: ticket && { priority: ticket.priority, status: ticket.status, dueAt: new Date(ticket.dueAt) },
-        classification: impact && urgency && affected ? { impact, urgency, affected } : null,
-        at,
-      });
-      const saved = await transfers.transfer({
-        conversationId,
-        level: route.level,
-        reason: route.reason,
-        summary: input.summary,
-        ticketId: ticket?.id ?? null,
-        waitUntil: route.waitUntil,
-        at,
-      });
-      if (!saved.transferred) {
-        return { ok: false as const, reason: "not_with_agent" as const, message: "Um analista já está com esta conversa." };
-      }
-      if (ticket) {
-        const body = { employeeId, level: route.level, summary: input.summary };
-        const marked = await ticketService.transferTicket(ticket.id, body, saved.noteId);
-        // The conversation is with the analyst either way; the history of the ticket only misses the line.
-        if (!marked.ok) console.error("transfer not noted on the ticket", { ticketId: ticket.id, error: marked.error.code });
-      }
-      return {
-        ok: true as const,
-        level: route.level,
-        levelLabel: LEVEL_LABEL[route.level],
-        transferReason: route.reason,
-        ticketId: ticket?.id ?? null,
-        waitUntil: route.waitUntil.toISOString(),
-        waitText: deadlineWords(route.waitUntil, at),
-      };
+      // The model sometimes asks for it twice in one step: one transfer, and the same answer to both.
+      const turn = context.requestContext as { get: (key: string) => unknown; set: (key: string, value: unknown) => void };
+      const earlier = turn.get(TURN_TRANSFER) as Promise<TransferToAnalystOutput> | undefined;
+      if (earlier) return earlier;
+      const transfer = transferOnce(input, context, turn.get(FORCED_TRANSFER) === true);
+      turn.set(TURN_TRANSFER, transfer);
+      // A refused call is not a transfer: the model may call again, fixed.
+      const output = await transfer;
+      if (!output.ok) turn.set(TURN_TRANSFER, undefined);
+      return output;
     },
   });
+
+  async function transferOnce(
+    input: TransferToAnalystInput,
+    context: { requestContext: { get: (key: "employeeId" | "conversationId") => string } },
+    forced: boolean,
+  ): Promise<TransferToAnalystOutput> {
+    const employeeId = context.requestContext.get("employeeId");
+    const conversationId = context.requestContext.get("conversationId");
+    let ticket: Ticket | null = null;
+    if (input.ticketId) {
+      const result = await ticketService.getTicket(input.ticketId, employeeId);
+      if (result.ok && !result.data) {
+        return {
+          ok: false as const,
+          reason: "ticket_not_found" as const,
+          message: `Não encontrei o ${input.ticketId} entre os chamados dele. Transfira sem o número.`,
+        };
+      }
+      if (result.ok) ticket = result.data;
+    }
+    const at = now();
+    const { impact, urgency, affected } = input;
+    const route = routeTransfer({
+      requested: forced ? "agent_unsure" : input.reason,
+      ticket: ticket && { priority: ticket.priority, status: ticket.status, dueAt: new Date(ticket.dueAt) },
+      classification: impact && urgency && affected ? { impact, urgency, affected } : null,
+      at,
+    });
+    const saved = await transfers.transfer({
+      conversationId,
+      level: route.level,
+      reason: route.reason,
+      summary: input.summary,
+      ticketId: ticket?.id ?? null,
+      waitUntil: route.waitUntil,
+      at,
+    });
+    if (!saved.transferred) {
+      return { ok: false as const, reason: "not_with_agent" as const, message: "Um analista já está com esta conversa." };
+    }
+    if (ticket) {
+      const body = { employeeId, level: route.level, summary: input.summary };
+      const marked = await ticketService.transferTicket(ticket.id, body, saved.noteId);
+      // The conversation is with the analyst either way; the history of the ticket only misses the line.
+      if (!marked.ok) console.error("transfer not noted on the ticket", { ticketId: ticket.id, error: marked.error.code });
+    }
+    return {
+      ok: true as const,
+      level: route.level,
+      levelLabel: LEVEL_LABEL[route.level],
+      transferReason: route.reason,
+      ticketId: ticket?.id ?? null,
+      waitUntil: route.waitUntil.toISOString(),
+      waitText: deadlineWords(route.waitUntil, at),
+    };
+  }
 
   return {
     recordDecision,

@@ -162,6 +162,35 @@ describe("transferToAnalyst", () => {
     log.mockRestore();
   });
 
+  it("transfers once when the model asks twice in the same reply, and answers both the same", async () => {
+    const { transferToAnalyst, transfers, marked } = setup();
+    const context = new RequestContext<unknown>([
+      ["employeeId", "emp-ana"],
+      ["conversationId", "conv-ana"],
+    ]);
+    const input = { reason: "employee_request", summary, ticketId: "INC-20311" };
+    const [first, second] = await Promise.all([
+      transferToAnalyst.execute!(input as never, { requestContext: context } as never),
+      transferToAnalyst.execute!(input as never, { requestContext: context } as never),
+    ]);
+    expect(first).toMatchObject({ ok: true, level: "N2" });
+    expect(second).toEqual(first);
+    expect(transfers).toHaveLength(1);
+    expect(marked).toHaveLength(1);
+  });
+
+  it("lets the model fix a refused call in the same reply: only a transfer that happened is kept", async () => {
+    const { transferToAnalyst, transfers } = setup();
+    const context = new RequestContext<unknown>([
+      ["employeeId", "emp-ana"],
+      ["conversationId", "conv-ana"],
+    ]);
+    const call = (input: unknown) => transferToAnalyst.execute!(input as never, { requestContext: context } as never);
+    expect(await call({ reason: "employee_request", summary, ticketId: "INC-20319" })).toMatchObject({ ok: false, reason: "ticket_not_found" });
+    expect(await call({ reason: "employee_request", summary })).toMatchObject({ ok: true });
+    expect(transfers).toHaveLength(1);
+  });
+
   it("does nothing when an analyst took the conversation meanwhile", async () => {
     const { transferToAnalyst, marked } = setup({ stillWithAgent: false });
     const result = await run(transferToAnalyst, { reason: "employee_request", summary, ticketId: "INC-20311" });
