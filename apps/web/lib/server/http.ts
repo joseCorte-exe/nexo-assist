@@ -15,6 +15,8 @@ export const serviceUnavailable = () =>
 
 export const forbidden = () => jsonError(403, "forbidden", "Esta área é só para funcionários.");
 
+export const analystsOnly = () => jsonError(403, "forbidden", "Esta área é só para analistas.");
+
 export function readSession(request: NextRequest, deps: Deps): Promise<Session | null> {
   return sessionFrom(request.cookies.get(SESSION_COOKIE)?.value, deps.sessionSecret, deps.now());
 }
@@ -41,4 +43,15 @@ export async function readBody<T>(
   const message =
     json === undefined ? "Corpo da requisição inválido." : (parsed.error.issues[0]?.message ?? "Dados inválidos.");
   return { ok: false, response: jsonError(400, "invalid_body", message) };
+}
+
+/** For the routes of the console: the session of an analyst, or the 401 or 403 to answer. */
+export async function readAnalystSession(
+  request: NextRequest,
+  deps: Deps,
+): Promise<{ ok: true; session: Session } | { ok: false; response: NextResponse }> {
+  const session = await readSession(request, deps);
+  if (!session) return { ok: false, response: unauthorized() };
+  if (session.role !== "analyst") return { ok: false, response: analystsOnly() };
+  return { ok: true, session };
 }
