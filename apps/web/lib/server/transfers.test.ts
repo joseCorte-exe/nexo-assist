@@ -5,7 +5,7 @@ import { conversations, decisions, messages } from "@/db/schema";
 import { chat } from "./chat";
 import { loadConversation } from "./conversation";
 import { ana, NOW, readStream, request, sessionCookieFor, testDeps, type TestDeps } from "./test-deps";
-import { createTransferStore } from "./transfers";
+import { createTransferStore, noteAfterReply } from "./transfers";
 
 // The transfer of feature 5 as the chat runs it: the agent (the simulated model, the same the end-to-end tests use)
 // calls transferToAnalyst, and the conversation moves in the conversations database with a note the console shows.
@@ -150,5 +150,27 @@ describe("createTransferStore", () => {
     expect(notes.map((note) => note.id)).toContain((result as { noteId: string }).noteId);
     const [row] = await deps.db.select().from(conversations).where(eq(conversations.id, "conv-bruno"));
     expect(row).toMatchObject({ state: "waiting_for_analyst", targetLevel: "N2", transferReason: "critical", lastActivityAt: NOW });
+  });
+});
+
+describe("noteAfterReply", () => {
+  const transfer = { conversationId: "conv-bruno", level: "N1" as const, reason: "employee_request" as const, summary: "Pediu um analista.", ticketId: null, waitUntil: new Date(NOW.getTime() + 3_600_000), at: NOW };
+  const noteAt = async (deps: TestDeps) =>
+    (await deps.db.select({ at: messages.createdAt }).from(messages).where(and(eq(messages.conversationId, "conv-bruno"), eq(messages.event, "transferred"))))[0]?.at;
+
+  it("moves the note of the transfer after the reply that announced it", async () => {
+    const deps = await testDeps();
+    await createTransferStore(deps.db).transfer(transfer);
+    const replyAt = new Date(NOW.getTime() + 5_000);
+    await noteAfterReply(deps.db, { conversationId: "conv-bruno", since: NOW, replyAt });
+    expect(await noteAt(deps)).toEqual(new Date(replyAt.getTime() + 1));
+  });
+
+  it("leaves it where it is when an analyst took the conversation while the agent answered", async () => {
+    const deps = await testDeps();
+    await createTransferStore(deps.db).transfer(transfer);
+    await deps.db.update(conversations).set({ state: "with_analyst", analystId: "analyst-rafael" }).where(eq(conversations.id, "conv-bruno"));
+    await noteAfterReply(deps.db, { conversationId: "conv-bruno", since: NOW, replyAt: new Date(NOW.getTime() + 5_000) });
+    expect(await noteAt(deps)).toEqual(NOW);
   });
 });

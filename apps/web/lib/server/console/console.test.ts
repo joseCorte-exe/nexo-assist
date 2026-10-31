@@ -6,6 +6,7 @@ import { conversations, messages } from "@/db/schema";
 import { chat } from "../chat";
 import { conversationHandler, loadConversation } from "../conversation";
 import { presenceHandler } from "../presence";
+import { createTransferStore } from "../transfers";
 import { ana, NOW, rafael, readStream, request, roundTrips, sessionCookieFor, testDeps, type TestDeps } from "../test-deps";
 import { assumeHandler, closeHandler, messageHandler, readHandler, releaseHandler } from "./actions";
 import { availabilityHandler } from "./availability";
@@ -161,6 +162,21 @@ describe("GET /api/console/conversations", () => {
     expect((await list(deps, "", await julianaCookie())).conversations.find((one) => one.id === conversation.id)?.unread).toBe(2);
   });
 
+  it("counts a second transfer from where it started again, not from a read of the first one", async () => {
+    const deps = await testDeps();
+    const conversation = await anaTransferred(deps);
+    await readHandler(request("/x", { method: "POST", cookie: await rafaelCookie() }), deps, conversation.id);
+    await act(deps, releaseHandler, conversation.id);
+    deps.now = () => after(60_000);
+    await anaSays(deps, "Qual o horário do service desk?");
+    deps.now = () => after(120_000);
+    await anaSays(deps, "Quero falar com um analista.");
+    // An N1 transfer this time: it is in Todas.
+    const [line] = (await list(deps)).conversations.filter((one) => one.id === conversation.id);
+    // Only what led to the second transfer: her last message, after the agent's last answer.
+    expect(line?.unread).toBe(1);
+  });
+
   it("shows who has the chat open, and who is writing", async () => {
     const deps = await testDeps();
     await anaTransferred(deps);
@@ -223,6 +239,33 @@ describe("assume, release and close", () => {
       body: { employeeId: ana.id, analystId: "analyst-rafael" },
       key: note!.id,
     });
+  });
+
+  it("puts in service the ticket the agent linked while the analyst was assuming", async () => {
+    const deps = await testDeps();
+    await anaSays(deps, "Qual o horário do service desk?");
+    const [conversation] = await deps.db.select().from(conversations).where(eq(conversations.employeeId, ana.id));
+    // The analyst read it with the agent and no ticket; the agent transfers it, about INC-20311, right before the move.
+    const batch = deps.db.batch.bind(deps.db);
+    let raced = false;
+    deps.db.batch = (async (queries: Parameters<typeof batch>[0]) => {
+      if (!raced) {
+        raced = true;
+        await createTransferStore(deps.db).transfer({
+          conversationId: conversation!.id,
+          level: "N2",
+          reason: "overdue",
+          summary: "Notebook lento e o INC-20311 vencido.",
+          ticketId: "INC-20311",
+          waitUntil: LATER,
+          at: NOW,
+        });
+      }
+      return batch(queries);
+    }) as unknown as typeof deps.db.batch;
+    const { body } = await act(deps, assumeHandler, conversation!.id);
+    expect(body.conversation).toMatchObject({ state: "with_analyst", ticketId: "INC-20311" });
+    expect(deps.ticketService.writes.at(-1)).toMatchObject({ path: "/tickets/INC-20311/assign" });
   });
 
   it("assumes once when clicked twice", async () => {

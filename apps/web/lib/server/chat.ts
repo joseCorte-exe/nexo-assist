@@ -8,6 +8,7 @@ import type { NextRequest } from "next/server";
 import type { Db } from "@/db";
 import { conversations, decisions, drafts, messages } from "@/db/schema";
 import { activeConversationOf } from "./conversation";
+import { noteAfterReply } from "./transfers";
 import type { Deps } from "./deps";
 import { jsonError, readBody, readEmployeeSession } from "./http";
 
@@ -107,18 +108,15 @@ async function saveReply(
       .update(conversations)
       .set({ firstResponseAt: sql`coalesce(${conversations.firstResponseAt}, ${at.getTime()})` })
       .where(eq(conversations.id, conversationId)),
-    // How sure the agent was when it transferred: the console says it of an agent that asked for help. The note of the
-    // transfer, written while the agent answered, moves after the reply that announces it, where nexo.pen draws it.
+    // How sure the agent was when it transferred, for the console's "Agent pediu ajuda · confiança 41%"; the transfer of
+    // this turn, whatever happened to the conversation since. Then the note goes after the reply that announced it.
     ...(transferred
       ? [
           db
             .update(conversations)
             .set({ transferConfidence: record?.confidence ?? null })
-            .where(and(eq(conversations.id, conversationId), eq(conversations.state, "waiting_for_analyst"))),
-          db
-            .update(messages)
-            .set({ createdAt: new Date(at.getTime() + 1) })
-            .where(and(eq(messages.conversationId, conversationId), eq(messages.event, "transferred"), gte(messages.createdAt, startedAt))),
+            .where(and(eq(conversations.id, conversationId), gte(conversations.transferredAt, startedAt))),
+          noteAfterReply(db, { conversationId, since: startedAt, replyAt: at }),
         ]
       : []),
   ]);

@@ -11,18 +11,18 @@ export const ONLINE_MS = 45_000;
 
 /**
  * Her messages this analyst has not read. Only a conversation that needs an analyst has any: waiting for one, or this
- * one's. Never read, they count from where it started needing one: the last answer before the transfer (what she wrote
- * that led to it), or the moment this analyst assumed it.
+ * one's. They count from the later of two moments: when this analyst last read it, and when it started needing an
+ * analyst this time (the last answer before the transfer, so what she wrote that led to it counts; or the moment this
+ * analyst assumed it). A read from an earlier transfer of the same conversation does not hide the new one.
  */
 const unread = (analystId: string) => sql<number>`case
   when ${conversations.state} = 'waiting_for_analyst' or (${conversations.state} = 'with_analyst' and ${conversations.analystId} = ${analystId})
-  then (select count(*) from ${messages} e where e.conversation_id = ${conversations.id} and e.author = 'employee' and e.created_at > coalesce(
-    ${consoleReads.readAt},
-    case when ${conversations.state} = 'with_analyst' then ${conversations.assumedAt}
-    else (select max(a.created_at) from ${messages} a
-          where a.conversation_id = ${conversations.id} and a.author in ('agent', 'analyst') and a.created_at < coalesce(${conversations.transferredAt}, 0))
-    end,
-    0))
+  then (select count(*) from ${messages} e where e.conversation_id = ${conversations.id} and e.author = 'employee' and e.created_at > max(
+    coalesce(${consoleReads.readAt}, 0),
+    case when ${conversations.state} = 'with_analyst' then coalesce(${conversations.assumedAt}, 0)
+    else coalesce((select max(a.created_at) from ${messages} a
+          where a.conversation_id = ${conversations.id} and a.author in ('agent', 'analyst') and a.created_at < coalesce(${conversations.transferredAt}, 0)), 0)
+    end))
   else 0 end`;
 
 /** The last message she or he can read, without the notes, on the index of (conversation, created_at). */

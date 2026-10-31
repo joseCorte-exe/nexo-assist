@@ -17,7 +17,7 @@ import { consoleReads, conversations, messages } from "@/db/schema";
 import type { Deps } from "../deps";
 import { jsonError, readAnalystSession, readBody, serviceUnavailable } from "../http";
 import type { Session } from "../session";
-import { notePart } from "../transfers";
+import { noteIfMoved } from "../transfers";
 import { conversationNotFound, loadDetail } from "./detail";
 
 // What an analyst does to a conversation in the console (ARQUITETURA.md, sections 6 and 7). Each move is one conditional
@@ -64,8 +64,9 @@ type Move = {
 };
 
 /**
- * Moves the conversation and notes it, in one batch; then copies the note to the memory. Answers whether this request
- * moved it and the id of the note, the key of what the ticket-service does about it.
+ * Moves the conversation and notes it, in one batch; then copies the note to the memory. Answers the conversation as the
+ * move left it (not as it was read before: the agent may have transferred it in between) and the id of the note, the
+ * key of what the ticket-service does about it.
  */
 async function move(deps: Deps, row: Row, { analyst }: Who, { event, set, from, text, memory }: Move) {
   const at = deps.now();
@@ -77,25 +78,22 @@ async function move(deps: Deps, row: Row, { analyst }: Who, { event, set, from, 
     analystName: analyst.name,
     at: at.toISOString(),
   };
-  const [moved] = await deps.db.batch([
+  const [[moved]] = await deps.db.batch([
     deps.db
       .update(conversations)
       .set(set)
       .where(and(eq(conversations.id, row.id), from))
-      .returning({ id: conversations.id }),
-    deps.db.run(sql`
-      insert into ${messages} (id, conversation_id, author, author_id, event, text, parts, created_at)
-      select ${noteId}, ${row.id}, 'system', ${analyst.id}, ${event}, ${text}, ${JSON.stringify(notePart(note))}, ${at.getTime()}
-      where changes() = 1`),
+      .returning(),
+    noteIfMoved(deps.db, { noteId, conversationId: row.id, authorId: analyst.id, text, note }),
   ]);
-  if (moved.length === 0) return { moved: false as const };
+  if (!moved) return { moved: false as const };
   try {
     await saveNote(deps.memory, { id: noteId, conversationId: row.id, employeeId: row.employeeId, text: memory, at, prefix: CONSOLE_NOTE });
   } catch (error) {
     // The move and its note are saved: a memory that did not take the note only costs the agent context.
     console.error("note not copied to the agent memory", { conversationId: row.id, event, error: (error as Error).name });
   }
-  return { moved: true as const, noteId };
+  return { moved: true as const, noteId, row: moved };
 }
 
 async function answerDetail(deps: Deps, row: Row, who: Who, analysts: Map<string, Analyst>) {
@@ -128,10 +126,11 @@ export async function assumeHandler(request: NextRequest, deps: Deps, id: string
   });
   // Somebody moved it meanwhile: answer from the state that won.
   if (!result.moved) return assumeHandler(request, deps, id);
-  if (row.ticketId) {
-    const assigned = await deps.ticketService.assignTicket(row.ticketId, { employeeId: row.employeeId, analystId: who.analyst.id }, result.noteId);
+  const { ticketId, employeeId } = result.row;
+  if (ticketId) {
+    const assigned = await deps.ticketService.assignTicket(ticketId, { employeeId, analystId: who.analyst.id }, result.noteId);
     // The conversation is theirs either way; the ticket only misses the "Em atendimento".
-    if (!assigned.ok) console.error("ticket not assigned", { ticketId: row.ticketId, error: assigned.error.code });
+    if (!assigned.ok) console.error("ticket not assigned", { ticketId, error: assigned.error.code });
   }
   return answerDetail(deps, row, who, analysts);
 }
