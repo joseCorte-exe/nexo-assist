@@ -2,20 +2,24 @@ import { createTool } from "@mastra/core/tools";
 import {
   type Affected,
   CATEGORY_LABEL,
-  canReopen,
   type Category,
+  changeRefusal,
   type DraftOperation,
-  type DraftTicketInput,
+  type DraftRejection,
+  type DraftRequest,
   type DraftTicketOutput,
   type DraftView,
   deadlineWords,
+  draftRequest,
   dueAt,
   type Impact,
   isOverdue,
+  isReopenable,
   nexoToolSchemas,
   type OutOfScopeArea,
   type Priority,
   priorityFor,
+  reopenedDueAt,
   slaText,
   type Ticket,
   type TicketCard,
@@ -138,9 +142,7 @@ export function createTools({ ticketService, drafts, now }: { ticketService: Tic
       const summaries = (tickets: Ticket[]) => tickets.map((ticket) => summarize(ticket, at));
       if (scope === "all") return { ok: true as const, tickets: summaries(result.data) };
       const open = result.data.filter((ticket) => ticket.status !== "resolved");
-      const reopenable = result.data.filter(
-        (ticket) => ticket.status === "resolved" && ticket.resolvedAt !== null && canReopen(new Date(ticket.resolvedAt), at),
-      );
+      const reopenable = result.data.filter((ticket) => isReopenable(ticket, at));
       return { ok: true as const, tickets: summaries(open), recentlyResolved: summaries(reopenable) };
     },
   });
@@ -217,9 +219,11 @@ export function createTools({ ticketService, drafts, now }: { ticketService: Tic
    * A new ticket: type and priority from the impact (RN-01), and no draft over a ticket that may be the same: an open
    * one of the category, or one resolved up to 7 days ago, which is reopened instead.
    */
-  async function draftNew(input: DraftTicketInput, { employeeId, conversationId }: TurnContext): Promise<DraftTicketOutput> {
-    // The schema already made sure a create carries these.
-    const { title, category, impact, urgency, affected } = input as Required<DraftTicketInput>;
+  async function draftNew(
+    input: Extract<DraftRequest, { operation: "create" }>,
+    { employeeId, conversationId }: TurnContext,
+  ): Promise<DraftTicketOutput> {
+    const { title, category, impact, urgency, affected } = input;
     const candidates = await ticketService.listCandidates(employeeId, category);
     if (!candidates.ok) return failure("unavailable", TICKETS_DOWN);
     const at = now();
@@ -233,7 +237,7 @@ export function createTools({ ticketService, drafts, now }: { ticketService: Tic
       };
     }
     const priority = priorityFor({ impact, urgency, affected });
-    const due = dueAt({ priority, createdAt: at, lastItResponseAt: null });
+    const due = dueAt({ priority, createdAt: at, lastItResponseAt: null, reopenedAt: null });
     const draft = await drafts.save({
       conversationId,
       operation: "create",
@@ -242,12 +246,12 @@ export function createTools({ ticketService, drafts, now }: { ticketService: Tic
       title,
       description: input.description,
       category,
-      subcategory: input.subcategory ?? null,
+      subcategory: input.subcategory,
       priority,
       affected,
       impact,
       urgency,
-      notDuplicateReason: input.notDuplicateReason ?? null,
+      notDuplicateReason: input.notDuplicateReason,
       dueAt: due,
       createdAt: at,
     });
@@ -259,36 +263,20 @@ export function createTools({ ticketService, drafts, now }: { ticketService: Tic
    * the ticket; only the reopening restarts the deadline, as a new opening. The service checks the same again when
    * the employee confirms.
    */
-  async function draftChange(input: DraftTicketInput, { employeeId, conversationId }: TurnContext): Promise<DraftTicketOutput> {
-    const ticketId = input.ticketId!;
+  async function draftChange(
+    input: Extract<DraftRequest, { operation: "update" | "reopen" }>,
+    { employeeId, conversationId }: TurnContext,
+  ): Promise<DraftTicketOutput> {
+    const { ticketId } = input;
     const result = await ticketService.getTicket(ticketId, employeeId);
     if (!result.ok) return failure("unavailable", TICKETS_DOWN);
     const ticket = result.data;
-    if (!ticket) return failure("not_found", `Não encontrei o ${ticketId} entre os seus chamados.`);
+    if (!ticket) return failure("ticket_not_found", REFUSAL_TO_MODEL.ticket_not_found(ticketId));
     const at = now();
-    const resolved = ticket.status === "resolved";
-
-    let due: Date;
-    if (input.operation === "update") {
-      if (resolved) {
-        return failure("resolved", `O ${ticket.id} está resolvido. Se o problema voltou, monte um reopen; ele vale até 7 dias depois da resolução.`);
-      }
-      due = new Date(ticket.dueAt);
-    } else {
-      if (!resolved || !ticket.resolvedAt) {
-        return failure("not_resolved", `O ${ticket.id} não está resolvido. Para acrescentar uma informação, monte um update.`);
-      }
-      if (!canReopen(new Date(ticket.resolvedAt), at)) {
-        return failure("reopen_window_closed", `O ${ticket.id} foi resolvido há mais de 7 dias e não pode ser reaberto. Monte um chamado novo (create).`);
-      }
-      // The deadline the service will set: the reopening counts as a new opening.
-      due = dueAt({
-        priority: ticket.priority,
-        createdAt: new Date(ticket.createdAt),
-        lastItResponseAt: ticket.lastItResponseAt ? new Date(ticket.lastItResponseAt) : null,
-        reopenedAt: at,
-      });
-    }
+    const refusal = changeRefusal(input.operation, ticket, at);
+    if (refusal) return failure(refusal, REFUSAL_TO_MODEL[refusal](ticket.id));
+    // A follow-up keeps the deadline of the ticket; a reopening counts as a new opening.
+    const due = input.operation === "update" ? new Date(ticket.dueAt) : reopenedDueAt(ticket, at);
 
     const draft = await drafts.save({
       conversationId,
@@ -319,7 +307,8 @@ export function createTools({ ticketService, drafts, now }: { ticketService: Tic
     requestContextSchema: turnContext,
     execute: async (input, context) => {
       const turn = { employeeId: employeeOf(context), conversationId: context.requestContext.get("conversationId") };
-      return input.operation === "create" ? draftNew(input, turn) : draftChange(input, turn);
+      const request = draftRequest(input);
+      return request.operation === "create" ? draftNew(request, turn) : draftChange(request, turn);
     },
   });
 
@@ -334,6 +323,14 @@ export function createTools({ ticketService, drafts, now }: { ticketService: Tic
     draftTicket,
   };
 }
+
+/** What the model is told when the ticket cannot take the change, so it knows what to draft instead. */
+const REFUSAL_TO_MODEL: Record<DraftRejection, (ticketId: string) => string> = {
+  ticket_not_found: (id) => `Não encontrei o ${id} entre os seus chamados.`,
+  ticket_resolved: (id) => `O ${id} está resolvido. Se o problema voltou, monte um reopen; ele vale até 7 dias depois da resolução.`,
+  ticket_not_resolved: (id) => `O ${id} não está resolvido. Para acrescentar uma informação, monte um update.`,
+  reopen_window_closed: (id) => `O ${id} foi resolvido há mais de 7 dias e não pode ser reaberto. Monte um chamado novo (create).`,
+};
 
 /** The tools that hand the turn to the employee: once one of them runs, the reply ends. */
 export const OFFER_TOOLS = new Set(["offerTicketChoice", "offerReplies"]);

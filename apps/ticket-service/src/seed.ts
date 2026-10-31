@@ -292,7 +292,7 @@ export async function seed(db: Db, now: Date = new Date()) {
           createdAt,
           updatedAt: lastItResponseAt ?? createdAt,
           lastItResponseAt,
-          dueAt: dueAt({ priority: ticket.priority, createdAt, lastItResponseAt }),
+          dueAt: dueAt({ priority: ticket.priority, createdAt, lastItResponseAt, reopenedAt: null }),
           resolvedAt: resolvedAgo === null ? null : ago(resolvedAgo),
         };
       }),

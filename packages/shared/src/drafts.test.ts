@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { draftLabel, draftTicketInput, draftTicketOutput, draftView, editDraftInput } from "./drafts";
+import { draftLabel, draftRequest, draftTicketInput, draftTicketOutput, draftView, editDraftInput } from "./drafts";
 import { nexoToolSchemas } from "./chat";
 
 const create = {
@@ -87,6 +87,27 @@ const view = {
   createdAt: "2026-10-26T12:43:00.000Z",
 };
 
+describe("draftRequest", () => {
+  it("turns a checked input into what its operation carries, with nothing missing", () => {
+    expect(draftRequest(draftTicketInput.parse(create))).toEqual({ ...create, notDuplicateReason: null });
+    expect(draftRequest(draftTicketInput.parse({ ...create, subcategory: undefined, notDuplicateReason: "Outro notebook." }))).toEqual({
+      ...create,
+      subcategory: null,
+      notDuplicateReason: "Outro notebook.",
+    });
+  });
+
+  it("keeps only the ticket and the new information of a follow-up or a reopening", () => {
+    const update = { operation: "update", ticketId: "INC-20311", description: "Agora trava também ao abrir o Teams." };
+    expect(draftRequest(draftTicketInput.parse(update))).toEqual(update);
+    expect(draftRequest(draftTicketInput.parse({ ...update, operation: "reopen" }))).toEqual({ ...update, operation: "reopen" });
+  });
+
+  it("refuses an input that skipped the schema", () => {
+    expect(() => draftRequest({ operation: "update", description: "Sem número." })).toThrow();
+  });
+});
+
 describe("draftTicketOutput", () => {
   it("brings the draft and its deadline in words for the model", () => {
     const output = { ok: true, draft: view, dueText: "hoje, até 13:43" };
@@ -103,10 +124,11 @@ describe("draftTicketOutput", () => {
     expect(draftTicketOutput.parse(output)).toEqual(output);
   });
 
-  it("says why a follow-up or a reopening could not be drafted", () => {
-    for (const reason of ["not_found", "resolved", "not_resolved", "reopen_window_closed", "unavailable"]) {
+  it("says why a follow-up or a reopening could not be drafted, with the codes the ticket-service refuses with", () => {
+    for (const reason of ["ticket_not_found", "ticket_resolved", "ticket_not_resolved", "reopen_window_closed", "unavailable"]) {
       expect(draftTicketOutput.safeParse({ ok: false, reason, message: "Não deu." }).success).toBe(true);
     }
+    expect(draftTicketOutput.safeParse({ ok: false, reason: "resolved", message: "Não deu." }).success).toBe(false);
   });
 });
 

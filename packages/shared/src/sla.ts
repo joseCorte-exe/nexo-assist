@@ -1,8 +1,6 @@
 import type { Priority, TicketStatus } from "./domain";
+import { SAO_PAULO_OFFSET_MS } from "./sao-paulo";
 
-// São Paulo has had no daylight saving time since 2019, so its offset is a fixed UTC-3.
-// Vercel runs in UTC, so every business-hours calculation goes through this offset explicitly.
-const SAO_PAULO_OFFSET_MS = -3 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_START_HOUR = 8;
 const DAY_END_HOUR = 18;
@@ -68,7 +66,7 @@ export function dueAt(ticket: {
   priority: Priority;
   createdAt: Date;
   lastItResponseAt: Date | null;
-  reopenedAt?: Date | null;
+  reopenedAt: Date | null;
 }): Date {
   const answeredOrOpened = ticket.lastItResponseAt ?? ticket.createdAt;
   const start =

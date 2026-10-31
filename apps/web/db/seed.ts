@@ -318,7 +318,7 @@ export async function seed(db: Db, now: Date = new Date()) {
         messageCount: conversation.messages.filter((message) => message.author === "employee").length,
         waitUntil:
           transfer && transferredAt
-            ? dueAt({ priority: transfer.priority, createdAt: transferredAt, lastItResponseAt: null })
+            ? dueAt({ priority: transfer.priority, createdAt: transferredAt, lastItResponseAt: null, reopenedAt: null })
             : null,
         createdAt: ago(first.ago),
         firstResponseAt: ago(firstReply.ago),

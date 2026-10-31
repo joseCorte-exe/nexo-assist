@@ -41,7 +41,7 @@ function ticket(
     createdAt: createdAt.toISOString(),
     updatedAt: (lastItResponseAt ?? createdAt).toISOString(),
     lastItResponseAt: lastItResponseAt?.toISOString() ?? null,
-    dueAt: dueAt({ priority: fields.priority, createdAt, lastItResponseAt }).toISOString(),
+    dueAt: dueAt({ priority: fields.priority, createdAt, lastItResponseAt, reopenedAt: null }).toISOString(),
     resolvedAt: null,
     ...fields,
   };

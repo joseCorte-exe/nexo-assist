@@ -183,7 +183,7 @@ function ticket(fields: Partial<Ticket> & Pick<Ticket, "id" | "title" | "status"
     createdAt: createdAt.toISOString(),
     updatedAt: (lastItResponseAt ?? createdAt).toISOString(),
     lastItResponseAt: lastItResponseAt?.toISOString() ?? null,
-    dueAt: dueAt({ priority: fields.priority, createdAt, lastItResponseAt }).toISOString(),
+    dueAt: dueAt({ priority: fields.priority, createdAt, lastItResponseAt, reopenedAt: null }).toISOString(),
     resolvedAt: null,
     ...fields,
   };
@@ -581,12 +581,12 @@ describe("draftTicket", () => {
     const { desk } = ticketDesk({ details: detailsOf(sap) });
     expect(await runInTurn(tools(desk).draftTicket, { operation: "update", ticketId: "INC-20150", description: "De novo." })).toEqual({
       ok: false,
-      reason: "resolved",
+      reason: "ticket_resolved",
       message: "O INC-20150 está resolvido. Se o problema voltou, monte um reopen; ele vale até 7 dias depois da resolução.",
     });
     expect(
       await runInTurn(tools(desk).draftTicket, { operation: "update", ticketId: "INC-20150", description: "De novo." }, "emp-carla"),
-    ).toEqual({ ok: false, reason: "not_found", message: "Não encontrei o INC-20150 entre os seus chamados." });
+    ).toEqual({ ok: false, reason: "ticket_not_found", message: "Não encontrei o INC-20150 entre os seus chamados." });
   });
 
   it("drafts the reopening of a ticket resolved 4 days ago, with the deadline counted again from now", async () => {
@@ -613,7 +613,7 @@ describe("draftTicket", () => {
     });
     expect(await runInTurn(tools(desk).draftTicket, { operation: "reopen", ticketId: "INC-20311", description: "Lento." })).toEqual({
       ok: false,
-      reason: "not_resolved",
+      reason: "ticket_not_resolved",
       message: "O INC-20311 não está resolvido. Para acrescentar uma informação, monte um update.",
     });
   });

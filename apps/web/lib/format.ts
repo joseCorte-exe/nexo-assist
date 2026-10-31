@@ -1,5 +1,8 @@
+import { clockTime, dueIn, MONTHS, twoDigits, wallClock } from "@nexo/shared";
+
 const DASH = "–";
-const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
 
 /** "8 s", "3 min", "2 h": the first-response number on the login screen. */
 export function formatDuration(seconds: number | null): string {
@@ -53,13 +56,8 @@ export function firstName(name: string): string {
   return name.trim().split(/\s+/)[0] ?? "";
 }
 
-// Dates of the tickets, in São Paulo time: it has had a fixed UTC-3 since 2019, and the server runs in UTC.
-const SAO_PAULO_OFFSET_MS = -3 * 60 * 60 * 1000;
-const MONTHS = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
-const HOUR_MS = 60 * 60 * 1000;
-
-const inSaoPaulo = (iso: string) => new Date(new Date(iso).getTime() + SAO_PAULO_OFFSET_MS);
-const twoDigits = (value: number) => String(value).padStart(2, "0");
+// Dates of the tickets, in São Paulo time.
+const inSaoPaulo = (iso: string) => wallClock(new Date(iso));
 
 /** "16 out": the opening date in the list of tickets. */
 export function formatDay(iso: string): string {
@@ -69,8 +67,7 @@ export function formatDay(iso: string): string {
 
 /** "16 out, 14:20": when the ticket was opened, on its card. */
 export function formatDayTime(iso: string): string {
-  const local = inSaoPaulo(iso);
-  return `${formatDay(iso)}, ${twoDigits(local.getUTCHours())}:${twoDigits(local.getUTCMinutes())}`;
+  return `${formatDay(iso)}, ${clockTime(new Date(iso))}`;
 }
 
 /** "há 6 dias", counted from when the agent looked the ticket up, so the card says what the agent said. */
@@ -85,8 +82,6 @@ export function formatTimeAgo(iso: string, since: string): string {
 
 /** "13:43", or "29 out, 10:00" when due on another day than the draft's: the "resposta até" of the draft card. */
 export function formatDueTime(dueAt: string, since: string): string {
-  const due = inSaoPaulo(dueAt);
-  const sameDay = Math.floor(due.getTime() / DAY_MS) === Math.floor(inSaoPaulo(since).getTime() / DAY_MS);
-  const time = `${twoDigits(due.getUTCHours())}:${twoDigits(due.getUTCMinutes())}`;
-  return sameDay ? time : `${formatDay(dueAt)}, ${time}`;
+  const { days, time } = dueIn(new Date(dueAt), new Date(since));
+  return days === 0 ? time : `${formatDay(dueAt)}, ${time}`;
 }

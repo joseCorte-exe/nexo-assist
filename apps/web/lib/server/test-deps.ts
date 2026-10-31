@@ -1,14 +1,16 @@
 import { type AgentMemory, type AgentModel, createMemory, createNexoAgent, type NexoAgent, simulatedModel } from "@nexo/agent";
 import {
   type Analyst,
-  canReopen,
   type Category,
+  changeRefusal,
   createTicketServiceClient,
   createTicketInput,
   dueAt,
   type Employee,
+  isReopenable,
   type KbArticle,
   type Priority,
+  reopenedDueAt,
   sampleAnalysts,
   sampleEmployees,
   type Ticket,
@@ -77,7 +79,7 @@ function toTicket({ openedDaysAgo, itAnsweredDaysAgo, resolvedDaysAgo, category 
     createdAt: createdAt.toISOString(),
     updatedAt: (lastItResponseAt ?? createdAt).toISOString(),
     lastItResponseAt: lastItResponseAt?.toISOString() ?? null,
-    dueAt: dueAt({ priority: sample.priority, createdAt, lastItResponseAt }).toISOString(),
+    dueAt: dueAt({ priority: sample.priority, createdAt, lastItResponseAt, reopenedAt: null }).toISOString(),
     resolvedAt: resolvedDaysAgo === undefined ? null : new Date(NOW.getTime() - resolvedDaysAgo * DAY).toISOString(),
   };
 }
@@ -91,7 +93,8 @@ export type FakeTicketService = TicketServiceClient & {
 };
 
 const notFound = () => Response.json({ error: { code: "ticket_not_found", message: "Ticket not found" } }, { status: 404 });
-const refused = (code: string, message: string) => Response.json({ error: { code, message } }, { status: 409 });
+// The message is the service's business; the web reads only the code.
+const refused = (code: string) => Response.json({ error: { code, message: "Refused" } }, { status: 409 });
 
 /**
  * The real ticket-service client, answering from the sample people and tickets instead of the network,
@@ -133,7 +136,7 @@ export function fakeTicketService({
     if (candidates) {
       const category = searchParams.get("category");
       // Open, or resolved recently enough to be reopened, as the service answers.
-      const sameCase = (ticket: Ticket) => ticket.status !== "resolved" || canReopen(new Date(ticket.resolvedAt!), NOW);
+      const sameCase = (ticket: Ticket) => ticket.status !== "resolved" || isReopenable(ticket, NOW);
       return Response.json(
         tickets.filter((ticket) => ticket.openedBy === decodeURIComponent(candidates[1]!) && ticket.category === category && sameCase(ticket)),
       );
@@ -167,7 +170,7 @@ export function fakeTicketService({
         createdAt: NOW.toISOString(),
         updatedAt: NOW.toISOString(),
         lastItResponseAt: null,
-        dueAt: dueAt({ priority: input.priority, createdAt: NOW, lastItResponseAt: null }).toISOString(),
+        dueAt: dueAt({ priority: input.priority, createdAt: NOW, lastItResponseAt: null, reopenedAt: null }).toISOString(),
         resolvedAt: null,
       };
       return Response.json(created, { status: 201 });
@@ -176,17 +179,15 @@ export function fakeTicketService({
     const { employeeId } = body as { employeeId: string };
     const ticket = tickets.find((one) => one.id === id && one.openedBy === employeeId);
     if (!ticket) return notFound();
-    if (!reopen) return ticket.status === "resolved" ? refused("ticket_resolved", "The ticket is resolved") : Response.json(ticket);
-    if (ticket.status !== "resolved") return refused("ticket_not_resolved", "The ticket is not resolved");
-    if (!canReopen(new Date(ticket.resolvedAt!), NOW)) {
-      return refused("reopen_window_closed", "The ticket was resolved more than 7 days ago");
-    }
+    const refusal = changeRefusal(reopen ? "reopen" : "update", ticket, NOW);
+    if (refusal) return refused(refusal);
+    if (!reopen) return Response.json(ticket);
     return Response.json({
       ...ticket,
       status: "waiting_for_analyst",
       resolvedAt: null,
       updatedAt: NOW.toISOString(),
-      dueAt: dueAt({ priority: ticket.priority, createdAt: NOW, lastItResponseAt: null }).toISOString(),
+      dueAt: reopenedDueAt(ticket, NOW).toISOString(),
     });
   }
 

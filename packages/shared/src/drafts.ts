@@ -1,13 +1,17 @@
 import { z } from "zod";
 import {
+  type Affected,
   affected,
+  type Category,
   category,
   draftOperation,
   draftRejection,
   draftStatus,
+  type Impact,
   impact,
   priority,
   ticketType,
+  type Urgency,
   urgency,
 } from "./domain";
 import { ticketId, ticketSummary } from "./tickets";
@@ -80,6 +84,45 @@ export const draftTicketInput = z
   });
 export type DraftTicketInput = z.infer<typeof draftTicketInput>;
 
+/** A checked draftTicket input as its operation carries it: a new ticket whole, or the ticket and the new information. */
+export type DraftRequest =
+  | {
+      operation: "create";
+      title: string;
+      description: string;
+      category: Category;
+      subcategory: string | null;
+      impact: Impact;
+      urgency: Urgency;
+      affected: Affected;
+      notDuplicateReason: string | null;
+    }
+  | { operation: "update" | "reopen"; ticketId: string; description: string };
+
+/** The input after draftTicketInput checked it, typed by its operation. An input that skipped the schema throws. */
+export function draftRequest(input: DraftTicketInput): DraftRequest {
+  const { operation, ticketId, description } = input;
+  if (operation !== "create") {
+    if (ticketId === undefined) throw new Error(`draftTicket ${operation} without ticketId`);
+    return { operation, ticketId, description };
+  }
+  const { title, category, impact, urgency, affected } = input;
+  if (title === undefined || category === undefined || impact === undefined || urgency === undefined || affected === undefined) {
+    throw new Error("draftTicket create without its classification");
+  }
+  return {
+    operation,
+    title,
+    description,
+    category,
+    subcategory: input.subcategory ?? null,
+    impact,
+    urgency,
+    affected,
+    notDuplicateReason: input.notDuplicateReason ?? null,
+  };
+}
+
 /** A draft as the card draws it, in its current state. For a follow-up or a reopening, ticketId is the ticket changed. */
 export const draftView = z.object({
   id: z.string(),
@@ -108,14 +151,8 @@ export type DraftView = z.infer<typeof draftView>;
 
 export const draftLabel = (number: number) => `D-${number}`;
 
-export const draftFailure = z.enum([
-  "possible_duplicate",
-  "not_found",
-  "resolved",
-  "not_resolved",
-  "reopen_window_closed",
-  "unavailable",
-]);
+/** Why draftTicket drafted nothing: the refusals of the ticket-service, a possible duplicate, or the service down. */
+export const draftFailure = z.enum([...draftRejection.options, "possible_duplicate", "unavailable"]);
 
 export const draftTicketOutput = z.discriminatedUnion("ok", [
   z.object({

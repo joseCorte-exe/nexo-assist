@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import {
-  canReopen,
+  changeRefusal,
   createTicketInput,
   dueAt,
   IDEMPOTENCY_KEY_HEADER,
+  reopenedDueAt,
   type Ticket,
   type TicketDetail,
   type TicketType,
@@ -69,7 +70,7 @@ export function ticketRoutes(deps: Deps) {
             createdAt: now,
             updatedAt: now,
             lastItResponseAt: null,
-            dueAt: dueAt({ priority: input.priority, createdAt: now, lastItResponseAt: null }),
+            dueAt: dueAt({ priority: input.priority, createdAt: now, lastItResponseAt: null, reopenedAt: null }),
             resolvedAt: null,
           })
           .returning();
@@ -87,7 +88,7 @@ export function ticketRoutes(deps: Deps) {
       const { employeeId, text } = body.data;
       return idempotent(deps, c, { key: body.key, scope: `PATCH /tickets/${id.data} for ${employeeId}`, status: 200 }, async (tx, now) => {
         const ticket = await ticketOf(tx, id.data, employeeId);
-        if (ticket.status === "resolved") throw new Refusal(409, "ticket_resolved", "The ticket is resolved");
+        refuseChange("update", ticket, now);
         await addUpdate(tx, { ticketId: ticket.id, text, now });
         return toTicket(ticket);
       });
@@ -103,12 +104,7 @@ export function ticketRoutes(deps: Deps) {
       const scope = `POST /tickets/${id.data}/reopen for ${employeeId}`;
       return idempotent(deps, c, { key: body.key, scope, status: 200 }, async (tx, now) => {
         const ticket = await ticketOf(tx, id.data, employeeId);
-        if (ticket.status !== "resolved" || !ticket.resolvedAt) {
-          throw new Refusal(409, "ticket_not_resolved", "The ticket is not resolved");
-        }
-        if (!canReopen(ticket.resolvedAt, now)) {
-          throw new Refusal(409, "reopen_window_closed", "The ticket was resolved more than 7 days ago");
-        }
+        refuseChange("reopen", ticket, now);
         const [row] = await tx
           .update(tickets)
           .set({
@@ -117,7 +113,7 @@ export function ticketRoutes(deps: Deps) {
             resolvedAt: null,
             reopenedAt: now,
             updatedAt: now,
-            dueAt: dueAt({ ...ticket, reopenedAt: now }),
+            dueAt: reopenedDueAt(ticket, now),
           })
           .where(eq(tickets.id, ticket.id))
           .returning();
@@ -126,6 +122,18 @@ export function ticketRoutes(deps: Deps) {
         return toTicket(row);
       });
     });
+}
+
+const REFUSAL_MESSAGE = {
+  ticket_resolved: "The ticket is resolved",
+  ticket_not_resolved: "The ticket is not resolved",
+  reopen_window_closed: "The ticket was resolved more than 7 days ago",
+} as const;
+
+/** The 409 when the ticket cannot take the change, by the rule the agent checked when drafting. */
+function refuseChange(operation: "update" | "reopen", ticket: typeof tickets.$inferSelect, now: Date) {
+  const refusal = changeRefusal(operation, ticket, now);
+  if (refusal) throw new Refusal(409, refusal, REFUSAL_MESSAGE[refusal]);
 }
 
 /** The idempotency key and the body of a write, or the 400 to answer. The key comes first: no write goes without it. */

@@ -1,4 +1,4 @@
-import { type Analyst, candidatesQuery, canReopen, corporateEmail, type Employee, employeeTicketsStatus } from "@nexo/shared";
+import { type Analyst, candidatesQuery, corporateEmail, type Employee, employeeTicketsStatus, isReopenable } from "@nexo/shared";
 import { and, asc, desc, eq, ne } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -55,7 +55,7 @@ export function employeeRoutes(deps: Deps) {
       }
       // The window counts calendar days in São Paulo, so it is checked here, by the same rule the reopening uses.
       const now = deps.now();
-      const candidates = rows.filter((row) => row.status !== "resolved" || (row.resolvedAt !== null && canReopen(row.resolvedAt, now)));
+      const candidates = rows.filter((row) => row.status !== "resolved" || isReopenable(row, now));
       return c.json(candidates.map(toTicket));
     });
 }
