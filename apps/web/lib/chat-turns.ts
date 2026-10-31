@@ -217,3 +217,20 @@ export function currentDraft(shown: DraftView, known: Readonly<Record<string, Dr
   const draft = known[shown.id] ?? shown;
   return draft.status === "pending" && lastId !== null && draft.id !== lastId ? { ...draft, status: "superseded" } : draft;
 }
+
+/** The same messages, by id and parts: a read that brought nothing new does not redraw the chat. */
+const sameMessages = (a: readonly NexoUIMessage[], b: readonly NexoUIMessage[]) =>
+  a.length === b.length && a.every((message, index) => message.id === b[index]?.id && message.parts.length === b[index]?.parts.length);
+
+/**
+ * The messages to show after reading the conversation again, while an analyst has it. Never under a message on its way:
+ * it lands with the next read. After a failure, the message that did not reach the server stays at the end, so "Tentar
+ * de novo" still has it to send.
+ */
+export function withSaved(current: NexoUIMessage[], saved: NexoUIMessage[], status: ChatStatus): NexoUIMessage[] {
+  if (status === "submitted" || status === "streaming") return current;
+  const last = current.at(-1);
+  const unsent = status === "error" && last?.role === "user" && !saved.some((message) => message.id === last.id) ? [last] : [];
+  const next = [...saved, ...unsent];
+  return sameMessages(current, next) ? current : unsent.length > 0 ? next : saved;
+}

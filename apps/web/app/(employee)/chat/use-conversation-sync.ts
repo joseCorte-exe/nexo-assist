@@ -2,6 +2,7 @@
 
 import type { ConversationResponse, ConversationState, PresenceResponse } from "@nexo/shared";
 import { useCallback, useEffect, useRef } from "react";
+import { createPoller, latestOnly } from "@/lib/poller";
 
 /** While an analyst has the conversation, the chat reads it every 3 s (ARQUITETURA.md, section 4). */
 const POLL_MS = 3_000;
@@ -31,12 +32,17 @@ export function useConversationSync({
   const known = useRef({ conversationId, state });
   known.current = { conversationId, state };
 
+  // A read that comes back after a newer one is not drawn over it.
+  const latest = useRef(latestOnly()).current;
   const refresh = useCallback(async () => {
     const id = known.current.conversationId;
+    const ticket = latest.begin();
     const query = id ? `?${new URLSearchParams({ conversationId: id })}` : "";
     const response = await fetch(`/api/conversation${query}`, { cache: "no-store" }).catch(() => null);
-    if (response?.ok) loaded.current((await response.json()) as ConversationResponse);
-  }, []);
+    if (!response?.ok) return;
+    const saved = (await response.json()) as ConversationResponse;
+    if (latest.take(ticket)) loaded.current(saved);
+  }, [latest]);
 
   const ping = useCallback(
     async (typing: boolean) => {
@@ -56,27 +62,19 @@ export function useConversationSync({
   const paused = state !== null && pausedStates.has(state);
   useEffect(() => {
     if (!paused) return;
-    let timer: ReturnType<typeof setTimeout>;
-    let stopped = false;
-    const schedule = () => {
-      timer = setTimeout(
-        async () => {
-          await refresh();
-          if (!stopped) schedule();
-        },
-        document.visibilityState === "visible" ? POLL_MS : HIDDEN_POLL_MS,
-      );
-    };
+    const poller = createPoller({
+      task: refresh,
+      intervalMs: POLL_MS,
+      hiddenIntervalMs: HIDDEN_POLL_MS,
+      visible: () => document.visibilityState === "visible",
+    });
     const onVisible = () => {
-      if (document.visibilityState !== "visible") return;
-      clearTimeout(timer);
-      void refresh().then(() => !stopped && schedule());
+      if (document.visibilityState === "visible") poller.runNow();
     };
-    schedule();
+    poller.start();
     document.addEventListener("visibilitychange", onVisible);
     return () => {
-      stopped = true;
-      clearTimeout(timer);
+      poller.stop();
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [paused, refresh]);

@@ -1,6 +1,6 @@
 import type { DraftView, NexoUIMessage, TicketCard, TicketSummary } from "@nexo/shared";
 import { describe, expect, it } from "vitest";
-import { type AgentTurn, currentDraft, lastDraftId, liveTurns, messageCount, ticketChoiceText, type Turn } from "./chat-turns";
+import { type AgentTurn, currentDraft, lastDraftId, liveTurns, messageCount, ticketChoiceText, type Turn, withSaved } from "./chat-turns";
 
 const decision = {
   understanding: "Quer saber o horário do service desk",
@@ -498,5 +498,29 @@ describe("liveTurns, with an analyst (feature 5)", () => {
       parts: [{ type: "data-conversation", data: { id: "conv-1", state: "with_analyst", messageCount: 4 } }],
     };
     expect(liveTurns([user("u1", "Oi"), counter], "ready", { paused: true })).toEqual([{ kind: "employee", id: "u1", text: "Oi", unsent: false }]);
+  });
+});
+
+describe("withSaved", () => {
+  const saved = [user("u1", "Oi"), user("u2", "Alguma novidade?")];
+
+  it("takes what the server has when the chat is idle", () => {
+    expect(withSaved([user("u1", "Oi")], saved, "ready")).toBe(saved);
+  });
+
+  it("keeps a message that did not reach the server after a failure, so it can be sent again", () => {
+    const unsent = user("u3", "Posso sim, está ligado.");
+    expect(withSaved([...saved, unsent], saved, "error")).toEqual([...saved, unsent]);
+  });
+
+  it("keeps the chat as it is while a message is on its way", () => {
+    const current = [user("u1", "Oi")];
+    expect(withSaved(current, saved, "submitted")).toBe(current);
+    expect(withSaved(current, saved, "streaming")).toBe(current);
+  });
+
+  it("does not redraw when nothing changed", () => {
+    const current = [user("u1", "Oi"), user("u2", "Alguma novidade?")];
+    expect(withSaved(current, [user("u1", "Oi"), user("u2", "Alguma novidade?")], "ready")).toBe(current);
   });
 });

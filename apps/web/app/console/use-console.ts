@@ -14,6 +14,7 @@ import {
 } from "@nexo/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { callApi } from "@/lib/api-client";
+import { createPoller, latestOnly } from "@/lib/poller";
 
 /** The console reads the list and the open conversation every 3 s, as the chat does (ARQUITETURA.md, section 4). */
 const POLL_MS = 3_000;
@@ -23,28 +24,21 @@ const PANEL_POLL_MS = 30_000;
 const SEARCH_DEBOUNCE_MS = 250;
 
 /**
- * Runs the task now and then every interval after it ends, never two at once, while the tab is visible. A tab that
- * comes back runs it at once: what was missed meanwhile shows up without a wait.
+ * Runs the task every interval, never two at once, while the tab is visible. A tab that comes back runs it at once: what
+ * was missed meanwhile shows up without a wait.
  */
 function usePolling(task: () => Promise<void>, intervalMs: number, key: unknown) {
   const latest = useRef(task);
   latest.current = task;
   useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let stopped = false;
-    const run = async () => {
-      clearTimeout(timer);
-      if (document.visibilityState === "visible") await latest.current();
-      if (!stopped) timer = setTimeout(run, intervalMs);
-    };
+    const poller = createPoller({ task: () => latest.current(), intervalMs, visible: () => document.visibilityState === "visible" });
     const onVisible = () => {
-      if (document.visibilityState === "visible") void run();
+      if (document.visibilityState === "visible") poller.runNow();
     };
-    timer = setTimeout(run, intervalMs);
+    poller.start();
     document.addEventListener("visibilitychange", onVisible);
     return () => {
-      stopped = true;
-      clearTimeout(timer);
+      poller.stop();
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [intervalMs, key]);
@@ -87,7 +81,10 @@ export function useConsole(initial: Initial) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [available, setAvailable] = useState(initial.available);
 
-  // What the latest request was for: an answer that arrives after the analyst moved on is dropped.
+  // Only the newest answer is drawn: an old read that comes back after a newer one, or after an action of the analyst
+  // changed the screen, is dropped. And an answer for what the analyst no longer has open, too.
+  const listLatest = useRef(latestOnly()).current;
+  const detailLatest = useRef(latestOnly()).current;
   const listKey = `${filter}:${search}`;
   const listKeyRef = useRef(listKey);
   listKeyRef.current = listKey;
@@ -96,10 +93,11 @@ export function useConsole(initial: Initial) {
 
   const loadList = useCallback(async () => {
     const key = listKeyRef.current;
+    const ticket = listLatest.begin();
     const params = new URLSearchParams({ filter });
     if (search) params.set("search", search);
     const result = await callApi("GET", `/api/console/conversations?${params}`, consoleListResponse);
-    if (key !== listKeyRef.current) return;
+    if (key !== listKeyRef.current || !listLatest.take(ticket)) return;
     setListFailed(!result.ok);
     if (result.ok) setList(result.data);
   }, [filter, search]);
@@ -107,8 +105,9 @@ export function useConsole(initial: Initial) {
   const loadDetail = useCallback(async () => {
     const id = selectedRef.current;
     if (!id) return;
+    const ticket = detailLatest.begin();
     const result = await callApi("GET", `/api/console/conversations/${encodeURIComponent(id)}`, consoleDetail);
-    if (id !== selectedRef.current) return;
+    if (id !== selectedRef.current || !detailLatest.take(ticket)) return;
     setDetailFailed(!result.ok);
     if (result.ok) setDetail(result.data);
   }, []);
@@ -174,7 +173,10 @@ export function useConsole(initial: Initial) {
     const result = await callApi("POST", `/api/console/conversations/${encodeURIComponent(selectedId)}/${action}`, consoleDetail);
     setActing(null);
     if (result.ok) {
-      if (result.data.conversation.id === selectedRef.current) setDetail(result.data);
+      if (result.data.conversation.id === selectedRef.current) {
+        detailLatest.changed();
+        setDetail(result.data);
+      }
     } else {
       setActionError(result.message);
       void loadDetail();
@@ -195,6 +197,7 @@ export function useConsole(initial: Initial) {
       return;
     }
     const saved: ConsoleMessage = result.data;
+    detailLatest.changed();
     setDetail((current) =>
       current && current.conversation.id === conversationId && !current.messages.some((message) => message.id === saved.id)
         ? { ...current, messages: [...current.messages, saved] }

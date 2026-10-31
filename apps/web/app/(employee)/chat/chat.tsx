@@ -17,7 +17,7 @@ import { CircleAlert } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { SystemNote } from "@/components/system-note";
 import { THINKING_LABEL } from "@/lib/agent-actions";
-import { currentDraft, lastDraftId, liveTurns, messageCount, type Turn } from "@/lib/chat-turns";
+import { currentDraft, lastDraftId, liveTurns, messageCount, type Turn, withSaved } from "@/lib/chat-turns";
 import { firstName } from "@/lib/format";
 import type { Shortcut } from "@/lib/shortcut";
 import { useWholePixelWidth } from "@/lib/use-whole-pixel-width";
@@ -133,8 +133,7 @@ export function Chat({
       if (saved.conversation) setConversation(saved.conversation);
       setDrafts(byId(saved.drafts));
       setSavedCount(saved.conversation?.messageCount ?? 0);
-      // Never under a reply on its way: it lands with the next read.
-      if (statusRef.current === "ready" || statusRef.current === "error") setMessages((current) => (sameMessages(current, saved.messages) ? current : saved.messages));
+      setMessages((current) => withSaved(current, saved.messages, statusRef.current));
     },
   });
 
@@ -315,10 +314,6 @@ function Announcer({ turn }: { turn: Turn | undefined }) {
 }
 
 const byId = (drafts: DraftView[]) => Object.fromEntries(drafts.map((draft) => [draft.id, draft]));
-
-/** The same messages, by id and parts: a read that brought nothing new does not redraw the chat. */
-const sameMessages = (a: readonly NexoUIMessage[], b: readonly NexoUIMessage[]) =>
-  a.length === b.length && a.every((message, index) => message.id === b[index]?.id && message.parts.length === b[index]?.parts.length);
 
 /** The clock of the waiting row: it ticks every 30 s, so a wait that runs out says so without a reload. */
 function useNow() {
