@@ -91,12 +91,20 @@ test("the card is laid out as nexo.pen lays it out: a 52 px bar under a rule cen
   expect(Number.isInteger(layout.stateWidth)).toBe(true);
 });
 
+
 test("she edits the title and the category in the card, never the priority", async ({ page }) => {
   await signInAsAna(page);
   const draft = lastDraft(page);
   await draft.getByRole("button", { name: "Editar" }).click();
   await expect(draft).toContainText("Editando");
   await expect(draft.getByLabel("Título")).toBeFocused();
+  // The category is a field like the title above it: same height, corners, inner space and text.
+  const look = (element: HTMLElement) => {
+    const style = getComputedStyle(element);
+    const { height } = element.getBoundingClientRect();
+    return { height, radius: style.borderRadius, left: style.paddingLeft, size: style.fontSize, weight: style.fontWeight };
+  };
+  expect(await draft.getByLabel("Categoria").evaluate(look)).toEqual(await draft.getByLabel("Título").evaluate(look));
   await draft.getByLabel("Título").fill("VPN não conecta no notebook — erro 809");
   await draft.getByLabel("Categoria").selectOption("software");
   await expect(draft.getByLabel("Prioridade")).toHaveCount(0);
@@ -195,6 +203,22 @@ test("a problem that came back reopens the ticket resolved 4 days ago", async ({
   expect(ticket).toMatchObject({ status: "waiting_for_analyst", resolvedAt: null });
 });
 
+test("with several cards in the conversation the page itself never scrolls: only the conversation does", async ({ page }) => {
+  // A laptop screen, short enough for the conversation to scroll.
+  await page.setViewportSize({ width: 1280, height: 600 });
+  await signInAsAna(page);
+  await expect(lastDraft(page)).toContainText("INC-20150 reaberto.");
+  // Laid out again while she reads from the top, as when the window changes size, then back to the end.
+  const conversation = page.getByRole("region", { name: "Conversa" }).locator("..");
+  await conversation.evaluate((element) => element.scrollTo({ top: 0 }));
+  await page.setViewportSize({ width: 1279, height: 600 });
+  await conversation.evaluate((element) => element.scrollTo({ top: element.scrollHeight }));
+  // Once the messages finished rising into place, when they stop holding what is inside them.
+  await page.waitForFunction(() => !document.getAnimations().some((animation) => animation instanceof CSSTransition));
+  const overflow = await page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight);
+  expect(overflow).toBe(0);
+});
+
 test("past the 7 days she is told so, and a new ticket starts", async ({ page }) => {
   await signInAsAna(page);
   await ask(page, "O Outlook do celular parou de sincronizar de novo.");
@@ -257,6 +281,14 @@ test.describe("on a Mac", () => {
     const edit = await lastDraft(page).getByRole("button", { name: "Editar" }).boundingBox();
     expect(Number.isInteger(edit!.width)).toBe(true);
     expect(edit!.x - (button!.x + button!.width)).toBe(6);
+  });
+
+  test("⌘↵ confirms the draft after she clicks on the card to read it, which takes the focus off everything", async ({ page }) => {
+    await signInAsAna(page);
+    await lastDraft(page).getByRole("heading").click();
+    await expect(composer(page)).not.toBeFocused();
+    await page.keyboard.press("Meta+Enter");
+    await expect(lastDraft(page)).toContainText("Complemento enviado ao REQ-10442.");
   });
 });
 

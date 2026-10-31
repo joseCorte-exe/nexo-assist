@@ -105,8 +105,8 @@ export function DraftCard({ draft, busy, shortcut, onChange, onDone, onStale }: 
     setProblem(result.message);
   }
 
-  // ⌘↵ (Ctrl ↵ outside Apple systems) confirms the draft waiting, from inside the card or from an empty composer.
-  // With text in the composer the keys send the text, as Enter does.
+  // ⌘↵ (Ctrl ↵ outside Apple systems) confirms the draft waiting, from inside the card, from an empty composer or
+  // with the focus on nothing, as after a click on the text of the card. With text in the composer the keys send it.
   useEffect(() => {
     if (!(open || confirming) || editing) return;
     function onKeyDown(event: KeyboardEvent) {
@@ -115,7 +115,8 @@ export function DraftCard({ draft, busy, shortcut, onChange, onDone, onStale }: 
       const focus = document.activeElement;
       const inCard = card.current?.contains(focus) ?? false;
       const emptyComposer = focus instanceof HTMLTextAreaElement && focus.id === "chat-message" && focus.value.trim() === "";
-      if (!inCard && !emptyComposer) return;
+      const nowhere = focus === null || focus === document.body;
+      if (!inCard && !emptyComposer && !nowhere) return;
       event.preventDefault();
       void act("confirm");
     }
@@ -132,7 +133,7 @@ export function DraftCard({ draft, busy, shortcut, onChange, onDone, onStale }: 
       ref={card}
       aria-label={`${kind} · ${reference}`}
       aria-busy={pending !== null}
-      className="@container mt-1.5 w-full overflow-hidden rounded-2xl bg-white shadow-card outline-1 -outline-offset-[0.5px] outline-card-line"
+      className="@container relative mt-1.5 w-full overflow-hidden rounded-2xl bg-white shadow-card outline-1 -outline-offset-[0.5px] outline-card-line"
     >
       {editing ? (
         <DraftEditor
@@ -516,7 +517,7 @@ function DraftEditor({ draft, kind, reference, shortcut, busy, onSaved, onClose,
                 value={category}
                 disabled={saving}
                 onChange={(event) => setCategory(event.target.value as Category)}
-                className="field -my-1 -ml-2 w-full min-w-0 appearance-none rounded-md bg-white py-1 pr-7 pl-2 text-14.5 font-medium text-ink outline-1 -outline-offset-[0.5px] outline-field max-md:text-16"
+                className={`${inputClass} min-w-0 appearance-none pr-9 font-normal`}
               >
                 {CATEGORIES.map(([value, label]) => (
                   <option key={value} value={value}>
@@ -524,7 +525,7 @@ function DraftEditor({ draft, kind, reference, shortcut, busy, onSaved, onClose,
                   </option>
                 ))}
               </select>
-              <ChevronDown aria-hidden className="pointer-events-none absolute right-1.5 size-3.5 text-ink-3" />
+              <ChevronDown aria-hidden className="pointer-events-none absolute right-3 size-4 text-ink-3" />
             </span>
           ) : undefined
         }
