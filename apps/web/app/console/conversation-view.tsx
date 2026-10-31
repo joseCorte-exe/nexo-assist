@@ -149,10 +149,11 @@ function Header({
             type="button"
             onClick={() => void state.act("close")}
             aria-disabled={state.acting !== null}
-            className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-danger-soft pr-3 pl-2.5 text-13.5 font-semibold whitespace-nowrap text-danger-text transition-[background-color,scale] duration-150 ease-out hover:bg-[#EE343B1F] active:scale-[0.96] aria-disabled:cursor-progress"
+            className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-danger-soft pr-3 pl-2.5 text-13.5 font-semibold whitespace-nowrap text-danger-text transition-[background-color,scale] duration-150 ease-out hover:bg-[#EE343B1F] active:scale-[0.96] aria-disabled:cursor-progress max-sm:size-9 max-sm:justify-center max-sm:p-0"
           >
-            <CircleCheckBigIcon aria-hidden className="size-3.5" />
-            Encerrar atendimento
+            <CircleCheckBigIcon aria-hidden className="size-3.5 max-sm:size-4" />
+            {/* On a phone the name of the person needs the room: the icon stays, the words go to the screen reader. */}
+            <span className="max-sm:sr-only">Encerrar atendimento</span>
           </button>
         </>
       )}

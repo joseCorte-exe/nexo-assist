@@ -1,7 +1,7 @@
 "use client";
 
 import type { ConsoleDetail, ConsoleFilter, ConsoleListResponse } from "@nexo/shared";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { MessageCircleIcon } from "@/components/console-icons";
 import { NexoMark } from "@/components/nexo-mark";
 import { AnalystMenu } from "./analyst-menu";
@@ -21,6 +21,24 @@ function useNow(initial: string) {
   return now;
 }
 
+const WIDE = "(min-width: 1280px)";
+const subscribeWide = (onChange: () => void) => {
+  const query = window.matchMedia(WIDE);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+};
+
+/**
+ * The panel of her tickets: beside the conversation on a wide screen, unless closed; over it on a narrower one, only once
+ * asked for. The server draws the wide one, as the design does.
+ */
+function usePanel() {
+  const [choice, setChoice] = useState<"auto" | "open" | "closed">("auto");
+  const wide = useSyncExternalStore(subscribeWide, () => window.matchMedia(WIDE).matches, () => true);
+  const open = choice === "open" || (choice === "auto" && wide);
+  return { open, toggle: () => setChoice(open ? "closed" : "open"), close: () => setChoice("closed") };
+}
+
 /**
  * The console of the analyst (nexo.pen, "Atendente — Conversas" and "Atendimento assumido"): the rail, the list, the open
  * conversation and the panel of her tickets.
@@ -36,7 +54,7 @@ export function ConsoleApp({
 }) {
   const state = useConsole(initial);
   const now = useNow(renderedAt);
-  const [panelOpen, setPanelOpen] = useState(true);
+  const panel = usePanel();
   const waiting = state.list?.waiting ?? 0;
   const open = state.detail && state.detail.conversation.id === state.selectedId ? state.detail.conversation : null;
 
@@ -65,8 +83,8 @@ export function ConsoleApp({
         <AnalystMenu name={analyst.name} email={analyst.email} available={state.available} />
       </nav>
       <ConversationList state={state} viewerId={analyst.id} now={now} />
-      <ConversationView state={state} viewerId={analyst.id} now={now} panelOpen={panelOpen} onTogglePanel={() => setPanelOpen((current) => !current)} />
-      {open && panelOpen ? <TicketsPanel state={state} conversation={open} onClose={() => setPanelOpen(false)} /> : null}
+      <ConversationView state={state} viewerId={analyst.id} now={now} panelOpen={panel.open} onTogglePanel={panel.toggle} />
+      {open && panel.open ? <TicketsPanel state={state} conversation={open} onClose={panel.close} /> : null}
     </div>
   );
 }

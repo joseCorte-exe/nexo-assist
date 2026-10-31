@@ -159,7 +159,7 @@ function Summary({
           {others.length > 0 ? (
             <TicketList tickets={others} onOpen={onOpen} />
           ) : (
-            <p className="py-3 text-13.5 text-ink-3">{`${name} não tem outros chamados.`}</p>
+            <p className="py-3 text-13.5 text-ink-3">{current ? `${name} não tem outros chamados.` : `${name} não tem chamados.`}</p>
           )}
         </div>
       </div>

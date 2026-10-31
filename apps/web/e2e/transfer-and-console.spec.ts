@@ -171,3 +171,23 @@ test("an employee is kept out of the console", async ({ browser }) => {
   await ana.goto("/console");
   await ana.waitForURL("/");
 });
+
+test.describe("on a phone", () => {
+  test.use({ viewport: { width: 375, height: 812 } });
+
+  test("the console opens the conversation over the list, and her tickets only when asked for", async ({ page }) => {
+    await signIn(page, "juliana.costa@nexo.com.br", "/console");
+    await list(page).getByRole("link").first().click();
+    const open = conversation(page);
+    await expect(open).toBeInViewport();
+    await expect(page.getByRole("complementary", { name: /^Chamados de/ })).toHaveCount(0);
+    await open.getByRole("button", { name: "Mais opções" }).click();
+    await page.getByRole("menuitem", { name: /^Mostrar chamados de/ }).click();
+    await expect(page.getByRole("complementary", { name: /^Chamados de/ })).toBeVisible();
+    await page.getByRole("button", { name: /^Fechar chamados de/ }).click();
+    await open.getByRole("button", { name: "Voltar para a lista" }).click();
+    await expect(list(page)).toBeInViewport();
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(overflow).toBe(0);
+  });
+});
