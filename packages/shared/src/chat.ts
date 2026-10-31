@@ -1,6 +1,17 @@
 import type { UIMessage } from "ai";
 import { z } from "zod";
-import { category, conversationState, priority, ticketStatus, ticketType } from "./domain";
+import {
+  affected,
+  analystLevel,
+  category,
+  conversationState,
+  impact,
+  priority,
+  ticketStatus,
+  ticketType,
+  transferReason,
+  urgency,
+} from "./domain";
 import { kbArticleSchema } from "./help-center";
 import { type DraftView, draftTicketInput, draftTicketOutput } from "./drafts";
 import { ticketId, ticketSummary } from "./tickets";
@@ -169,6 +180,54 @@ export const offerRepliesInput = z.object({
 export type OfferRepliesInput = z.infer<typeof offerRepliesInput>;
 export const offerRepliesOutput = z.object({ ok: z.literal(true) });
 
+// The transfer to an analyst (feature 5). The model says why and writes the summary; the level, the wait and whether the
+// case is critical or overdue come from the code (routeTransfer), from the ticket or from RN-01.
+
+/** Fewer characters than this cannot tell the analyst what happens without asking again. */
+const MIN_TRANSFER_SUMMARY = 20;
+
+export const transferToAnalystInput = z
+  .object({
+    reason: z
+      .enum(["employee_request", "agent_unsure"])
+      .describe("employee_request: o funcionário pediu um analista. agent_unsure: você não sabe o que fazer, mesmo com a informação."),
+    summary: z
+      .string()
+      .trim()
+      .min(MIN_TRANSFER_SUMMARY)
+      .max(600)
+      .describe(
+        "O caso para o analista não precisar perguntar de novo: o que acontece, desde quando, o que já foi tentado, o impacto e o que o funcionário quer.",
+      ),
+    ticketId: ticketId.optional().describe("O chamado do funcionário sobre o caso, se houver."),
+    impact: impact.optional().describe("Sem chamado: stopped, degraded ou request, como no draftTicket."),
+    urgency: urgency.optional().describe("Sem chamado: same_day ou none."),
+    affected: affected.optional().describe("Sem chamado: only_me, my_team ou company."),
+  })
+  .superRefine((input, context) => {
+    const given = [input.impact, input.urgency, input.affected].filter((value) => value !== undefined).length;
+    if (given !== 0 && given !== 3) {
+      context.addIssue({ code: "custom", message: "Informe impact, urgency e affected juntos, ou nenhum deles." });
+    }
+  });
+export type TransferToAnalystInput = z.infer<typeof transferToAnalystInput>;
+
+export const transferToAnalystOutput = z.discriminatedUnion("ok", [
+  z.object({
+    ok: z.literal(true),
+    level: analystLevel,
+    /** "Suporte N2", as the employee and the console read it. */
+    levelLabel: z.string(),
+    transferReason,
+    ticketId: z.string().nullable(),
+    waitUntil: z.iso.datetime(),
+    /** The wait in words, for the model to say: "hoje, até 12:05". */
+    waitText: z.string(),
+  }),
+  z.object({ ok: z.literal(false), reason: z.enum(["not_with_agent", "ticket_not_found"]), message: z.string() }),
+]);
+export type TransferToAnalystOutput = z.infer<typeof transferToAnalystOutput>;
+
 /** The schemas of each tool: for the agent that runs them, and to check saved messages when they are read back. */
 export const nexoToolSchemas = {
   recordDecision: { inputSchema: decisionRecord, outputSchema: recordDecisionOutput },
@@ -179,6 +238,7 @@ export const nexoToolSchemas = {
   offerTicketChoice: { inputSchema: offerTicketChoiceInput, outputSchema: offerTicketChoiceOutput },
   offerReplies: { inputSchema: offerRepliesInput, outputSchema: offerRepliesOutput },
   draftTicket: { inputSchema: draftTicketInput, outputSchema: draftTicketOutput },
+  transferToAnalyst: { inputSchema: transferToAnalystInput, outputSchema: transferToAnalystOutput },
 };
 
 /** First part of every chat stream: the conversation the message went to, with the new counter. */
