@@ -27,7 +27,7 @@ async function ask(page: Page, text: string) {
 test("an empty chat greets Ana and counts nothing yet", async ({ page }) => {
   await signInAsAna(page);
   await expect(page.getByRole("heading", { name: "Oi, Ana. O que está acontecendo?" })).toBeVisible();
-  await expect(page.getByRole("status").filter({ hasText: "Assistente online" })).toBeVisible();
+  await expect(page.getByText("Assistente online")).toBeVisible();
   await expect(counter(page)).toHaveText("0/30 mensagens nesta sessão");
   await expect(composer(page)).toBeFocused();
 });

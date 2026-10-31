@@ -9,6 +9,7 @@ import { getDeps } from "@/lib/server/deps";
 import { confirmShortcut } from "@/lib/shortcut";
 import { AssistantStatus } from "./chat/assistant-status";
 import { Chat } from "./chat/chat";
+import { ChatStatusProvider } from "./chat/chat-status";
 
 export const metadata: Metadata = { title: "Atendimento" };
 
@@ -21,11 +22,11 @@ export default async function AttendancePage() {
   const shortcut = confirmShortcut({ platform: request.get("sec-ch-ua-platform"), userAgent: request.get("user-agent") });
 
   return (
-    <>
+    <ChatStatusProvider initial={initial.conversation}>
       <TopBar here="Atendimento">
         <AssistantStatus />
       </TopBar>
       <Chat initial={initial} employeeName={firstName(session.name)} shortcut={shortcut} />
-    </>
+    </ChatStatusProvider>
   );
 }

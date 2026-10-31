@@ -324,9 +324,10 @@ function lineStarts(element: HTMLElement) {
 }
 
 test("a bubble breaks its lines word by word, as nexo.pen does, never moving a word down for a longer last line", async ({ page }) => {
-  // Carla, so that Ana's conversation stays as the tests above left it.
+  // Bruno, so that Ana's conversation stays as the tests above left it. His is with the agent in the sample data;
+  // Carla's waits for an analyst, who would be the one to answer.
   await page.goto("/login");
-  await page.getByLabel("E-mail corporativo").fill("carla.mendes@nexo.com.br");
+  await page.getByLabel("E-mail corporativo").fill("bruno.tavares@nexo.com.br");
   await page.getByLabel("Senha", { exact: true }).fill("qualquer-senha");
   await page.getByRole("button", { name: "Entrar" }).click();
   await page.waitForURL("/");

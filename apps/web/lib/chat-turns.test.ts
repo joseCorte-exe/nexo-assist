@@ -443,3 +443,60 @@ describe("lastDraftId", () => {
     expect(lastDraftId([user("u1", "a")])).toBeNull();
   });
 });
+
+describe("liveTurns, with an analyst (feature 5)", () => {
+  const note = (id: string, event: "transferred" | "assumed" | "released" | "closed", analystName: string | null = "Rafael Lima"): NexoUIMessage => ({
+    id,
+    role: "system",
+    parts: [{ type: "data-note", data: { event, level: event === "transferred" ? "N2" : null, analystName, at: "2026-10-26T13:05:00.000Z" } }],
+  });
+  const fromRafael = (id: string, text: string): NexoUIMessage => ({
+    id,
+    role: "assistant",
+    parts: [{ type: "data-analyst", data: { name: "Rafael Lima", level: "N2" } }, { type: "text", text }],
+  });
+
+  it("draws a note of the console between the messages", () => {
+    const turns = liveTurns([user("u1", "Falar com um analista"), note("n1", "transferred", null)], "ready");
+    expect(turns.at(-1)).toEqual({
+      kind: "note",
+      id: "n1",
+      note: { event: "transferred", level: "N2", analystName: null, at: "2026-10-26T13:05:00.000Z" },
+    });
+  });
+
+  it("draws the analyst's messages in a row as one turn, under one sign", () => {
+    const turns = liveTurns([note("n1", "assumed"), fromRafael("r1", "Oi, Ana!"), fromRafael("r2", "Pode deixar ligado?"), user("u1", "Posso.")], "ready", {
+      paused: true,
+    });
+    expect(turns).toEqual([
+      expect.objectContaining({ kind: "note", id: "n1" }),
+      {
+        kind: "analyst",
+        id: "r1",
+        name: "Rafael Lima",
+        level: "N2",
+        messages: [
+          { id: "r1", text: "Oi, Ana!" },
+          { id: "r2", text: "Pode deixar ligado?" },
+        ],
+      },
+      { kind: "employee", id: "u1", text: "Posso.", unsent: false },
+    ]);
+  });
+
+  it("does not show the agent thinking under her message while an analyst has the conversation", () => {
+    expect(liveTurns([user("u1", "Alguma novidade?")], "submitted", { paused: true })).toEqual([
+      { kind: "employee", id: "u1", text: "Alguma novidade?", unsent: false },
+    ]);
+  });
+
+  it("leaves out the empty answer a paused conversation streams back: only its counter", () => {
+    const counter: NexoUIMessage = {
+      id: "a9",
+      role: "assistant",
+      parts: [{ type: "data-conversation", data: { id: "conv-1", state: "with_analyst", messageCount: 4 } }],
+    };
+    expect(liveTurns([user("u1", "Oi"), counter], "ready", { paused: true })).toEqual([{ kind: "employee", id: "u1", text: "Oi", unsent: false }]);
+  });
+});

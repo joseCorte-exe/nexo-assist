@@ -1,7 +1,7 @@
 "use client";
 
 import { MESSAGE_LIMIT } from "@nexo/shared";
-import { type KeyboardEvent, type RefObject, useState } from "react";
+import { type KeyboardEvent, type RefObject, useRef, useState } from "react";
 import { ArrowUpIcon } from "@/components/design-icons";
 
 type Props = {
@@ -10,17 +10,52 @@ type Props = {
   busy: boolean;
   onSend: (text: string) => void;
   inputRef: RefObject<HTMLTextAreaElement | null>;
+  /** Who reads what she writes: the Nexo, the analyst waited for, or the one attending. */
+  placeholder?: string;
+  label?: string;
+  /** She started or stopped writing: the console shows "digitando…". */
+  onTyping?: (typing: boolean) => void;
 };
 
+/** Without a keystroke for this long, she stopped writing. */
+const TYPING_IDLE_MS = 4_000;
+
 /** "Escreva para o Nexo…", Enviar and the counter. Enter sends, Shift+Enter breaks the line. */
-export function Composer({ count, busy, onSend, inputRef }: Props) {
+export function Composer({
+  count,
+  busy,
+  onSend,
+  inputRef,
+  placeholder = "Escreva para o Nexo…",
+  label = "Mensagem para o Nexo",
+  onTyping,
+}: Props) {
   const [text, setText] = useState("");
+  const typing = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** Says she writes on the first keystroke, and that she stopped after a pause or once the message went. */
+  function typed(next: string) {
+    if (!onTyping) return;
+    const wasTyping = typing.current !== null;
+    if (typing.current) clearTimeout(typing.current);
+    if (!next.trim()) {
+      typing.current = null;
+      if (wasTyping) onTyping(false);
+      return;
+    }
+    if (!wasTyping) onTyping(true);
+    typing.current = setTimeout(() => {
+      typing.current = null;
+      onTyping(false);
+    }, TYPING_IDLE_MS);
+  }
 
   function send() {
     const trimmed = text.trim();
     if (busy || !trimmed) return inputRef.current?.focus();
     onSend(trimmed);
     setText("");
+    typed("");
     inputRef.current?.focus();
   }
 
@@ -42,18 +77,21 @@ export function Composer({ count, busy, onSend, inputRef }: Props) {
     >
       <div className="field flex items-end gap-2 rounded-xl bg-white pr-1.5 pl-4 outline-1 -outline-offset-[0.5px] outline-field">
         <label htmlFor="chat-message" className="sr-only">
-          Mensagem para o Nexo
+          {label}
         </label>
         <textarea
           id="chat-message"
           ref={inputRef}
           rows={1}
           value={text}
-          onChange={(event) => setText(event.target.value)}
+          onChange={(event) => {
+            setText(event.target.value);
+            typed(event.target.value);
+          }}
           onKeyDown={onKeyDown}
           maxLength={2000}
           autoFocus
-          placeholder="Escreva para o Nexo…"
+          placeholder={placeholder}
           aria-describedby="chat-counter"
           className="max-h-[153px] min-w-0 flex-1 resize-none bg-transparent py-[13.5px] text-14.5 leading-[21px] text-ink outline-none [field-sizing:content] placeholder:text-ink-3 max-md:text-16"
         />

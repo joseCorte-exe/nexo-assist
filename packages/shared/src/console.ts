@@ -243,3 +243,19 @@ export function ticketLine({ id, status, resolvedAt }: { id: string; status: Tic
   if (status === "resolved" && resolvedAt) return `${id} · Resolvido em ${listDay(new Date(resolvedAt))}`;
   return `${id} · ${TICKET_STATUS_LABEL[status]}`;
 }
+
+/**
+ * The same note in the chat of the employee, without the time. She knows the agent as the Nexo, and an analyst who takes
+ * the conversation joins it: the words differ from the console's where they would be ours, not hers.
+ */
+export function employeeNoteLabel(note: NoteView): string {
+  const who = note.analystName ?? "Um analista";
+  switch (note.event) {
+    case "assumed":
+      return `${who} entrou na conversa`;
+    case "released":
+      return `${who} devolveu a conversa ao Nexo`;
+    default:
+      return noteLabel(note);
+  }
+}

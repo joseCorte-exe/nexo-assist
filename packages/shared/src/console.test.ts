@@ -4,6 +4,7 @@ import {
   availabilityInput,
   consoleListQuery,
   contactText,
+  employeeNoteLabel,
   conversationTag,
   listTime,
   noteLabel,
@@ -134,5 +135,15 @@ describe("contracts of the console", () => {
   it("takes the availability as a boolean", () => {
     expect(availabilityInput.parse({ available: false })).toEqual({ available: false });
     expect(availabilityInput.safeParse({ available: "false" }).success).toBe(false);
+  });
+});
+
+describe("employeeNoteLabel", () => {
+  it("tells her the notes in her words: the Nexo, not the agent", () => {
+    expect(employeeNoteLabel({ event: "transferred", level: "N2", analystName: null })).toBe("Transferida para Suporte N2");
+    expect(employeeNoteLabel({ event: "assumed", level: "N2", analystName: "Rafael Lima" })).toBe("Rafael Lima entrou na conversa");
+    expect(employeeNoteLabel({ event: "released", level: null, analystName: "Rafael Lima" })).toBe("Rafael Lima devolveu a conversa ao Nexo");
+    expect(employeeNoteLabel({ event: "closed", level: null, analystName: "Rafael Lima" })).toBe("Rafael Lima encerrou o atendimento");
+    expect(employeeNoteLabel({ event: "assumed", level: null, analystName: null })).toBe("Um analista entrou na conversa");
   });
 });
