@@ -4,11 +4,12 @@ import {
   type Affected,
   type Category,
   CATEGORY_LABEL,
-  type DraftRejection,
+  DRAFT_COPY,
   type DraftView,
   draftLabel,
   draftView,
   PRIORITY_LABEL,
+  REJECTION_LABEL,
 } from "@nexo/shared";
 import { ChevronDown, CircleAlert, LoaderCircle } from "lucide-react";
 import { type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
@@ -30,13 +31,6 @@ const AFFECTED_LABEL: Record<Affected, string> = {
 };
 
 const CATEGORIES = Object.entries(CATEGORY_LABEL) as Array<[Category, string]>;
-
-const REJECTED_LINE: Record<DraftRejection, (ticketId: string | null) => string> = {
-  ticket_not_found: () => "Não encontrei esse chamado entre os seus.",
-  ticket_resolved: (id) => `O ${id} foi resolvido e não recebe mais complementos.`,
-  ticket_not_resolved: (id) => `O ${id} não está mais resolvido.`,
-  reopen_window_closed: (id) => `O ${id} foi resolvido há mais de 7 dias e não pode mais ser reaberto.`,
-};
 
 const dot = "size-1.5 shrink-0 rounded-full";
 const TITLE_MAX = 90;
@@ -124,7 +118,8 @@ export function DraftCard({ draft, busy, shortcut, onChange, onDone, onStale }: 
     return () => window.removeEventListener("keydown", onKeyDown);
   });
 
-  const kind = isNew ? (draft.status === "confirmed" ? "Chamado" : "Novo chamado") : draft.operation === "update" ? "Complemento" : "Reabertura";
+  const copy = DRAFT_COPY[draft.operation];
+  const kind = isNew && draft.status === "confirmed" ? "Chamado" : copy.kind;
   const reference = isNew ? (draft.status === "confirmed" ? draft.ticketId : `Rascunho ${draftLabel(draft.number)}`) : draft.ticketId;
   const overdue = draft.operation === "update" && new Date(draft.dueAt) < new Date(draft.createdAt);
 
@@ -164,7 +159,7 @@ export function DraftCard({ draft, busy, shortcut, onChange, onDone, onStale }: 
             </Eyebrow>
             <h3 className="text-18 font-semibold tracking-[-0.2px] text-balance text-ink">{draft.title}</h3>
             {isNew ? null : (
-              <span className="mt-0.5 text-12.5 text-ink-3">{draft.operation === "update" ? "Informação nova" : "O que aconteceu de novo"}</span>
+              <span className="mt-0.5 text-12.5 text-ink-3">{copy.description}</span>
             )}
             <p className="text-13.5 leading-5 text-pretty whitespace-pre-line text-ink-2">{draft.description}</p>
           </div>
@@ -189,7 +184,7 @@ export function DraftCard({ draft, busy, shortcut, onChange, onDone, onStale }: 
                   aria-keyshortcuts={shortcut.keys}
                   className={`${actionBase} gap-2 bg-cta pr-2.5 pl-3.5 font-semibold text-white hover:bg-cta-hover`}
                 >
-                  <Working active={pending === "confirm"} label={draft.operation === "create" ? "Criando…" : draft.operation === "update" ? "Enviando…" : "Reabrindo…"}>
+                  <Working active={pending === "confirm"} label={copy.working}>
                     {confirming ? "Tentar de novo" : "Confirmar"}
                   </Working>
                   <kbd
@@ -282,14 +277,14 @@ const STATE: Record<DraftView["status"], { dot: string; tone: string; label: (dr
   confirmed: {
     dot: "bg-success",
     tone: "text-success-text",
-    label: (draft) => (draft.operation === "create" ? "Criado" : draft.operation === "update" ? "Enviado" : "Reaberto"),
+    label: (draft) => DRAFT_COPY[draft.operation].done,
   },
   cancelled: { dot: "bg-ink-faint", tone: "text-ink-3", label: () => "Descartado" },
   superseded: { dot: "bg-ink-faint", tone: "text-ink-3", label: () => "Substituído" },
   rejected: {
     dot: "bg-danger",
     tone: "text-danger-text",
-    label: (draft) => (draft.operation === "reopen" ? "Não reaberto" : draft.operation === "update" ? "Não enviado" : "Não criado"),
+    label: (draft) => DRAFT_COPY[draft.operation].notDone,
   },
 };
 
@@ -344,15 +339,10 @@ function StatusLine({ draft }: { draft: DraftView }) {
   const lines: Record<DraftView["status"], string> = {
     pending: "",
     confirming: "",
-    confirmed:
-      draft.operation === "create"
-        ? `Chamado ${draft.ticketId} criado.`
-        : draft.operation === "update"
-          ? `Complemento enviado ao ${draft.ticketId}.`
-          : `${draft.ticketId} reaberto.`,
+    confirmed: DRAFT_COPY[draft.operation].confirmed(draft.ticketId ?? ""),
     cancelled: "Rascunho descartado. Se mudar de ideia, é só pedir.",
     superseded: "Substituído pelo rascunho mais recente.",
-    rejected: draft.rejectedReason ? REJECTED_LINE[draft.rejectedReason](draft.ticketId) : "O serviço de chamados recusou.",
+    rejected: draft.rejectedReason ? REJECTION_LABEL[draft.rejectedReason](draft.ticketId) : "O serviço de chamados recusou.",
   };
   const icon =
     draft.status === "confirmed" ? (
@@ -370,11 +360,10 @@ function StatusLine({ draft }: { draft: DraftView }) {
 
 function announce(draft: DraftView) {
   if (draft.status === "cancelled") return "Rascunho descartado.";
-  if (draft.status === "rejected") return draft.rejectedReason ? REJECTED_LINE[draft.rejectedReason](draft.ticketId) : "";
+  if (draft.status === "rejected") return draft.rejectedReason ? REJECTION_LABEL[draft.rejectedReason](draft.ticketId) : "";
   if (draft.status !== "confirmed") return "";
-  if (draft.operation === "update") return `Complemento enviado ao ${draft.ticketId}.`;
-  if (draft.operation === "reopen") return `${draft.ticketId} reaberto.`;
-  return `Chamado ${draft.ticketId} criado. Resposta até ${formatDueTime(draft.dueAt, draft.createdAt)}.`;
+  const confirmed = DRAFT_COPY[draft.operation].confirmed(draft.ticketId ?? "");
+  return draft.operation === "create" ? `${confirmed} Resposta até ${formatDueTime(draft.dueAt, draft.createdAt)}.` : confirmed;
 }
 
 type EditorProps = {
@@ -481,7 +470,7 @@ function DraftEditor({ draft, kind, reference, shortcut, busy, onSaved, onClose,
         )}
         <EditField
           id={ids.description}
-          label={isNew ? "Descrição" : draft.operation === "update" ? "Informação nova" : "O que aconteceu de novo"}
+          label={DRAFT_COPY[draft.operation].description}
           error={errors.description}
           count={description.length}
           max={DESCRIPTION_MAX}

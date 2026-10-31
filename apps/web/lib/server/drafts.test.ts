@@ -227,7 +227,7 @@ describe("POST /api/drafts/:id/confirm", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ status: "rejected", rejectedReason: "reopen_window_closed" });
     expect(deps.notes).toEqual([
-      "(ação na tela) Tentei confirmar a reabertura do INC-19877, mas ele foi resolvido há mais de 7 dias e não pode mais ser reaberto.",
+      "(ação na tela) Tentei confirmar a reabertura do INC-19877. O INC-19877 foi resolvido há mais de 7 dias e não pode mais ser reaberto.",
     ]);
     // Asked again, it does not try again.
     await confirm(deps, draft.id);

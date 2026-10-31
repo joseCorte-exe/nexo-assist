@@ -2,13 +2,14 @@ import { randomUUID } from "node:crypto";
 import { type DraftStore, saveNote } from "@nexo/agent";
 import {
   CATEGORY_LABEL,
-  type DraftRejection,
+  DRAFT_COPY,
   type DraftView,
   deadlineWords,
   draftLabel,
   draftRejection,
   editDraftInput,
   PRIORITY_LABEL,
+  REJECTION_LABEL,
   slaText,
   type Ticket,
   type TicketServiceResult,
@@ -99,20 +100,6 @@ const draftNotPending = () => jsonError(409, "draft_not_pending", "Este rascunho
 const draftConfirming = () =>
   jsonError(409, "draft_confirming", "A confirmação deste rascunho já começou. Confirme de novo; o chamado não será duplicado.");
 const viewOf = (row: DraftRow) => NextResponse.json<DraftView>(toDraftView(row));
-
-/** What the draft is, in the words of a note: "o rascunho D-381", "o complemento do INC-20311". */
-function nameOf(draft: DraftRow) {
-  if (draft.operation === "update") return `o complemento do ${draft.ticketId}`;
-  if (draft.operation === "reopen") return `a reabertura do ${draft.ticketId}`;
-  return `o rascunho ${draftLabel(draft.number)}`;
-}
-
-const REJECTED_BECAUSE: Record<DraftRejection, string> = {
-  ticket_not_found: "não encontrei o chamado entre os seus",
-  ticket_resolved: "ele foi resolvido e não recebe mais complementos",
-  ticket_not_resolved: "ele não está resolvido",
-  reopen_window_closed: "ele foi resolvido há mais de 7 dias e não pode mais ser reaberto",
-};
 
 type Settle = {
   draft: DraftRow;
@@ -218,7 +205,7 @@ export async function confirmDraftHandler(request: NextRequest, deps: Deps, id: 
   if (!result.ok) {
     const rejection = draftRejection.safeParse(result.error.serviceCode);
     if (rejection.success) {
-      const note = `Tentei confirmar ${nameOf(draft)}, mas ${REJECTED_BECAUSE[rejection.data]}.`;
+      const note = `Tentei confirmar ${DRAFT_COPY[draft.operation].named(draft)}. ${REJECTION_LABEL[rejection.data](draft.ticketId)}`;
       const set = { status: "rejected" as const, rejectedReason: rejection.data };
       return viewOf(await settle(deps, { draft, employeeId, from, event: "rejected", set, note }));
     }

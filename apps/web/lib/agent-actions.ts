@@ -1,4 +1,4 @@
-import type { NexoUIMessage } from "@nexo/shared";
+import { DRAFT_COPY, type NexoUIMessage } from "@nexo/shared";
 
 type Part = NexoUIMessage["parts"][number];
 type StepState = "running" | "done" | "failed";
@@ -91,14 +91,10 @@ function draftSteps(part: DraftPart): Step[] {
       ? [{ key, label: "encontrou um chamado parecido", state: "done" }]
       : [{ key, label: "não montou o rascunho", state: "failed" }];
   }
-  const { operation, ticketId } = output.draft;
-  if (operation === "update") return [{ key, label: `montou o complemento do ${ticketId}`, state: "done" }];
-  if (operation === "reopen") {
-    return [
-      { key: `${key}-window`, label: "conferiu o prazo de 7 dias", state: "done" },
-      { key, label: `montou a reabertura do ${ticketId}`, state: "done" },
-    ];
-  }
+  const { draft } = output;
+  const drafted: Step = { key, label: `montou ${DRAFT_COPY[draft.operation].named(draft)}`, state: "done" };
+  if (draft.operation === "update") return [drafted];
+  if (draft.operation === "reopen") return [{ key: `${key}-window`, label: "conferiu o prazo de 7 dias", state: "done" }, drafted];
   return [
     { key: `${key}-priority`, label: "classificou a prioridade", state: "done" },
     { key: `${key}-sla`, label: "consultou o SLA", state: "done" },
