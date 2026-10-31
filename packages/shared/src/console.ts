@@ -1,9 +1,11 @@
 import { z } from "zod";
 import { storedDecision } from "./chat";
+import { draftView } from "./drafts";
 import {
   analystLevel,
   type AnalystLevel,
   category,
+  conversationEvent,
   conversationOutcome,
   type ConversationOutcome,
   conversationState,
@@ -39,10 +41,6 @@ export const consoleListQuery = z.object({
     .transform((value) => value?.trim() || undefined),
 });
 export type ConsoleListQuery = z.infer<typeof consoleListQuery>;
-
-/** What happened in a conversation outside the messages, as the system notes tell it. */
-export const conversationEvent = z.enum(["transferred", "assumed", "released", "closed"]);
-export type ConversationEvent = z.infer<typeof conversationEvent>;
 
 export const analystSign = z.object({ id: z.string(), name: z.string(), level: analystLevel });
 export type AnalystSign = z.infer<typeof analystSign>;
@@ -104,6 +102,8 @@ export const consoleMessage = z.object({
   note: noteView.nullable(),
   /** An agent or analyst message the employee was on the chat after: the double check turns blue. */
   seen: z.boolean(),
+  /** The draft the agent showed in this reply, as it is now in drafts. */
+  draftId: z.string().nullable(),
 });
 export type ConsoleMessage = z.infer<typeof consoleMessage>;
 
@@ -111,6 +111,7 @@ export type ConsoleMessage = z.infer<typeof consoleMessage>;
 export const consoleDetail = z.object({
   conversation: consoleConversation.extend({ transferSummary: z.string().nullable() }),
   messages: z.array(consoleMessage),
+  drafts: z.array(draftView),
 });
 export type ConsoleDetail = z.infer<typeof consoleDetail>;
 

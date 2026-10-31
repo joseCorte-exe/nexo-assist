@@ -16,7 +16,7 @@ export default async function AttendancePage() {
   await connection();
   const session = await requireSession("employee");
   // Same data as GET /api/conversation, read here so the chat opens with its history, without a spinner.
-  const initial = await loadConversation(getDeps().db, session.id);
+  const initial = await loadConversation(getDeps(), session.id);
   const request = await headers();
   const shortcut = confirmShortcut({ platform: request.get("sec-ch-ua-platform"), userAgent: request.get("user-agent") });
 

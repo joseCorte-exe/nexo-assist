@@ -24,9 +24,9 @@ describe("GET /api/conversation", () => {
 describe("loadConversation", () => {
   it("returns the active conversation with its messages in order, the agent replies with the parts they streamed", async () => {
     // Bruno is talking to the agent in the sample data.
-    const { db } = await testDeps();
-    const view = await loadConversation(db, "emp-bruno");
-    expect(view.conversation).toEqual({ id: "conv-bruno", state: "with_agent", messageCount: 1 });
+    const deps = await testDeps();
+    const view = await loadConversation(deps, "emp-bruno");
+    expect(view.conversation).toEqual({ id: "conv-bruno", state: "with_agent", messageCount: 1, targetLevel: null, waitUntil: null, analyst: null });
     expect(view.messages).toEqual([
       {
         id: "conv-bruno-msg-1",
@@ -59,36 +59,53 @@ describe("loadConversation", () => {
   });
 
   it("returns a saved message without parts as its text", async () => {
-    const { db } = await testDeps();
-    await db.update(messages).set({ parts: null }).where(eq(messages.id, "conv-bruno-msg-2"));
-    const [, reply] = (await loadConversation(db, "emp-bruno")).messages;
+    const deps = await testDeps();
+    await deps.db.update(messages).set({ parts: null }).where(eq(messages.id, "conv-bruno-msg-2"));
+    const [, reply] = (await loadConversation(deps, "emp-bruno")).messages;
     expect(reply?.parts).toEqual([{ type: "text", text: expect.stringContaining("REQ-10450") }]);
   });
 
   it("returns a saved reply whose parts no longer match the tools as its text", async () => {
-    const { db } = await testDeps();
+    const deps = await testDeps();
     const broken = [{ type: "tool-searchArticles", toolCallId: "c1", state: "output-available", input: { query: 42 }, output: {} }];
-    await db.update(messages).set({ parts: broken as never }).where(eq(messages.id, "conv-bruno-msg-2"));
-    const [, reply] = (await loadConversation(db, "emp-bruno")).messages;
+    await deps.db.update(messages).set({ parts: broken as never }).where(eq(messages.id, "conv-bruno-msg-2"));
+    const [, reply] = (await loadConversation(deps, "emp-bruno")).messages;
     expect(reply?.parts).toEqual([{ type: "text", text: expect.stringContaining("REQ-10450") }]);
   });
 
-  it("leaves out what is not from the employee or the agent, which comes with the console in feature 5", async () => {
+  it("brings the notes of the console, which the chat draws between the messages", async () => {
     // Carla's conversation ends with a system message, the transfer.
-    const { db } = await testDeps();
-    const roles = (await loadConversation(db, "emp-carla")).messages.map(({ role }) => role);
-    expect(roles).toEqual(["user", "assistant"]);
+    const deps = await testDeps();
+    const loaded = await loadConversation(deps, "emp-carla");
+    expect(loaded.messages.map(({ role }) => role)).toEqual(["user", "assistant", "system"]);
+    expect(loaded.messages[2]?.parts).toEqual([
+      { type: "data-note", data: { event: "transferred", level: "N1", analystName: null, at: "2026-10-26T12:48:00.000Z" } },
+    ]);
+  });
+
+  it("leaves out the notes of what she did in a card: the card shows it", async () => {
+    const deps = await testDeps();
+    await deps.db.insert(messages).values({
+      id: "note-draft-1-cancelled",
+      conversationId: "conv-carla",
+      author: "system",
+      text: "Descartei o rascunho D-381. Nada foi enviado.",
+      parts: null,
+      createdAt: new Date("2026-10-26T12:59:00.000Z"),
+    });
+    const roles = (await loadConversation(deps, "emp-carla")).messages.map(({ role }) => role);
+    expect(roles).toEqual(["user", "assistant", "system"]);
   });
 
   it("leaves out closed conversations", async () => {
     // Elisa only has closed conversations.
-    const { db } = await testDeps();
-    expect(await loadConversation(db, "emp-elisa")).toEqual({ conversation: null, messages: [], drafts: [] });
+    const deps = await testDeps();
+    expect(await loadConversation(deps, "emp-elisa")).toEqual({ conversation: null, messages: [], drafts: [] });
   });
 
   it("never returns the messages of another employee", async () => {
-    const { db } = await testDeps();
-    const view = await loadConversation(db, "emp-carla");
+    const deps = await testDeps();
+    const view = await loadConversation(deps, "emp-carla");
     expect(view.conversation?.id).toBe("conv-carla");
     expect(view.messages.every(({ id }) => id.startsWith("conv-carla-"))).toBe(true);
   });

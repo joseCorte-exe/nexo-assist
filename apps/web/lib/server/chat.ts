@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { toAISdkStream } from "@mastra/ai-sdk";
-import { streamReply } from "@nexo/agent";
+import { saveNote, streamReply } from "@nexo/agent";
 import { chatInput, type ConversationPart, type NexoUIMessage, shownDraft, summarizeTurn, textOf, withToolErrors } from "@nexo/shared";
 import { consumeStream, createUIMessageStream, createUIMessageStreamResponse, type InferUIMessageChunk } from "ai";
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -14,14 +14,14 @@ import { jsonError, readBody, readEmployeeSession } from "./http";
 const AGENT_FAILED = "O Nexo não conseguiu responder. Tente de novo.";
 
 const REFUSALS = {
-  agent_paused: "Sua conversa está com um analista. Ele responde por aqui.",
   already_answered: "Essa mensagem já foi respondida.",
   message_conflict: "Essa mensagem já foi enviada.",
 };
 
+/** paused: the conversation is with an analyst, or waits for one: the message is saved and the agent is not called. */
 type StartedTurn =
-  | { ok: true; conversation: ConversationPart; startedAt: Date }
-  | { ok: false; reason: "agent_paused" | "already_answered" | "message_conflict" };
+  | { ok: true; conversation: ConversationPart; startedAt: Date; paused: boolean }
+  | { ok: false; reason: "already_answered" | "message_conflict" };
 
 /**
  * Saves the employee message in the active conversation, or in a new one, and counts it, in one batch: a single
@@ -32,7 +32,8 @@ type StartedTurn =
  * The message is saved under the id the chat gave it. Sent again ("Tentar de novo", or the network dropped the
  * response) with the same text and still unanswered, it is answered, not saved twice, and the counter, which counts
  * the saved messages, does not move. Already answered, the chat is told so, to load the reply instead. Any other use
- * of a taken id is refused. Outside with_agent nothing is saved and the agent is not called (feature 5).
+ * of a taken id is refused. Outside with_agent the message is saved and counted all the same, and the turn is paused: the
+ * agent is not called (ARQUITETURA.md, section 6). A message also says she is on the chat, for the console.
  */
 async function startTurn(db: Db, { employeeId, id, text, now }: { employeeId: string; id: string; text: string; now: Date }) {
   const at = now.getTime();
@@ -47,14 +48,15 @@ async function startTurn(db: Db, { employeeId, id, text, now }: { employeeId: st
       insert into ${messages} (id, conversation_id, author, text, parts, created_at)
       select ${id}, c.id, 'employee', ${text}, null, ${at}
       from ${conversations} c
-      where c.employee_id = ${employeeId} and c.state = 'with_agent'
+      where c.employee_id = ${employeeId} and c.state <> 'closed'
       on conflict (id) do nothing`),
     db
       .update(conversations)
       .set({
         messageCount: sql`(select count(*) from ${messages} m where m.conversation_id = ${conversations}.id and m.author = 'employee')`,
+        employeeSeenAt: now,
       })
-      .where(sql`${activeConversationOf(employeeId)} and ${conversations.state} = 'with_agent'`),
+      .where(activeConversationOf(employeeId)),
     db
       .select({
         id: conversations.id,
@@ -77,11 +79,11 @@ async function startTurn(db: Db, { employeeId, id, text, now }: { employeeId: st
   ]);
   if (!conversation) throw new Error("The active conversation is missing after it was ensured");
   const { mine, answered, ...part } = conversation;
-  if (part.state !== "with_agent") return { ok: false, reason: "agent_paused" } satisfies StartedTurn;
   // Anything but this employee's unanswered message would be answered without being saved or counted.
   if (!mine) return { ok: false, reason: "message_conflict" } satisfies StartedTurn;
+  if (part.state !== "with_agent") return { ok: true, conversation: part, startedAt: now, paused: true } satisfies StartedTurn;
   if (answered) return { ok: false, reason: "already_answered" } satisfies StartedTurn;
-  return { ok: true, conversation: part, startedAt: now } satisfies StartedTurn;
+  return { ok: true, conversation: part, startedAt: now, paused: false } satisfies StartedTurn;
 }
 
 /**
@@ -97,6 +99,7 @@ async function saveReply(
   const parts = withToolErrors(reply.parts.filter((part) => part.type !== "data-conversation"));
   const { record, toolsUsed } = summarizeTurn(parts);
   const at = new Date(Math.max(now.getTime(), startedAt.getTime() + 1));
+  const transferred = parts.some((part) => part.type === "tool-transferToAnalyst" && part.state === "output-available" && part.output.ok);
   await db.batch([
     db.insert(messages).values({ id: reply.id, conversationId, author: "agent", text: textOf(parts), parts, createdAt: at }),
     db.insert(decisions).values({ id: `dec-${randomUUID()}`, messageId: reply.id, toolsUsed, ...record }),
@@ -104,6 +107,15 @@ async function saveReply(
       .update(conversations)
       .set({ firstResponseAt: sql`coalesce(${conversations.firstResponseAt}, ${at.getTime()})` })
       .where(eq(conversations.id, conversationId)),
+    // How sure the agent was when it transferred: the console says it of an agent that asked for help.
+    ...(transferred
+      ? [
+          db
+            .update(conversations)
+            .set({ transferConfidence: record?.confidence ?? null })
+            .where(and(eq(conversations.id, conversationId), eq(conversations.state, "waiting_for_analyst"))),
+        ]
+      : []),
   ]);
 }
 
@@ -115,6 +127,29 @@ async function discardDrafts(db: Db, reply: NexoUIMessage) {
   const ids = reply.parts.flatMap((part) => shownDraft(part)?.id ?? []);
   if (ids.length === 0) return;
   await db.update(drafts).set({ status: "cancelled" }).where(and(inArray(drafts.id, ids), eq(drafts.status, "pending")));
+}
+
+/**
+ * A message while an analyst has the conversation: saved, and copied to the agent memory as she wrote it, so the agent
+ * knows it if the conversation comes back. The answer is the conversation alone: nobody answers until the analyst does.
+ */
+async function pausedTurn(
+  deps: Deps,
+  { conversation, employeeId, id, text, at }: { conversation: ConversationPart; employeeId: string; id: string; text: string; at: Date },
+) {
+  try {
+    await saveNote(deps.memory, { id, conversationId: conversation.id, employeeId, text, at, prefix: null });
+  } catch (error) {
+    console.error("message not copied to the agent memory", { conversationId: conversation.id, error: (error as Error).name });
+  }
+  const stream = createUIMessageStream<NexoUIMessage>({
+    execute: ({ writer }) => {
+      writer.write({ type: "start" });
+      writer.write({ type: "data-conversation", data: conversation });
+      writer.write({ type: "finish" });
+    },
+  });
+  return createUIMessageStreamResponse({ stream });
 }
 
 /**
@@ -134,6 +169,7 @@ export async function chat(request: NextRequest, deps: Deps) {
   if (!turn.ok) return jsonError(409, turn.reason, REFUSALS[turn.reason]);
 
   const { conversation, startedAt } = turn;
+  if (turn.paused) return pausedTurn(deps, { conversation, employeeId, id, text, at: startedAt });
   const reply = streamReply(deps.agent, { conversationId: conversation.id, employeeId, text });
   const stream = createUIMessageStream<NexoUIMessage>({
     execute: async ({ writer }) => {

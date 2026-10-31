@@ -5,7 +5,8 @@ import { describe, expect, it } from "vitest";
 import { conversations, drafts, messages } from "@/db/schema";
 import { loadConversation } from "./conversation";
 import { cancelDraftHandler, confirmDraftHandler, createDraftStore, editDraftHandler } from "./drafts";
-import { ana, fakeTicketService, NOW, rafael, request, sessionCookieFor, testDeps, type TestDeps } from "./test-deps";
+import { ana, fakeTicketService, NOW, rafael, request, sessionCookieFor, roundTrips, testDeps, type TestDeps
+} from "./test-deps";
 
 // The draft of a ticket, after the agent showed it: the employee edits, confirms or cancels it in the card, and the
 // code does it, without the model (ARQUITETURA.md, sections 7 and 8).
@@ -442,7 +443,7 @@ describe("loadConversation with drafts", () => {
     const deps = await testDeps();
     const draft = await anaWithDraft(deps);
     await confirm(deps, draft.id);
-    const loaded = await loadConversation(deps.db, ana.id);
+    const loaded = await loadConversation(deps, ana.id);
     expect(loaded.drafts).toEqual([expect.objectContaining({ id: draft.id, status: "confirmed", ticketId: "INC-20320" })]);
   });
 
@@ -450,31 +451,11 @@ describe("loadConversation with drafts", () => {
     const deps = await testDeps();
     const draft = await anaWithDraft(deps);
     await cancel(deps, draft.id);
-    expect((await loadConversation(deps.db, ana.id)).messages).toEqual([]);
+    expect((await loadConversation(deps, ana.id)).messages).toEqual([]);
   });
 });
 
 describe("the cost of a draft in the database", () => {
-  /** Counts the round trips to the database while the work runs: each query, batch or transaction is one. */
-  async function roundTrips(deps: TestDeps, work: () => Promise<unknown>) {
-    const client = deps.db.$client;
-    let count = 0;
-    const originals = { execute: client.execute, batch: client.batch, transaction: client.transaction };
-    for (const name of ["execute", "batch", "transaction"] as const) {
-      const original = originals[name] as (...args: unknown[]) => Promise<unknown>;
-      (client as unknown as Record<string, unknown>)[name] = (...args: unknown[]) => {
-        count++;
-        return original.apply(client, args);
-      };
-    }
-    try {
-      await work();
-    } finally {
-      Object.assign(client, originals);
-    }
-    return count;
-  }
-
   it("saves a draft, superseding the one before and numbering it, in one round trip", async () => {
     const deps = await testDeps();
     await anaWithDraft(deps);
@@ -497,7 +478,7 @@ describe("the cost of a draft in the database", () => {
   it("loads the conversation with its messages and drafts in two", async () => {
     const deps = await testDeps();
     await anaWithDraft(deps);
-    expect(await roundTrips(deps, () => loadConversation(deps.db, ana.id))).toBe(2);
+    expect(await roundTrips(deps, () => loadConversation(deps, ana.id))).toBe(2);
   });
 
   it("reads the drafts of a conversation and a draft of an employee through indexes, never scanning the table", async () => {

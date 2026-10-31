@@ -29,6 +29,13 @@
       "when": 1793329627339,
       "tag": "0003_drafts_for_confirmation",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1793423881857,
+      "tag": "0004_console",
+      "breakpoints": true
     }
   ]
 }

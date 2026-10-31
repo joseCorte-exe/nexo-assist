@@ -13,6 +13,7 @@ import { seed } from "@/db/seed";
 import { chat } from "./chat";
 import { loadConversation } from "./conversation";
 import { createDraftStore } from "./drafts";
+import { createTransferStore } from "./transfers";
 import {
   ana,
   fakeTicketService,
@@ -198,19 +199,32 @@ describe("POST /api/chat", () => {
     expect(reply?.decision).toMatchObject({ understanding: null, action: null, confidence: null, reason: null, toolsUsed: [] });
   });
 
-  it("does not call the agent when the conversation is not with it", async () => {
+  it("saves and counts a message while the conversation waits for an analyst, without calling the agent", async () => {
     // Carla's conversation is waiting for an analyst in the sample data.
     const model = scriptedModel(vpnScript());
     const deps = await testDeps({ agent: testAgent(model) });
     const carla = await sessionCookieFor({ role: "employee", id: "emp-carla", name: "Carla Mendes", email: "carla.mendes@nexo.com.br" });
-    const response = await chat(await say("Alguma novidade?", carla), deps);
+    const response = await chat(await post({ id: "msg-carla-9", text: "Alguma novidade?" }, carla), deps);
 
-    expect(response.status).toBe(409);
-    expect(await response.json()).toEqual({
-      error: { code: "agent_paused", message: "Sua conversa está com um analista. Ele responde por aqui." },
-    });
+    expect(response.status).toBe(200);
+    // Only the conversation, with the new counter: nobody answers until the analyst does.
+    const chunks = await readStream(response);
+    expect(chunks.map((chunk) => chunk.type)).toEqual(["start", "data-conversation", "finish"]);
+    expect(chunks[1]).toEqual({ type: "data-conversation", data: { id: "conv-carla", state: "waiting_for_analyst", messageCount: 2 } });
     expect(model.calls).toHaveLength(0);
-    expect(await messagesOf(deps, "conv-carla")).toHaveLength(3);
+    const saved = await messagesOf(deps, "conv-carla");
+    expect(saved.at(-1)).toMatchObject({ id: "msg-carla-9", author: "employee", text: "Alguma novidade?" });
+    // Copied to the agent memory as she wrote it, so the agent knows it if the conversation comes back.
+    expect(deps.notes).toEqual(["Alguma novidade?"]);
+  });
+
+  it("does not save a message sent again while paused twice", async () => {
+    const deps = await testDeps({ agent: testAgent(scriptedModel([])) });
+    const carla = await sessionCookieFor({ role: "employee", id: "emp-carla", name: "Carla Mendes", email: "carla.mendes@nexo.com.br" });
+    await readStream(await chat(await post({ id: "msg-carla-9", text: "Alguma novidade?" }, carla), deps));
+    const again = await readStream(await chat(await post({ id: "msg-carla-9", text: "Alguma novidade?" }, carla), deps));
+    expect(again[1]).toMatchObject({ data: { messageCount: 2 } });
+    expect((await messagesOf(deps, "conv-carla")).filter((message) => message.id === "msg-carla-9")).toHaveLength(1);
   });
 
   it("opens a new conversation when the last one was closed", async () => {
@@ -347,7 +361,7 @@ describe("POST /api/chat looking up tickets (feature 3)", () => {
     const deps = await testDeps();
     await readStream(await chat(await say("Qual o status do meu chamado?"), deps));
     await deps.settled();
-    const { messages: saved } = await loadConversation(deps.db, ana.id);
+    const { messages: saved } = await loadConversation(deps, ana.id);
     const types = saved.at(-1)?.parts.map((part) => part.type).filter((type) => type !== "step-start");
     expect(types).toEqual(["tool-recordDecision", "tool-listMyTickets", "tool-offerTicketChoice"]);
   });
@@ -401,7 +415,7 @@ describe("POST /api/chat opening a ticket (feature 4)", () => {
     const tools = reply!.parts!.filter((part) => part.type === "tool-draftTicket");
     expect(tools.map((part) => part.state)).toEqual(["output-error", "output-available"]);
     expect(tools[0]).toMatchObject({ errorText: expect.stringContaining("Para criar, falta title.") });
-    const loaded = await loadConversation(deps.db, ana.id);
+    const loaded = await loadConversation(deps, ana.id);
     // Read back whole, not as text only: the refusal as an error of a tool, then the draft and the text.
     const types = loaded.messages.at(-1)?.parts.map((part) => part.type).filter((type) => type !== "step-start");
     expect(types).toEqual(["tool-recordDecision", "dynamic-tool", "tool-draftTicket", "text"]);
@@ -457,6 +471,7 @@ describe("POST /api/chat under concurrent messages", () => {
         memory: createMemory({ url }),
         ticketService,
         drafts: createDraftStore(db),
+        transfers: createTransferStore(db),
       }),
     });
     const employees = [

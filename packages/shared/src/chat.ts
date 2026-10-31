@@ -4,6 +4,7 @@ import {
   affected,
   analystLevel,
   category,
+  conversationEvent,
   conversationState,
   impact,
   priority,
@@ -249,6 +250,33 @@ export const conversationPart = z.object({
 });
 export type ConversationPart = z.infer<typeof conversationPart>;
 
+/** A note of the console in the chat: "Transferida para Suporte N2 · 10:05", "Rafael Lima assumiu". */
+export const chatNote = z.object({
+  event: conversationEvent,
+  level: analystLevel.nullable(),
+  analystName: z.string().nullable(),
+  at: z.iso.datetime(),
+});
+export type ChatNote = z.infer<typeof chatNote>;
+
+/** Who wrote an analyst message in the chat, and the name she reads above it. */
+export const analystPart = z.object({ name: z.string(), level: analystLevel });
+export type AnalystPart = z.infer<typeof analystPart>;
+
+/** The conversation as the chat loads it: who it waits for, until when, and who attends it. */
+export const conversationView = conversationPart.extend({
+  targetLevel: analystLevel.nullable(),
+  waitUntil: z.iso.datetime().nullable(),
+  analyst: analystPart.nullable(),
+});
+export type ConversationView = z.infer<typeof conversationView>;
+
+// POST /api/conversation/presence: the chat is open, and whether she is writing. It answers the state of the conversation,
+// so a chat that does not poll still learns an analyst took it.
+export const presenceInput = z.object({ typing: z.boolean() });
+export type PresenceInput = z.infer<typeof presenceInput>;
+export type PresenceResponse = { conversation: Pick<ConversationPart, "id" | "state"> | null };
+
 /** The tools of the agent as the stream carries them, typed by the schemas above. */
 export type NexoTools = {
   [Name in keyof typeof nexoToolSchemas]: {
@@ -261,14 +289,14 @@ export type NexoTools = {
  * A message of the chat: text, the parts of each tool and the data-conversation part. An agent reply is saved
  * with these same parts, so the screen draws a reply the same way while it streams and after a reload.
  */
-export type NexoUIMessage = UIMessage<never, { conversation: ConversationPart }, NexoTools>;
+export type NexoUIMessage = UIMessage<never, { conversation: ConversationPart; note: ChatNote; analyst: AnalystPart }, NexoTools>;
 
 /**
  * GET /api/conversation: the active conversation, or none, with its messages in order and its drafts as they are now.
  * A saved reply keeps the draft as it was shown; the card draws the current one, confirmed, edited or cancelled since.
  */
 export type ConversationResponse = {
-  conversation: ConversationPart | null;
+  conversation: ConversationView | null;
   messages: NexoUIMessage[];
   drafts: DraftView[];
 };

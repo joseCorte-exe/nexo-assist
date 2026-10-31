@@ -56,3 +56,7 @@ export type TransferReason = z.infer<typeof transferReason>;
 /** Why the ticket-service refused to confirm a draft: the ticket changed between the draft and the click. */
 export const draftRejection = z.enum(["ticket_not_found", "ticket_resolved", "ticket_not_resolved", "reopen_window_closed"]);
 export type DraftRejection = z.infer<typeof draftRejection>;
+
+/** What happened in a conversation outside the messages, as the system notes tell it (feature 5). */
+export const conversationEvent = z.enum(["transferred", "assumed", "released", "closed"]);
+export type ConversationEvent = z.infer<typeof conversationEvent>;
