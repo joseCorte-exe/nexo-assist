@@ -8,10 +8,11 @@ import { and, eq, ne } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { createDb } from "@/db";
 import { migrateDb } from "@/db/migrate";
-import { conversations, decisions, messages } from "@/db/schema";
+import { conversations, decisions, drafts, messages } from "@/db/schema";
 import { seed } from "@/db/seed";
 import { chat } from "./chat";
 import { loadConversation } from "./conversation";
+import { createDraftStore } from "./drafts";
 import {
   ana,
   fakeTicketService,
@@ -352,6 +353,93 @@ describe("POST /api/chat looking up tickets (feature 3)", () => {
   });
 });
 
+describe("POST /api/chat opening a ticket (feature 4)", () => {
+  const vpnDraft = {
+    operation: "create",
+    title: "VPN não conecta no notebook — erro 809",
+    description: "Desde ontem o notebook (Windows 11) não conecta na VPN e mostra o erro 809. Precisa dela para a reunião das 14h.",
+    category: "network_vpn",
+    subcategory: "VPN",
+    impact: "stopped",
+    urgency: "same_day",
+    affected: "only_me",
+  };
+  const aboveTheCard = "Coloquei prioridade alta por causa da reunião. Confira antes de eu criar:";
+
+  it("saves the draft in the conversation of the turn and streams it, with the priority the code gave it", async () => {
+    const deps = await testDeps({
+      model: scriptedModel([
+        { toolCalls: [{ toolName: "recordDecision", input: decision }] },
+        { toolCalls: [{ toolName: "draftTicket", input: vpnDraft }] },
+        { text: aboveTheCard },
+      ]),
+    });
+    const chunks = await readStream(await chat(await say("Só eu. Tenho reunião às 14h."), deps));
+    await deps.settled();
+
+    const conversation = await anaConversation(deps);
+    const saved = await deps.db.select().from(drafts);
+    expect(saved).toMatchObject([{ conversationId: conversation!.id, status: "pending", priority: "high", number: 381 }]);
+    const output = chunks.find((chunk) => chunk.type === "tool-output-available" && chunk.toolCallId?.toString().includes("call-2"));
+    expect(output).toMatchObject({ output: { ok: true, draft: { id: saved[0]!.id, priority: "high" }, dueText: "hoje, até 14:00" } });
+  });
+
+  it("saves a tool input the agent refused as an error of the tool, so the reply still reads back whole", async () => {
+    const deps = await testDeps({
+      model: scriptedModel([
+        { toolCalls: [{ toolName: "recordDecision", input: decision }] },
+        { toolCalls: [{ toolName: "draftTicket", input: { operation: "create", description: "VPN" } }] },
+        { toolCalls: [{ toolName: "draftTicket", input: vpnDraft }] },
+        { text: aboveTheCard },
+      ]),
+    });
+    await readStream(await chat(await say("Só eu. Tenho reunião às 14h."), deps));
+    await deps.settled();
+
+    const conversation = await anaConversation(deps);
+    const [, reply] = await messagesOf(deps, conversation!.id);
+    const tools = reply!.parts!.filter((part) => part.type === "tool-draftTicket");
+    expect(tools.map((part) => part.state)).toEqual(["output-error", "output-available"]);
+    expect(tools[0]).toMatchObject({ errorText: expect.stringContaining("Para criar, falta title.") });
+    const loaded = await loadConversation(deps.db, ana.id);
+    // Read back whole, not as text only: the refusal as an error of a tool, then the draft and the text.
+    const types = loaded.messages.at(-1)?.parts.map((part) => part.type).filter((type) => type !== "step-start");
+    expect(types).toEqual(["tool-recordDecision", "dynamic-tool", "tool-draftTicket", "text"]);
+  });
+
+  it("discards the draft of a reply that failed after it, which no card will show", async () => {
+    const deps = await testDeps({
+      model: scriptedModel([
+        { toolCalls: [{ toolName: "recordDecision", input: decision }] },
+        { toolCalls: [{ toolName: "draftTicket", input: vpnDraft }] },
+        new Error("overloaded"),
+      ]),
+    });
+    await readStream(await chat(await say("Só eu. Tenho reunião às 14h."), deps));
+    await deps.settled();
+    expect((await deps.db.select({ status: drafts.status }).from(drafts)).map((row) => row.status)).toEqual(["cancelled"]);
+  });
+
+  it("does not take a note of the screen as the answer to a message that is still unanswered", async () => {
+    // The reply failed; meanwhile she cancelled a draft in the card, which left a note; then "Tentar de novo".
+    const deps = await testDeps({ agent: testAgent(scriptedModel([new Error("overloaded"), ...vpnScript()])) });
+    const message = { id: "msg-ana-1", text: "Minha VPN dá erro 809" };
+    await readStream(await chat(await post(message), deps));
+    await deps.settled();
+    const conversation = await anaConversation(deps);
+    await deps.db.insert(messages).values({
+      id: "note-1",
+      conversationId: conversation!.id,
+      author: "system",
+      text: "Descartei o rascunho D-381. Nada foi enviado.",
+      createdAt: new Date(NOW.getTime() + 1000),
+    });
+
+    const response = await chat(await post(message), deps);
+    expect(response.status).toBe(200);
+  });
+});
+
 describe("POST /api/chat under concurrent messages", () => {
   it("answers each one at once, with the agent memory writing to the same database file", async () => {
     // A file database, as in production: the route and the agent memory are two clients of the same file.
@@ -364,7 +452,12 @@ describe("POST /api/chat under concurrent messages", () => {
     const ticketService = fakeTicketService();
     const deps = await testDeps({
       db,
-      agent: createNexoAgent({ model: simulatedModel({ delayMs: 35 }), memory: createMemory({ url }), ticketService }),
+      agent: createNexoAgent({
+        model: simulatedModel({ delayMs: 35 }),
+        memory: createMemory({ url }),
+        ticketService,
+        drafts: createDraftStore(db),
+      }),
     });
     const employees = [
       { role: "employee" as const, ...ana },

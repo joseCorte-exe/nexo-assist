@@ -1,3 +1,4 @@
+import { IDEMPOTENCY_KEY_HEADER } from "@nexo/shared";
 import { eq } from "drizzle-orm";
 import type { MiddlewareHandler } from "hono";
 import type { Deps } from "./app";
@@ -29,10 +30,10 @@ export function outage(deps: Deps): MiddlewareHandler {
     const seconds = MIN_WINDOW_SECONDS + Math.floor(deps.random() * (MAX_WINDOW_SECONDS - MIN_WINDOW_SECONDS + 1));
     await openOutageWindow(deps.db, now, seconds);
 
-    // Half of the outages that hit a ticket creation save the ticket and fall before answering.
-    // The client's retry with the same idempotency key then gets the saved ticket back.
-    const isCreate = c.req.method === "POST" && c.req.path === "/tickets";
-    if (isCreate && deps.random() < 0.5) {
+    // Half of the outages that hit a write save it and fall before answering: creating, following up or reopening a
+    // ticket. The client's retry with the same idempotency key then gets what was already written.
+    const isWrite = c.req.method !== "GET" && c.req.header(IDEMPOTENCY_KEY_HEADER) !== undefined;
+    if (isWrite && deps.random() < 0.5) {
       await next();
       c.res = unavailable();
       return;

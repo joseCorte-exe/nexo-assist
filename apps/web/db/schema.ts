@@ -5,6 +5,7 @@ import type {
   ConversationOutcome,
   ConversationState,
   DraftOperation,
+  DraftRejection,
   DraftStatus,
   Impact,
   MessageAuthor,
@@ -83,25 +84,50 @@ export const decisions = sqliteTable(
   (table) => [uniqueIndex("decisions_message_id").on(table.messageId)],
 );
 
-export const drafts = sqliteTable("drafts", {
-  id: text("id").primaryKey(),
-  conversationId: text("conversation_id")
-    .notNull()
-    .references(() => conversations.id),
-  operation: text("operation").$type<DraftOperation>().notNull(),
-  title: text("title").notNull(),
-  description: text("description").notNull(),
-  type: text("type").$type<TicketType>().notNull(),
-  category: text("category").$type<Category>().notNull(),
-  subcategory: text("subcategory"),
-  impact: text("impact").$type<Impact>().notNull(),
-  urgency: text("urgency").$type<Urgency>().notNull(),
-  priority: text("priority").$type<Priority>().notNull(),
-  affected: text("affected").$type<Affected>().notNull(),
-  ticketId: text("ticket_id"),
-  status: text("status").$type<DraftStatus>().notNull(),
-  createdAt: timestamp("created_at").notNull(),
-});
+/**
+ * The draft of a ticket the agent showed for the employee to confirm (feature 4). A new ticket keeps what RN-01 read;
+ * a follow-up or a reopening keeps the classification of its ticket, in ticket_id.
+ */
+export const drafts = sqliteTable(
+  "drafts",
+  {
+    id: text("id").primaryKey(),
+    /** Shown as "Rascunho D-381": one sequence for every conversation. */
+    number: integer("number").notNull(),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => conversations.id),
+    operation: text("operation").$type<DraftOperation>().notNull(),
+    title: text("title").notNull(),
+    description: text("description").notNull(),
+    type: text("type").$type<TicketType>().notNull(),
+    category: text("category").$type<Category>().notNull(),
+    subcategory: text("subcategory"),
+    // What RN-01 read. Null in a follow-up or a reopening, which keep the priority of their ticket.
+    impact: text("impact").$type<Impact>(),
+    urgency: text("urgency").$type<Urgency>(),
+    priority: text("priority").$type<Priority>().notNull(),
+    affected: text("affected").$type<Affected>().notNull(),
+    /** The ticket followed up or reopened, or the one created once a new ticket is confirmed. */
+    ticketId: text("ticket_id"),
+    status: text("status").$type<DraftStatus>().notNull(),
+    rejectedReason: text("rejected_reason").$type<DraftRejection>(),
+    /** Why the agent judged it is not the same problem as an open ticket of the category. */
+    notDuplicateReason: text("not_duplicate_reason"),
+    /** When the answer is due: as if created when drafted, then the real one once confirmed. */
+    dueAt: timestamp("due_at").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("drafts_number").on(table.number),
+    // A conversation has at most one draft waiting: drafting again supersedes the one before.
+    uniqueIndex("drafts_one_pending_per_conversation")
+      .on(table.conversationId)
+      .where(sql`${table.status} = 'pending'`),
+    // The cards of a conversation load its drafts.
+    index("drafts_conversation_created").on(table.conversationId, table.createdAt),
+  ],
+);
 
 /** Abuse limits: key is "ip:<ip>:<day>" or "global:<day>". Incremented atomically. */
 export const usageCounters = sqliteTable("usage_counters", {

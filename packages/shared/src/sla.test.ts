@@ -40,28 +40,42 @@ describe("addBusinessHours", () => {
 });
 
 describe("RN-02 dueAt", () => {
+  it("counts a reopened ticket from the reopening, as a new opening, not from an older answer of IT", () => {
+    const createdAt = at("2026-10-19T10:00");
+    expect(
+      dueAt({ priority: "high", createdAt, lastItResponseAt: at("2026-10-20T10:00"), reopenedAt: at("2026-10-26T10:00") }),
+    ).toEqual(at("2026-10-26T14:00"));
+  });
+
+  it("counts from an answer of IT that came after the reopening", () => {
+    const createdAt = at("2026-10-19T10:00");
+    expect(
+      dueAt({ priority: "high", createdAt, lastItResponseAt: at("2026-10-27T09:00"), reopenedAt: at("2026-10-26T10:00") }),
+    ).toEqual(at("2026-10-27T13:00"));
+  });
+
   const createdAt = at("2026-10-26T10:00");
 
   it("gives critical 1 hour around the clock", () => {
-    expect(dueAt({ priority: "critical", createdAt: at("2026-10-31T03:00"), lastItResponseAt: null })).toEqual(
+    expect(dueAt({ priority: "critical", createdAt: at("2026-10-31T03:00"), lastItResponseAt: null, reopenedAt: null })).toEqual(
       at("2026-10-31T04:00"),
     );
   });
 
   it("gives high 4 business hours", () => {
-    expect(dueAt({ priority: "high", createdAt, lastItResponseAt: null })).toEqual(at("2026-10-26T14:00"));
+    expect(dueAt({ priority: "high", createdAt, lastItResponseAt: null, reopenedAt: null })).toEqual(at("2026-10-26T14:00"));
   });
 
   it("gives medium 3 business days", () => {
-    expect(dueAt({ priority: "medium", createdAt, lastItResponseAt: null })).toEqual(at("2026-10-29T10:00"));
+    expect(dueAt({ priority: "medium", createdAt, lastItResponseAt: null, reopenedAt: null })).toEqual(at("2026-10-29T10:00"));
   });
 
   it("gives low 5 business days", () => {
-    expect(dueAt({ priority: "low", createdAt, lastItResponseAt: null })).toEqual(at("2026-11-02T10:00"));
+    expect(dueAt({ priority: "low", createdAt, lastItResponseAt: null, reopenedAt: null })).toEqual(at("2026-11-02T10:00"));
   });
 
   it("restarts from the last IT response", () => {
-    expect(dueAt({ priority: "high", createdAt, lastItResponseAt: at("2026-10-27T09:00") })).toEqual(
+    expect(dueAt({ priority: "high", createdAt, lastItResponseAt: at("2026-10-27T09:00"), reopenedAt: null })).toEqual(
       at("2026-10-27T13:00"),
     );
   });
@@ -85,7 +99,7 @@ describe("isOverdue", () => {
   it("marks a medium ticket with no IT response for 6 days as overdue (INC-20311)", () => {
     const now = at("2026-10-28T11:00");
     const createdAt = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000);
-    const ticket = { status: "waiting_for_analyst" as const, dueAt: dueAt({ priority: "medium", createdAt, lastItResponseAt: null }) };
+    const ticket = { status: "waiting_for_analyst" as const, dueAt: dueAt({ priority: "medium", createdAt, lastItResponseAt: null, reopenedAt: null }) };
     expect(isOverdue(ticket, now)).toBe(true);
   });
 });

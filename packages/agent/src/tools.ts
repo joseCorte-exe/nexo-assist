@@ -1,18 +1,61 @@
 import { createTool } from "@mastra/core/tools";
 import {
+  type Affected,
+  CATEGORY_LABEL,
+  type Category,
+  changeRefusal,
+  type DraftOperation,
+  type DraftRejection,
+  type DraftRequest,
+  type DraftTicketOutput,
+  type DraftView,
+  deadlineWords,
+  draftRequest,
+  dueAt,
+  type Impact,
   isOverdue,
+  isReopenable,
   nexoToolSchemas,
   type OutOfScopeArea,
+  type Priority,
+  priorityFor,
+  reopenedDueAt,
   slaText,
   type Ticket,
   type TicketCard,
   type TicketServiceClient,
   type TicketSummary,
+  type TicketType,
+  type Urgency,
 } from "@nexo/shared";
 import { z } from "zod";
 
-/** The part of the ticket-service the tools use: the help center and the employee's tickets. */
-export type TicketDesk = Pick<TicketServiceClient, "searchArticles" | "listEmployeeTickets" | "getTicket">;
+/** The part of the ticket-service the tools use: the help center, the employee's tickets and the duplicate lookup. */
+export type TicketDesk = Pick<TicketServiceClient, "searchArticles" | "listEmployeeTickets" | "getTicket" | "listCandidates">;
+
+/** A draft as the tool hands it to be saved: what the card shows, plus what the console and the analyst need. */
+export type DraftRecord = {
+  conversationId: string;
+  operation: DraftOperation;
+  /** The ticket followed up or reopened; null for a new one. */
+  ticketId: string | null;
+  type: TicketType;
+  title: string;
+  description: string;
+  category: Category;
+  subcategory: string | null;
+  priority: Priority;
+  affected: Affected;
+  /** What RN-01 read, for a new ticket. A follow-up and a reopening keep the priority of the ticket. */
+  impact: Impact | null;
+  urgency: Urgency | null;
+  notDuplicateReason: string | null;
+  dueAt: Date;
+  createdAt: Date;
+};
+
+/** Where drafts are kept: the conversations database, which the web owns. Saving one replaces the pending one. */
+export type DraftStore = { save: (draft: DraftRecord) => Promise<DraftView> };
 
 const HELP_CENTER_DOWN = "A central de ajuda não respondeu.";
 const TICKETS_DOWN = "O serviço de chamados não respondeu.";
@@ -34,7 +77,14 @@ type EmployeeContext = z.infer<typeof employeeContext>;
 const employeeOf = (context: { requestContext: { get: (key: "employeeId") => EmployeeContext["employeeId"] } }) =>
   context.requestContext.get("employeeId");
 
-export function createTools({ ticketService, now }: { ticketService: TicketDesk; now: () => Date }) {
+/** A draft also needs the conversation it belongs to, which the route puts in the context too. */
+const turnContext = employeeContext.extend({ conversationId: z.string().min(1) });
+type TurnContext = z.infer<typeof turnContext>;
+
+type DraftFailure = Extract<DraftTicketOutput, { ok: false }>;
+const failure = (reason: DraftFailure["reason"], message: string): DraftFailure => ({ ok: false, reason, message });
+
+export function createTools({ ticketService, drafts, now }: { ticketService: TicketDesk; drafts: DraftStore; now: () => Date }) {
   const summarize = (ticket: Ticket, at: Date): TicketSummary => ({
     id: ticket.id,
     title: ticket.title,
@@ -81,17 +131,19 @@ export function createTools({ ticketService, now }: { ticketService: TicketDesk;
   const listMyTickets = createTool({
     id: "listMyTickets",
     description:
-      "Lista os chamados do funcionário, do mais recente para o mais antigo, com o status e se está vencido. Use quando ele falar de um chamado sem dizer o número.",
+      "Lista os chamados do funcionário, do mais recente para o mais antigo, com o status e se está vencido. Com scope open, traz à parte (recentlyResolved) os resolvidos há até 7 dias, que são reabertos se o problema voltou. Use quando ele falar de um chamado sem dizer o número, e antes de abrir um chamado.",
     ...nexoToolSchemas.listMyTickets,
     requestContextSchema: employeeContext,
     execute: async ({ scope }, context) => {
-      const result = await ticketService.listEmployeeTickets(
-        employeeOf(context),
-        scope === "open" ? { status: "open" } : {},
-      );
+      // Every ticket in one call: the open ones and, apart, the ones that can still be reopened.
+      const result = await ticketService.listEmployeeTickets(employeeOf(context), {});
       if (!result.ok) return { ok: false as const, message: TICKETS_DOWN };
       const at = now();
-      return { ok: true as const, tickets: result.data.map((ticket) => summarize(ticket, at)) };
+      const summaries = (tickets: Ticket[]) => tickets.map((ticket) => summarize(ticket, at));
+      if (scope === "all") return { ok: true as const, tickets: summaries(result.data) };
+      const open = result.data.filter((ticket) => ticket.status !== "resolved");
+      const reopenable = result.data.filter((ticket) => isReopenable(ticket, at));
+      return { ok: true as const, tickets: summaries(open), recentlyResolved: summaries(reopenable) };
     },
   });
 
@@ -163,8 +215,122 @@ export function createTools({ ticketService, now }: { ticketService: TicketDesk;
     execute: async () => ({ ok: true as const }),
   });
 
-  return { recordDecision, searchArticles, redirectOutOfScope, listMyTickets, getTicket, offerTicketChoice, offerReplies };
+  /**
+   * A new ticket: type and priority from the impact (RN-01), and no draft over a ticket that may be the same: an open
+   * one of the category, or one resolved up to 7 days ago, which is reopened instead.
+   */
+  async function draftNew(
+    input: Extract<DraftRequest, { operation: "create" }>,
+    { employeeId, conversationId }: TurnContext,
+  ): Promise<DraftTicketOutput> {
+    const { title, category, impact, urgency, affected } = input;
+    const candidates = await ticketService.listCandidates(employeeId, category);
+    if (!candidates.ok) return failure("unavailable", TICKETS_DOWN);
+    const at = now();
+    if (candidates.data.length > 0 && !input.notDuplicateReason) {
+      return {
+        ...failure(
+          "possible_duplicate",
+          `O funcionário já tem chamados de ${CATEGORY_LABEL[category]} que podem ser o mesmo problema. Se for o mesmo de um aberto, monte um update dele; de um resolvido, um reopen. Se não for, chame de novo com notDuplicateReason.`,
+        ),
+        candidates: candidates.data.map((ticket) => summarize(ticket, at)),
+      };
+    }
+    const priority = priorityFor({ impact, urgency, affected });
+    const due = dueAt({ priority, createdAt: at, lastItResponseAt: null, reopenedAt: null });
+    const draft = await drafts.save({
+      conversationId,
+      operation: "create",
+      ticketId: null,
+      type: impact === "request" ? "REQ" : "INC",
+      title,
+      description: input.description,
+      category,
+      subcategory: input.subcategory,
+      priority,
+      affected,
+      impact,
+      urgency,
+      notDuplicateReason: input.notDuplicateReason,
+      dueAt: due,
+      createdAt: at,
+    });
+    return { ok: true, draft, dueText: deadlineWords(due, at) };
+  }
+
+  /**
+   * A follow-up of an open ticket, or the reopening of one resolved up to 7 days ago. Both keep the classification of
+   * the ticket; only the reopening restarts the deadline, as a new opening. The service checks the same again when
+   * the employee confirms.
+   */
+  async function draftChange(
+    input: Extract<DraftRequest, { operation: "update" | "reopen" }>,
+    { employeeId, conversationId }: TurnContext,
+  ): Promise<DraftTicketOutput> {
+    const { ticketId } = input;
+    const result = await ticketService.getTicket(ticketId, employeeId);
+    if (!result.ok) return failure("unavailable", TICKETS_DOWN);
+    const ticket = result.data;
+    if (!ticket) return failure("ticket_not_found", REFUSAL_TO_MODEL.ticket_not_found(ticketId));
+    const at = now();
+    const refusal = changeRefusal(input.operation, ticket, at);
+    if (refusal) return failure(refusal, REFUSAL_TO_MODEL[refusal](ticket.id));
+    // A follow-up keeps the deadline of the ticket; a reopening counts as a new opening.
+    const due = input.operation === "update" ? new Date(ticket.dueAt) : reopenedDueAt(ticket, at);
+
+    const draft = await drafts.save({
+      conversationId,
+      operation: input.operation,
+      ticketId: ticket.id,
+      type: ticket.type,
+      title: ticket.title,
+      description: input.description,
+      category: ticket.category,
+      subcategory: ticket.subcategory,
+      priority: ticket.priority,
+      affected: ticket.affected,
+      impact: null,
+      urgency: null,
+      notDuplicateReason: null,
+      dueAt: due,
+      createdAt: at,
+    });
+    const overdue = input.operation === "update" && isOverdue({ status: ticket.status, dueAt: due }, at);
+    return { ok: true, draft, dueText: overdue ? "prazo vencido" : deadlineWords(due, at) };
+  }
+
+  const draftTicket = createTool({
+    id: "draftTicket",
+    description:
+      "Monta o rascunho de um chamado novo (create), do complemento de um chamado aberto (update) ou da reabertura de um chamado resolvido há até 7 dias (reopen). O funcionário vê o card e confere: nada é criado antes de ele clicar em Confirmar. O código calcula o tipo, a prioridade e o prazo e confere duplicidade e a janela de reabertura.",
+    ...nexoToolSchemas.draftTicket,
+    requestContextSchema: turnContext,
+    execute: async (input, context) => {
+      const turn = { employeeId: employeeOf(context), conversationId: context.requestContext.get("conversationId") };
+      const request = draftRequest(input);
+      return request.operation === "create" ? draftNew(request, turn) : draftChange(request, turn);
+    },
+  });
+
+  return {
+    recordDecision,
+    searchArticles,
+    redirectOutOfScope,
+    listMyTickets,
+    getTicket,
+    offerTicketChoice,
+    offerReplies,
+    draftTicket,
+  };
 }
+
+/** What the model is told when the ticket cannot take the change, so it knows what to draft instead. */
+const REFUSAL_TO_MODEL: Record<DraftRejection, (ticketId: string) => string> = {
+  ticket_not_found: (id) => `Não encontrei o ${id} entre os seus chamados.`,
+  ticket_resolved: (id) => `O ${id} está resolvido. Se o problema voltou, monte um reopen; ele vale até 7 dias depois da resolução.`,
+  ticket_not_resolved: (id) => `O ${id} não está resolvido. Para acrescentar uma informação, monte um update.`,
+  reopen_window_closed: (id) => `O ${id} foi resolvido há mais de 7 dias e não pode ser reaberto. Monte um chamado novo (create).`,
+};
 
 /** The tools that hand the turn to the employee: once one of them runs, the reply ends. */
 export const OFFER_TOOLS = new Set(["offerTicketChoice", "offerReplies"]);

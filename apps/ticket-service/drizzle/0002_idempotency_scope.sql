@@ -1,0 +1,1 @@
+ALTER TABLE `idempotency_keys` ADD `scope` text DEFAULT 'POST /tickets' NOT NULL;

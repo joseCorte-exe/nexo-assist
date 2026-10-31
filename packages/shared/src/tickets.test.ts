@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findTicketIds, ticketDetailSchema, ticketId } from "./tickets";
+import { findTicketIds, ticketDetailSchema, ticketFollowUpInput, ticketId } from "./tickets";
 
 describe("ticketId", () => {
   it("takes INC or REQ with 5 digits, uppercased and trimmed", () => {
@@ -65,5 +65,20 @@ describe("ticketDetailSchema", () => {
       updates: [{ author: "robot", text: "?", createdAt: "2026-10-19T13:00:00.000Z" }],
     });
     expect(parsed.success).toBe(false);
+  });
+});
+
+describe("ticketFollowUpInput", () => {
+  it("takes the employee and the text, trimmed", () => {
+    expect(ticketFollowUpInput.parse({ employeeId: "emp-ana", text: "  Trava no Teams também. " })).toEqual({
+      employeeId: "emp-ana",
+      text: "Trava no Teams também.",
+    });
+  });
+
+  it("refuses an empty text, a text too long and a missing employee", () => {
+    expect(ticketFollowUpInput.safeParse({ employeeId: "emp-ana", text: " " }).success).toBe(false);
+    expect(ticketFollowUpInput.safeParse({ employeeId: "emp-ana", text: "x".repeat(2001) }).success).toBe(false);
+    expect(ticketFollowUpInput.safeParse({ text: "Oi" }).success).toBe(false);
   });
 });

@@ -63,3 +63,23 @@ export type TicketDetail = z.infer<typeof ticketDetailSchema>;
 /** Filter of GET /employees/:id/tickets. open leaves the resolved ones out; without it, every ticket comes. */
 export const employeeTicketsStatus = z.enum(["open"]);
 export type EmployeeTicketsStatus = z.infer<typeof employeeTicketsStatus>;
+
+/** A ticket as a line of a list: what the employee needs to recognize it and whether it is late. */
+export const ticketSummary = z.object({
+  id: z.string(),
+  title: z.string(),
+  status: ticketStatus,
+  createdAt: z.iso.datetime(),
+  overdue: z.boolean(),
+});
+export type TicketSummary = z.infer<typeof ticketSummary>;
+
+/** Body of PATCH /tickets/:id (a follow-up of the employee) and of POST /tickets/:id/reopen (what happened again). */
+export const ticketFollowUpInput = z.object({
+  employeeId: z.string().min(1),
+  text: z.string().trim().min(1).max(2000),
+});
+export type TicketFollowUpInput = z.infer<typeof ticketFollowUpInput>;
+
+/** Query of GET /employees/:id/tickets/candidates: the tickets that could be the same problem, open or resolved up to 7 days ago. */
+export const candidatesQuery = z.object({ category });

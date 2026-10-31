@@ -1,15 +1,17 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import { apiError, type ConversationResponse, type NexoUIMessage, textOf } from "@nexo/shared";
+import { apiError, type ConversationResponse, type DraftView, type NexoUIMessage, textOf } from "@nexo/shared";
 import { DefaultChatTransport } from "ai";
 import { CircleAlert } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { THINKING_LABEL } from "@/lib/agent-actions";
-import { liveTurns, messageCount, type Turn } from "@/lib/chat-turns";
+import { currentDraft, lastDraftId, liveTurns, messageCount, type Turn } from "@/lib/chat-turns";
+import type { Shortcut } from "@/lib/shortcut";
 import { useWholePixelWidth } from "@/lib/use-whole-pixel-width";
 import { AgentReply } from "./agent-reply";
 import { Composer } from "./composer";
+import { DraftCard } from "./draft-card";
 import { EmptyChat } from "./empty-chat";
 
 /** Closer than this to the bottom, new parts keep the view pinned; farther up, she is reading and is left alone. */
@@ -43,11 +45,22 @@ function wasAlreadyAnswered(error: Error) {
   }
 }
 
-export function Chat({ initial, employeeName }: { initial: ConversationResponse; employeeName: string }) {
+export function Chat({
+  initial,
+  employeeName,
+  shortcut,
+}: {
+  initial: ConversationResponse;
+  employeeName: string;
+  /** ⌘↵ or Ctrl ↵, decided on the server from the request. */
+  shortcut: Shortcut;
+}) {
   // How many replies in a row failed: the second one sends the employee to the phone.
   const [failures, setFailures] = useState(0);
   // The counter of the conversation as last loaded from the server; replies bring newer ones in the stream.
   const [savedCount, setSavedCount] = useState(initial.conversation?.messageCount ?? 0);
+  // The drafts as last known: loaded with the conversation, then as each action of a card answered.
+  const [drafts, setDrafts] = useState<Record<string, DraftView>>(() => byId(initial.drafts));
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const { messages, setMessages, sendMessage, regenerate, status, clearError } = useChat<NexoUIMessage>({
@@ -63,11 +76,18 @@ export function Chat({ initial, employeeName }: { initial: ConversationResponse;
     },
   });
 
+  /** The drafts as the server has them now, when a card learned it was showing an old state. */
+  async function refreshDrafts() {
+    const response = await fetch("/api/conversation", { cache: "no-store" }).catch(() => null);
+    if (response?.ok) setDrafts(byId(((await response.json()) as ConversationResponse).drafts));
+  }
+
   async function showSavedConversation() {
     const response = await fetch("/api/conversation", { cache: "no-store" }).catch(() => null);
     if (!response?.ok) return setFailures((count) => count + 1);
     const saved = (await response.json()) as ConversationResponse;
     setSavedCount(saved.conversation?.messageCount ?? 0);
+    setDrafts(byId(saved.drafts));
     setMessages(saved.messages);
     clearError();
   }
@@ -75,6 +95,21 @@ export function Chat({ initial, employeeName }: { initial: ConversationResponse;
   const busy = status === "submitted" || status === "streaming";
   const turns = liveTurns(messages, status);
   const count = messageCount(messages, status, savedCount);
+  const lastDraft = lastDraftId(messages);
+
+  function renderDraft(shown: DraftView, key: string) {
+    return (
+      <DraftCard
+        key={key}
+        draft={currentDraft(shown, drafts, lastDraft)}
+        busy={busy}
+        shortcut={shortcut}
+        onChange={(draft) => setDrafts((known) => ({ ...known, [draft.id]: draft }))}
+        onDone={() => inputRef.current?.focus()}
+        onStale={refreshDrafts}
+      />
+    );
+  }
 
   function send(text: string) {
     void sendMessage({ text });
@@ -122,6 +157,7 @@ export function Chat({ initial, employeeName }: { initial: ConversationResponse;
                 <AgentReply
                   key={turn.id}
                   turn={turn}
+                  renderDraft={renderDraft}
                   failures={failures}
                   onRetry={retry}
                   onChoose={choose}
@@ -142,11 +178,12 @@ export function Chat({ initial, employeeName }: { initial: ConversationResponse;
 function EmployeeMessage({ text, unsent, onRetry }: { text: string; unsent: boolean; onRetry: () => void }) {
   const bubble = useRef<HTMLDivElement>(null);
   useWholePixelWidth(bubble, text);
+  // Lines break word by word, as nexo.pen breaks them, without moving a word down for a longer last line.
   return (
     <article aria-label="Você" className="message-enter flex flex-col items-end gap-1.5">
       <div
         ref={bubble}
-        className="max-w-[520px] rounded-[12px_12px_4px_12px] bg-ink px-4 py-[11px] text-14.5 leading-[21px] text-pretty wrap-anywhere whitespace-pre-line text-white">
+        className="max-w-[520px] rounded-[12px_12px_4px_12px] bg-ink px-4 py-[11px] text-14.5 leading-[21px] wrap-anywhere whitespace-pre-line text-white">
         {text}
       </div>
       {unsent ? (
@@ -194,3 +231,5 @@ function Announcer({ turn }: { turn: Turn | undefined }) {
     </p>
   );
 }
+
+const byId = (drafts: DraftView[]) => Object.fromEntries(drafts.map((draft) => [draft.id, draft]));

@@ -26,6 +26,8 @@ export function Composer({ count, busy, onSend, inputRef }: Props) {
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+    // ⌘↵ or Ctrl ↵ with nothing written is the shortcut of the draft waiting for confirmation: left to its card.
+    if ((event.metaKey || event.ctrlKey) && !text.trim()) return;
     event.preventDefault();
     send();
   }

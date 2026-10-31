@@ -1,0 +1,1 @@
+ALTER TABLE `tickets` ADD `reopened_at` integer;

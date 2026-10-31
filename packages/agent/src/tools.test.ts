@@ -1,7 +1,15 @@
 import { RequestContext } from "@mastra/core/request-context";
-import { dueAt, type KbArticle, type Ticket, type TicketDetail, type TicketServiceResult } from "@nexo/shared";
+import {
+  type DraftView,
+  dueAt,
+  type KbArticle,
+  slaText,
+  type Ticket,
+  type TicketDetail,
+  type TicketServiceResult,
+} from "@nexo/shared";
 import { describe, expect, it } from "vitest";
-import { createTools, type TicketDesk } from "./tools";
+import { createTools, type DraftRecord, type DraftStore, type TicketDesk } from "./tools";
 
 // Monday 10:00 in São Paulo.
 const NOW = new Date("2026-10-26T13:00:00Z");
@@ -42,10 +50,34 @@ function helpCenter(articles: KbArticle[] | "down"): TicketDesk & { queries: str
     },
     listEmployeeTickets: unexpected,
     getTicket: unexpected,
+    listCandidates: unexpected,
   };
 }
 
-const tools = (desk: TicketDesk) => createTools({ ticketService: desk, now: () => NOW });
+/** The drafts the tool saved, numbered from D-381 as the web numbers them. */
+function draftStore(): DraftStore & { saved: DraftRecord[] } {
+  const saved: DraftRecord[] = [];
+  return {
+    saved,
+    save: async (draft) => {
+      saved.push(draft);
+      const { conversationId, impact, urgency, notDuplicateReason, ...shown } = draft;
+      const view: DraftView = {
+        ...shown,
+        id: `draft-${saved.length}`,
+        number: 380 + saved.length,
+        status: "pending",
+        rejectedReason: null,
+        deadline: slaText(draft.priority),
+        dueAt: draft.dueAt.toISOString(),
+        createdAt: draft.createdAt.toISOString(),
+      };
+      return view;
+    },
+  };
+}
+
+const tools = (desk: TicketDesk, drafts: DraftStore = draftStore()) => createTools({ ticketService: desk, drafts, now: () => NOW });
 
 // The tools run outside an agent here. Those of the tickets read the employee from the request context, which
 // the route fills with the session; the others need no context.
@@ -53,6 +85,14 @@ const run = <I, O>(tool: { execute?: (input: I, context: never) => Promise<O> },
   tool.execute!(input, {} as never);
 const runAs = <I, O>(employeeId: string, tool: { execute?: (input: I, context: never) => Promise<O> }, input: I) =>
   tool.execute!(input, { requestContext: new RequestContext([["employeeId", employeeId]]) } as never);
+/** As the route runs a turn: the employee of the session and the conversation the reply belongs to. */
+const runInTurn = <I, O>(tool: { execute?: (input: I, context: never) => Promise<O> }, input: I, employeeId = "emp-ana") =>
+  tool.execute!(input, {
+    requestContext: new RequestContext([
+      ["employeeId", employeeId],
+      ["conversationId", "conv-1"],
+    ]),
+  } as never);
 
 describe("recordDecision", () => {
   it("only acknowledges: the route saves the decision at the end of the reply", async () => {
@@ -143,7 +183,7 @@ function ticket(fields: Partial<Ticket> & Pick<Ticket, "id" | "title" | "status"
     createdAt: createdAt.toISOString(),
     updatedAt: (lastItResponseAt ?? createdAt).toISOString(),
     lastItResponseAt: lastItResponseAt?.toISOString() ?? null,
-    dueAt: dueAt({ priority: fields.priority, createdAt, lastItResponseAt }).toISOString(),
+    dueAt: dueAt({ priority: fields.priority, createdAt, lastItResponseAt, reopenedAt: null }).toISOString(),
     resolvedAt: null,
     ...fields,
   };
@@ -171,11 +211,16 @@ const monitor = ticket(
   7,
 );
 
-type Calls = { list: Array<[string, unknown]>; get: Array<[string, string]> };
+type Calls = { list: Array<[string, unknown]>; get: Array<[string, string]>; candidates: Array<[string, string]> };
 
 /** A ticket-service with Ana's tickets, recording who each call was made for. */
-function ticketDesk({ state = "up", tickets = [notebook, sharepoint, monitor], details = {} as Record<string, TicketDetail> } = {}) {
-  const calls: Calls = { list: [], get: [] };
+function ticketDesk({
+  state = "up",
+  tickets = [notebook, sharepoint, monitor],
+  details = {} as Record<string, TicketDetail>,
+  candidates = undefined as Ticket[] | undefined,
+} = {}) {
+  const calls: Calls = { list: [], get: [], candidates: [] };
   const desk: TicketDesk = {
     searchArticles: unexpected,
     listEmployeeTickets: async (employeeId, options) => {
@@ -187,6 +232,12 @@ function ticketDesk({ state = "up", tickets = [notebook, sharepoint, monitor], d
       calls.get.push([id, employeeId]);
       if (state === "down") return down;
       return { ok: true, data: employeeId === "emp-ana" ? (details[id] ?? null) : null };
+    },
+    listCandidates: async (employeeId, category) => {
+      calls.candidates.push([employeeId, category]);
+      if (state === "down") return down;
+      const open = candidates ?? tickets.filter((one) => one.status !== "resolved" && one.category === category);
+      return { ok: true, data: employeeId === "emp-ana" ? open : [] };
     },
   };
   return { desk, calls };
@@ -203,8 +254,22 @@ describe("listMyTickets", () => {
         { id: "INC-20298", title: sharepoint.title, status: "in_progress", createdAt: sharepoint.createdAt, overdue: false },
         { id: "REQ-10442", title: monitor.title, status: "approved", createdAt: monitor.createdAt, overdue: false },
       ],
+      recentlyResolved: [],
     });
-    expect(calls.list).toEqual([["emp-ana", { status: "open" }]]);
+    // One call for both lists: the open tickets and the ones resolved in the last days.
+    expect(calls.list).toEqual([["emp-ana", {}]]);
+  });
+
+  it("brings apart the tickets resolved up to 7 days ago, which can be reopened, and never the older ones", async () => {
+    const resolvedAgo = (days: number) => new Date(NOW.getTime() - days * DAY).toISOString();
+    const sap = ticket({ id: "INC-20150", title: "Senha do SAP bloqueada", priority: "medium", status: "resolved", resolvedAt: resolvedAgo(4) }, 5, 4);
+    const outlook = ticket({ id: "INC-19877", title: "Outlook não sincroniza no celular", priority: "low", status: "resolved", resolvedAt: resolvedAgo(12) }, 15, 12);
+    const { desk } = ticketDesk({ tickets: [notebook, sap, outlook] });
+    expect(await runAs("emp-ana", tools(desk).listMyTickets, { scope: "open" })).toEqual({
+      ok: true,
+      tickets: [{ id: "INC-20311", title: notebook.title, status: "waiting_for_analyst", createdAt: notebook.createdAt, overdue: true }],
+      recentlyResolved: [{ id: "INC-20150", title: "Senha do SAP bloqueada", status: "resolved", createdAt: sap.createdAt, overdue: false }],
+    });
   });
 
   it("asks for every ticket, resolved included, with scope all", async () => {
@@ -339,5 +404,235 @@ describe("offerReplies", () => {
   it("only shows the replies, which the screen draws from its input", async () => {
     const { desk } = ticketDesk();
     expect(await run(tools(desk).offerReplies, { question: "Quer ajuda?", options: ["Falar com um analista", "Não, obrigado"] })).toEqual({ ok: true });
+  });
+});
+
+describe("draftTicket", () => {
+  const vpnTicket = {
+    operation: "create" as const,
+    title: "VPN não conecta no notebook — erro 809",
+    description: "Desde ontem o notebook (Windows 11) não conecta na VPN e mostra o erro 809. Precisa dela para a reunião das 14h.",
+    category: "network_vpn" as const,
+    subcategory: "VPN",
+    impact: "stopped" as const,
+    urgency: "same_day" as const,
+    affected: "only_me" as const,
+  };
+
+  it("drafts a new ticket with the priority of RN-01 and the deadline counted from now, and saves it in the conversation", async () => {
+    const drafts = draftStore();
+    const result = await runInTurn(tools(ticketDesk().desk, drafts).draftTicket, vpnTicket);
+    // One person stopped with a meeting today: high, 4 business hours, so 14:00 in São Paulo.
+    expect(result).toEqual({
+      ok: true,
+      dueText: "hoje, até 14:00",
+      draft: {
+        id: "draft-1",
+        number: 381,
+        operation: "create",
+        status: "pending",
+        ticketId: null,
+        type: "INC",
+        title: vpnTicket.title,
+        description: vpnTicket.description,
+        category: "network_vpn",
+        subcategory: "VPN",
+        priority: "high",
+        affected: "only_me",
+        rejectedReason: null,
+        deadline: "4 horas úteis",
+        dueAt: "2026-10-26T17:00:00.000Z",
+        createdAt: NOW.toISOString(),
+      },
+    });
+    expect(drafts.saved).toEqual([
+      {
+        conversationId: "conv-1",
+        operation: "create",
+        ticketId: null,
+        type: "INC",
+        title: vpnTicket.title,
+        description: vpnTicket.description,
+        category: "network_vpn",
+        subcategory: "VPN",
+        priority: "high",
+        affected: "only_me",
+        impact: "stopped",
+        urgency: "same_day",
+        notDuplicateReason: null,
+        dueAt: new Date("2026-10-26T17:00:00.000Z"),
+        createdAt: NOW,
+      },
+    ]);
+  });
+
+  it("makes a request a REQ, and gives it the priority of a request", async () => {
+    const result = await runInTurn(tools(ticketDesk().desk).draftTicket, {
+      ...vpnTicket,
+      title: "Acesso ao Power BI",
+      description: "Preciso de uma licença do Power BI para montar os relatórios do time de vendas a partir do mês que vem.",
+      category: "software",
+      impact: "request",
+      urgency: "none",
+    });
+    expect(result).toMatchObject({ ok: true, draft: { type: "REQ", priority: "low", deadline: "5 dias úteis" } });
+  });
+
+  it("looks for open tickets of the same category, as the employee of the session", async () => {
+    const { desk, calls } = ticketDesk();
+    await runInTurn(tools(desk).draftTicket, vpnTicket);
+    expect(calls.candidates).toEqual([["emp-ana", "network_vpn"]]);
+  });
+
+  it("does not draft over an open ticket that may be the same problem, and shows it to the model", async () => {
+    const drafts = draftStore();
+    const result = await runInTurn(tools(ticketDesk().desk, drafts).draftTicket, {
+      ...vpnTicket,
+      title: "Notebook muito lento",
+      description: "O notebook continua muito lento para abrir qualquer programa desde a atualização do Windows.",
+      category: "hardware",
+      impact: "degraded",
+      urgency: "none",
+    });
+    expect(result).toEqual({
+      ok: false,
+      reason: "possible_duplicate",
+      message:
+        "O funcionário já tem chamados de Hardware que podem ser o mesmo problema. Se for o mesmo de um aberto, monte um update dele; de um resolvido, um reopen. Se não for, chame de novo com notDuplicateReason.",
+      candidates: [
+        { id: "INC-20311", title: notebook.title, status: "waiting_for_analyst", createdAt: notebook.createdAt, overdue: true },
+        { id: "REQ-10442", title: monitor.title, status: "approved", createdAt: monitor.createdAt, overdue: false },
+      ],
+    });
+    expect(drafts.saved).toEqual([]);
+  });
+
+  it("shows a ticket resolved in the last days as a candidate too, for the model to reopen it", async () => {
+    const sapResolved = ticket(
+      { id: "INC-20150", title: "Senha do SAP bloqueada", category: "access", priority: "medium", status: "resolved", resolvedAt: new Date(NOW.getTime() - 4 * DAY).toISOString() },
+      5,
+      4,
+    );
+    const { desk } = ticketDesk({ tickets: [sharepoint], candidates: [sapResolved, sharepoint] });
+    const result = await runInTurn(tools(desk).draftTicket, {
+      ...vpnTicket,
+      title: "Senha do SAP bloqueada de novo",
+      description: "A senha do SAP bloqueou de novo hoje cedo e não consigo entrar para lançar as notas.",
+      category: "access",
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "possible_duplicate",
+      candidates: [{ id: "INC-20150", status: "resolved" }, { id: "INC-20298", status: "in_progress" }],
+    });
+  });
+
+  it("drafts it anyway once the model says why it is another problem, and keeps the reason", async () => {
+    const drafts = draftStore();
+    const result = await runInTurn(tools(ticketDesk().desk, drafts).draftTicket, {
+      ...vpnTicket,
+      title: "Teclado do notebook com teclas soltas",
+      description: "Três teclas do notebook soltaram hoje cedo e não voltam ao lugar; dá para usar um teclado externo.",
+      category: "hardware",
+      impact: "degraded",
+      urgency: "none",
+      notDuplicateReason: "O INC-20311 é sobre lentidão; este é um defeito físico do teclado.",
+    });
+    expect(result).toMatchObject({ ok: true, draft: { priority: "medium", category: "hardware" } });
+    expect(drafts.saved[0]?.notDuplicateReason).toBe("O INC-20311 é sobre lentidão; este é um defeito físico do teclado.");
+  });
+
+  const notebookDetail: TicketDetail = { ...notebook, assigneeName: null, updates: [] };
+  const sap = ticket(
+    { id: "INC-20150", title: "Senha do SAP bloqueada", category: "access", subcategory: "SAP", priority: "medium", status: "resolved", resolvedAt: new Date(NOW.getTime() - 4 * DAY).toISOString() },
+    5,
+    4,
+  );
+  const outlook = { ...sap, id: "INC-19877", title: "Outlook não sincroniza no celular", resolvedAt: new Date(NOW.getTime() - 12 * DAY).toISOString() };
+  const detailsOf = (...list: Ticket[]) => Object.fromEntries(list.map((one) => [one.id, { ...one, assigneeName: null, updates: [] }]));
+
+  it("drafts a follow-up with the classification of the ticket and its deadline, which does not restart", async () => {
+    const drafts = draftStore();
+    const { desk, calls } = ticketDesk({ details: { "INC-20311": notebookDetail } });
+    const result = await runInTurn(tools(desk, drafts).draftTicket, {
+      operation: "update",
+      ticketId: "INC-20311",
+      description: "Agora também trava ao abrir o Teams.",
+    });
+    expect(result).toEqual({
+      ok: true,
+      dueText: "prazo vencido",
+      draft: expect.objectContaining({
+        operation: "update",
+        ticketId: "INC-20311",
+        title: notebook.title,
+        description: "Agora também trava ao abrir o Teams.",
+        category: "hardware",
+        subcategory: "Notebook",
+        priority: "medium",
+        dueAt: notebook.dueAt,
+      }),
+    });
+    expect(calls.get).toEqual([["INC-20311", "emp-ana"]]);
+    expect(drafts.saved[0]).toMatchObject({ impact: null, urgency: null });
+  });
+
+  it("does not follow up a resolved ticket, nor one that is not the employee's", async () => {
+    const { desk } = ticketDesk({ details: detailsOf(sap) });
+    expect(await runInTurn(tools(desk).draftTicket, { operation: "update", ticketId: "INC-20150", description: "De novo." })).toEqual({
+      ok: false,
+      reason: "ticket_resolved",
+      message: "O INC-20150 está resolvido. Se o problema voltou, monte um reopen; ele vale até 7 dias depois da resolução.",
+    });
+    expect(
+      await runInTurn(tools(desk).draftTicket, { operation: "update", ticketId: "INC-20150", description: "De novo." }, "emp-carla"),
+    ).toEqual({ ok: false, reason: "ticket_not_found", message: "Não encontrei o INC-20150 entre os seus chamados." });
+  });
+
+  it("drafts the reopening of a ticket resolved 4 days ago, with the deadline counted again from now", async () => {
+    const { desk } = ticketDesk({ details: detailsOf(sap) });
+    const result = await runInTurn(tools(desk).draftTicket, {
+      operation: "reopen",
+      ticketId: "INC-20150",
+      description: "A senha do SAP bloqueou de novo hoje cedo.",
+    });
+    // Medium: 3 business days from Monday 10:00.
+    expect(result).toMatchObject({
+      ok: true,
+      dueText: "até 29 out, 10:00",
+      draft: { operation: "reopen", ticketId: "INC-20150", title: "Senha do SAP bloqueada", dueAt: "2026-10-29T13:00:00.000Z" },
+    });
+  });
+
+  it("does not reopen past the 7 days, nor a ticket that is still open", async () => {
+    const { desk } = ticketDesk({ details: { ...detailsOf(outlook), "INC-20311": notebookDetail } });
+    expect(await runInTurn(tools(desk).draftTicket, { operation: "reopen", ticketId: "INC-19877", description: "Parou de novo." })).toEqual({
+      ok: false,
+      reason: "reopen_window_closed",
+      message: "O INC-19877 foi resolvido há mais de 7 dias e não pode ser reaberto. Monte um chamado novo (create).",
+    });
+    expect(await runInTurn(tools(desk).draftTicket, { operation: "reopen", ticketId: "INC-20311", description: "Lento." })).toEqual({
+      ok: false,
+      reason: "ticket_not_resolved",
+      message: "O INC-20311 não está resolvido. Para acrescentar uma informação, monte um update.",
+    });
+  });
+
+  it("says the service did not answer, and drafts nothing", async () => {
+    const drafts = draftStore();
+    const { desk } = ticketDesk({ state: "down" });
+    expect(await runInTurn(tools(desk, drafts).draftTicket, vpnTicket)).toEqual({
+      ok: false,
+      reason: "unavailable",
+      message: "O serviço de chamados não respondeu.",
+    });
+    expect(drafts.saved).toEqual([]);
+  });
+
+  it("never runs without the conversation of the turn", async () => {
+    const drafts = draftStore();
+    const result = await runAs("emp-ana", tools(ticketDesk().desk, drafts).draftTicket, vpnTicket);
+    expect(result).toMatchObject({ error: true });
+    expect(drafts.saved).toEqual([]);
   });
 });

@@ -1,8 +1,8 @@
 "use client";
 
-import type { DecisionRecord } from "@nexo/shared";
+import type { DecisionRecord, DraftView } from "@nexo/shared";
 import { ChevronDown, CircleAlert, LoaderCircle } from "lucide-react";
-import { useId, useRef, useState } from "react";
+import { type ReactNode, useId, useRef, useState } from "react";
 import { Button } from "@/components/button";
 import { CheckIcon } from "@/components/design-icons";
 import { THINKING_LABEL } from "@/lib/agent-actions";
@@ -18,6 +18,8 @@ const bubble =
 
 type Props = {
   turn: AgentTurn;
+  /** Draws the card of a draft in its current state. */
+  renderDraft: (draft: DraftView, key: string) => ReactNode;
   /** How many replies in a row failed: the second one sends the employee to the phone. */
   failures: number;
   onRetry: () => void;
@@ -29,7 +31,7 @@ type Props = {
  * One reply of the agent: who answered, the actions it took (the line grows while tools run), "Ver decisão"
  * with what it understood, did, how sure it was and why, and the answer. Failures show where the answer would be.
  */
-export function AgentReply({ turn, failures, onRetry, onChoose }: Props) {
+export function AgentReply({ turn, renderDraft, failures, onRetry, onChoose }: Props) {
   const [open, setOpen] = useState(false);
   const detailId = useId();
   const articleRef = useRef<HTMLElement>(null);
@@ -74,6 +76,7 @@ export function AgentReply({ turn, failures, onRetry, onChoose }: Props) {
 
       {turn.blocks.map((block) => {
         if (block.kind === "ticket") return <TicketCard key={block.key} ticket={block.ticket} />;
+        if (block.kind === "draft") return renderDraft(block.draft, block.key);
         if (block.kind === "choice") {
           const { tickets, chosen, mode } = block;
           return <TicketChoice key={block.key} tickets={tickets} chosen={chosen} mode={mode} onChoose={onChoose} />;

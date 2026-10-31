@@ -178,7 +178,52 @@ describe("getTicket", () => {
     const { client } = clientWith([json(400, { error: { code: "invalid_query", message: "employeeId is required" } })]);
     expect(await client.getTicket("INC-20312", "")).toEqual({
       ok: false,
-      error: { code: "http_error", status: 400, message: "employeeId is required" },
+      error: { code: "http_error", status: 400, serviceCode: "invalid_query", message: "employeeId is required" },
+    });
+  });
+});
+
+describe("listCandidates", () => {
+  it("asks for the open tickets of the employee in a category", async () => {
+    const { client, fetch } = clientWith([json(200, [ticket])]);
+    expect(await client.listCandidates("emp-ana", "network_vpn")).toEqual({ ok: true, data: [ticket] });
+    expect(String(fetch.mock.calls[0]?.[0])).toBe(
+      "http://tickets.test/employees/emp-ana/tickets/candidates?category=network_vpn",
+    );
+  });
+});
+
+describe("addFollowUp and reopenTicket", () => {
+  const body = { employeeId: "emp-ana", text: "Trava no Teams também." };
+  const headersOf = (init: RequestInit | undefined) => init?.headers as Record<string, string>;
+
+  it("adds the information to the ticket with the draft as the idempotency key, and retries it", async () => {
+    const { client, fetch } = clientWith([json(503, {}), json(200, ticket)]);
+    expect(await client.addFollowUp("INC-20312", body, "draft-7")).toEqual({ ok: true, data: ticket });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const [url, init] = fetch.mock.calls[1]!;
+    expect(String(url)).toBe("http://tickets.test/tickets/INC-20312");
+    expect(init.method).toBe("PATCH");
+    expect(JSON.parse(String(init.body))).toEqual(body);
+    expect(headersOf(init)[IDEMPOTENCY_KEY_HEADER]).toBe("draft-7");
+  });
+
+  it("reopens the ticket with the draft as the idempotency key", async () => {
+    const { client, fetch } = clientWith([json(200, ticket)]);
+    expect(await client.reopenTicket("INC-20150", body, "draft-8")).toEqual({ ok: true, data: ticket });
+    const [url, init] = fetch.mock.calls[0]!;
+    expect(String(url)).toBe("http://tickets.test/tickets/INC-20150/reopen");
+    expect(init.method).toBe("POST");
+    expect(headersOf(init)[IDEMPOTENCY_KEY_HEADER]).toBe("draft-8");
+  });
+
+  it("keeps the code the service refused with, so the web can say why", async () => {
+    const { client } = clientWith([
+      json(409, { error: { code: "reopen_window_closed", message: "Resolved more than 7 days ago" } }),
+    ]);
+    expect(await client.reopenTicket("INC-19877", body, "draft-9")).toEqual({
+      ok: false,
+      error: { code: "http_error", status: 409, serviceCode: "reopen_window_closed", message: "Resolved more than 7 days ago" },
     });
   });
 });
@@ -228,7 +273,10 @@ describe("ticket-service client", () => {
   it("does not retry a 4xx and keeps the service message", async () => {
     const { client, fetch } = clientWith([json(400, { error: { code: "invalid_body", message: "title is required" } })]);
     const result = await client.createTicket(input, "draft-1");
-    expect(result).toEqual({ ok: false, error: { code: "http_error", status: 400, message: "title is required" } });
+    expect(result).toEqual({
+      ok: false,
+      error: { code: "http_error", status: 400, serviceCode: "invalid_body", message: "title is required" },
+    });
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 

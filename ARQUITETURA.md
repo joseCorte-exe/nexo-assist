@@ -115,7 +115,7 @@ nexo-assist/
 |---|---|
 | employees | id, name, email, department, password_changed_at |
 | analysts | id, name, email, level (N1, N2), available |
-| tickets | id (INC-xxxxx ou REQ-xxxxx), type (INC, REQ), title, description, category, subcategory, priority, affected (only_me, my_team, company), status, opened_by, assigned_to, created_at, updated_at, last_it_response_at, due_at, resolved_at |
+| tickets | id (INC-xxxxx ou REQ-xxxxx), type (INC, REQ), title, description, category, subcategory, priority, affected (only_me, my_team, company), status, opened_by, assigned_to, created_at, updated_at, last_it_response_at, due_at, resolved_at, reopened_at |
 | ticket_updates | id, ticket_id, author (employee, agent, analyst), text, created_at |
 | kb_articles | id, title, content, category, keywords |
 | idempotency_keys | key, response, created_at (gravada na mesma transação do chamado) |
@@ -139,7 +139,7 @@ Status do chamado e o que muda cada um (só o que o design mostra):
 | "Encerrar atendimento" | Não muda o chamado, só fecha a conversa |
 | `in_progress`, `approved` e `resolved` | Vêm dos dados de exemplo |
 
-`due_at` é calculado a partir de `last_it_response_at` (ou de `created_at`, se a TI ainda não respondeu), somando o prazo da prioridade em horas úteis (RN-02).
+`due_at` é calculado a partir de `last_it_response_at` (ou de `created_at`, se a TI ainda não respondeu), somando o prazo da prioridade em horas úteis (RN-02). A reabertura conta como uma nova abertura: o chamado guarda `reopened_at`, e o prazo conta do mais recente entre a reabertura e a última resposta da TI. O complemento do funcionário não muda `due_at` nem `updated_at`.
 
 ### Banco das conversas (web + agent)
 
@@ -224,7 +224,7 @@ Toda rota exige o cabeçalho com o segredo compartilhado entre os dois projetos.
 | PATCH /analysts/:id | status Disponível |
 | GET /employees/:id/tickets?status= | chamados do funcionário |
 | GET /tickets/:id?employeeId= | detalhe; recusa se o chamado não for desse funcionário |
-| GET /employees/:id/tickets/candidates?category= | chamados abertos parecidos, usados na checagem de duplicidade |
+| GET /employees/:id/tickets/candidates?category= | chamados da mesma categoria que podem ser o mesmo problema: os abertos e os resolvidos há até 7 dias, usados na checagem de duplicidade |
 | POST /tickets | cria (exige `Idempotency-Key` = id do rascunho) |
 | PATCH /tickets/:id | atualiza ou complementa |
 | POST /tickets/:id/reopen | reabre se foi resolvido há até 7 dias |
@@ -246,9 +246,9 @@ Ferramentas:
 |---|---|
 | recordDecision | Obrigatória no primeiro passo de toda resposta. Grava o que o agent entendeu, a ação que vai tomar, a confiança (0 a 1) e o motivo |
 | searchArticles | Procura na central de ajuda |
-| listMyTickets | Chamados do funcionário logado. O id vem da sessão, nunca do modelo |
+| listMyTickets | Chamados do funcionário logado. O id vem da sessão, nunca do modelo. Junto com os abertos, traz à parte os resolvidos há até 7 dias, que podem ser reabertos |
 | getTicket | Detalhe e situação do prazo (vencido ou não) |
-| draftTicket | Monta o rascunho para criar, atualizar ou reabrir. Antes de criar, o código busca os chamados abertos parecidos e exige que o rascunho diga por que não é duplicado |
+| draftTicket | Monta o rascunho para criar, atualizar ou reabrir. Antes de criar, o código busca os chamados que podem ser o mesmo problema (abertos e resolvidos há até 7 dias) e exige que o rascunho diga por que não é duplicado. Depois de um rascunho, as ofertas saem da resposta: o card tem os próprios botões |
 | transferToAnalyst | Muda o estado da conversa, escolhe N1 ou N2 pela regra, calcula a espera e grava o resumo do caso |
 | redirectOutOfScope | Responde a assuntos de RH, financeiro e facilities indicando o canal |
 | offerTicketChoice | Mostra a pergunta e a lista dos chamados do funcionário para ele escolher um. Encerra a resposta |

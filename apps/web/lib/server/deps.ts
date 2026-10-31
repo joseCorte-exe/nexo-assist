@@ -1,15 +1,21 @@
-import { AGENT_MODEL, createMemory, createNexoAgent, type NexoAgent, simulatedModel } from "@nexo/agent";
+import { AGENT_MODEL, type AgentMemory, createMemory, createNexoAgent, type NexoAgent, simulatedModel } from "@nexo/agent";
 import { createTicketServiceClient, type TicketServiceClient } from "@nexo/shared";
 import { after } from "next/server";
 import { z } from "zod";
 import { createDb, type Db } from "@/db";
+import { createDraftStore } from "./drafts";
 import { getSessionSecret } from "./session";
 
 /** What the server code needs from the outside. Route handlers get the real one; tests build their own. */
 export type Deps = {
   db: Db;
-  ticketService: Pick<TicketServiceClient, "findPersonByEmail" | "listAnalysts">;
+  ticketService: Pick<
+    TicketServiceClient,
+    "findPersonByEmail" | "listAnalysts" | "createTicket" | "addFollowUp" | "reopenTicket" | "listCandidates"
+  >;
   agent: NexoAgent;
+  /** The agent memory, for the notes of what the employee did outside the agent. */
+  memory: Pick<AgentMemory, "saveMessages">;
   /** Keeps the server running for work that ends after the response, like saving the agent reply. */
   waitUntil: (task: Promise<unknown>) => void;
   sessionSecret: string;
@@ -39,16 +45,20 @@ export function getDeps(): Deps {
       baseUrl: config.TICKET_SERVICE_URL,
       secret: config.TICKET_SERVICE_SECRET,
     });
+    const db = createDb(config.CONVERSATIONS_DB_URL, config.CONVERSATIONS_DB_AUTH_TOKEN);
+    // Same database as the conversations: the memory goes in the mastra_* tables.
+    const memory = createMemory({ url: config.CONVERSATIONS_DB_URL, authToken: config.CONVERSATIONS_DB_AUTH_TOKEN });
     deps = {
-      db: createDb(config.CONVERSATIONS_DB_URL, config.CONVERSATIONS_DB_AUTH_TOKEN),
+      db,
       ticketService,
       agent: createNexoAgent({
         model:
           config.NEXO_AGENT_MODEL === "simulated" ? simulatedModel({ delayMs: SIMULATED_WORD_DELAY_MS }) : AGENT_MODEL,
-        // Same database as the conversations: the memory goes in the mastra_* tables.
-        memory: createMemory({ url: config.CONVERSATIONS_DB_URL, authToken: config.CONVERSATIONS_DB_AUTH_TOKEN }),
+        memory,
         ticketService,
+        drafts: createDraftStore(db),
       }),
+      memory,
       waitUntil: (task) => after(task),
       sessionSecret: getSessionSecret(),
       secureCookies: process.env.NODE_ENV === "production",

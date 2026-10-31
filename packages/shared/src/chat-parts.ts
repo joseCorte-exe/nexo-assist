@@ -1,4 +1,5 @@
 import { type DecisionRecord, decisionRecord, type NexoUIMessage, type StoredDecision } from "./chat";
+import type { DraftView } from "./drafts";
 
 // Reading the parts of a chat message, the same way on the server, which saves them, and on the screen, which draws
 // them, live and after a reload.
@@ -31,4 +32,30 @@ export function summarizeTurn(parts: Parts): StoredDecision {
   const tools = parts.flatMap((part) => (part.type.startsWith("tool-") ? [part.type.slice("tool-".length)] : []));
   const toolsUsed = [...new Set(tools)].filter((tool) => !INTERNAL_TOOLS.has(tool));
   return { record: decisionOf(parts), toolsUsed };
+}
+
+/** What Mastra hands the model when a tool input fails its schema, so the model can fix the call. */
+export const isRefusedInput = (output: unknown): output is { error: true; message: string } =>
+  typeof output === "object" &&
+  output !== null &&
+  (output as { error?: unknown }).error === true &&
+  typeof (output as { message?: unknown }).message === "string";
+
+/** The draft a finished draftTicket showed the employee, or null for any other part. */
+export function shownDraft(part: Parts[number]): DraftView | null {
+  if (part.type !== "tool-draftTicket" || part.state !== "output-available" || isRefusedInput(part.output)) return null;
+  return part.output.ok ? part.output.draft : null;
+}
+
+/**
+ * A tool input the agent refused streams as a normal result with { error: true }, which matches no output schema: the
+ * saved reply would no longer read back. It is saved as what it is, an error of that tool, with the message the model got.
+ */
+export function withToolErrors(parts: Parts): Parts {
+  return parts.map((part) => {
+    if (!part.type.startsWith("tool-") || !("state" in part) || part.state !== "output-available") return part;
+    if (!isRefusedInput(part.output)) return part;
+    const { output, ...rest } = part;
+    return { ...rest, state: "output-error", errorText: output.message } as Parts[number];
+  });
 }

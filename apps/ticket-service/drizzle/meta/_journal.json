@@ -15,6 +15,20 @@
       "when": 1793298164075,
       "tag": "0001_ticket_lookup_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793328835850,
+      "tag": "0002_idempotency_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1793333796389,
+      "tag": "0003_reopened_at",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,4 @@
-import type { NexoUIMessage } from "@nexo/shared";
+import { DRAFT_COPY, isRefusedInput, type NexoUIMessage } from "@nexo/shared";
 
 type Part = NexoUIMessage["parts"][number];
 type StepState = "running" | "done" | "failed";
@@ -65,7 +65,36 @@ export function stepsOf(part: Part): Step[] {
         { key: `${part.toolCallId}-deadline`, label: "calculou o prazo", state: "done" },
       ];
     }
+    case "tool-draftTicket":
+      return draftSteps(part);
     default:
       return [];
   }
+}
+
+type DraftPart = Extract<Part, { type: "tool-draftTicket" }>;
+
+/**
+ * The draft as the design names it: a new ticket is classified, its deadline looked up and the draft made. A
+ * possible duplicate is something the agent found, not a failure.
+ */
+function draftSteps(part: DraftPart): Step[] {
+  const key = part.toolCallId;
+  if (part.state === "output-error" || (part.state === "output-available" && isRefusedInput(part.output))) return [];
+  if (part.state !== "output-available") return [{ key, label: "montando o rascunho", state: "running" }];
+  const { output } = part;
+  if (!output.ok) {
+    return output.reason === "possible_duplicate"
+      ? [{ key, label: "encontrou um chamado parecido", state: "done" }]
+      : [{ key, label: "não montou o rascunho", state: "failed" }];
+  }
+  const { draft } = output;
+  const drafted: Step = { key, label: `montou ${DRAFT_COPY[draft.operation].named(draft)}`, state: "done" };
+  if (draft.operation === "update") return [drafted];
+  if (draft.operation === "reopen") return [{ key: `${key}-window`, label: "conferiu o prazo de 7 dias", state: "done" }, drafted];
+  return [
+    { key: `${key}-priority`, label: "classificou a prioridade", state: "done" },
+    { key: `${key}-sla`, label: "consultou o SLA", state: "done" },
+    { key, label: "montou o rascunho", state: "done" },
+  ];
 }

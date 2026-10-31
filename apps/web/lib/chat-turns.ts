@@ -1,4 +1,14 @@
-import { type DecisionRecord, decisionOf, findTicketIds, type NexoUIMessage, type TicketCard, type TicketSummary, textOf } from "@nexo/shared";
+import {
+  type DecisionRecord,
+  type DraftView,
+  decisionOf,
+  findTicketIds,
+  type NexoUIMessage,
+  shownDraft,
+  type TicketCard,
+  type TicketSummary,
+  textOf,
+} from "@nexo/shared";
 import type { ChatStatus } from "ai";
 import { type Step, stepsOf } from "./agent-actions";
 
@@ -23,12 +33,15 @@ export type Replies = { question: string | null; options: string[]; chosen: stri
 
 /**
  * What a reply shows, in the order it arrived: text in bubbles, the card of each ticket looked up and the list of
- * tickets to choose from. chosen is what the next message of the employee picked.
+ * tickets to choose from. The draft closes the reply, under the text that introduces it, whatever came first. chosen
+ * is what the next message of the employee picked.
  */
 export type Block =
   | { kind: "text"; key: string; text: string; replies?: Replies }
   | { kind: "ticket"; key: string; ticket: TicketCard }
-  | { kind: "choice"; key: string; tickets: TicketSummary[]; chosen: string | null; mode: OfferMode };
+  | { kind: "choice"; key: string; tickets: TicketSummary[]; chosen: string | null; mode: OfferMode }
+  /** The draft as the agent showed it; the card draws its current state, which the chat keeps by id. */
+  | { kind: "draft"; key: string; draft: DraftView };
 
 /** unsent: the message never reached the server (nothing of the reply came back). */
 export type EmployeeTurn = { kind: "employee"; id: string; text: string; unsent: boolean };
@@ -87,6 +100,8 @@ function agentTurn(message: NexoUIMessage, answer: string | null, busy: boolean)
   const blocks: Block[] = [];
   const text = textOf(message.parts);
   const mode: OfferMode = answer !== null ? "answered" : busy ? "busy" : "open";
+  // Only the last draft: one refused as a possible duplicate is followed by the one that replaced it.
+  let draft: Block | null = null;
 
   message.parts.forEach((part, index) => {
     steps.push(...stepsOf(part));
@@ -97,10 +112,15 @@ function agentTurn(message: NexoUIMessage, answer: string | null, busy: boolean)
       else if (part.text) blocks.push({ kind: "text", key: `text-${index}`, text: part.text });
     } else if (part.type === "tool-getTicket" && part.state === "output-available" && part.output.ok) {
       blocks.push({ kind: "ticket", key: part.toolCallId, ticket: part.output.ticket });
+    } else if (part.type === "tool-draftTicket") {
+      const shown = shownDraft(part);
+      if (shown) draft = { kind: "draft", key: part.toolCallId, draft: shown };
     } else {
       addOffer(blocks, part, text, answer, mode);
     }
   });
+
+  if (draft) blocks.push(draft);
 
   const decision = decisionOf(message.parts);
   const phase: Phase = text ? "writing" : decision ? "working" : "thinking";
@@ -154,4 +174,26 @@ export function messageCount(messages: readonly NexoUIMessage[], status: ChatSta
     for (const part of message.parts) if (part.type === "data-conversation") count = part.data.messageCount;
   }
   return status === "submitted" && messages.at(-1)?.role === "user" ? count + 1 : count;
+}
+
+/** The id of the last draft the agent showed in the conversation: the only one that can still be pending. */
+export function lastDraftId(messages: readonly NexoUIMessage[]): string | null {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const parts = messages[index]?.parts ?? [];
+    for (const part of [...parts].reverse()) {
+      const shown = shownDraft(part);
+      if (shown) return shown.id;
+    }
+  }
+  return null;
+}
+
+/**
+ * The draft as it is now: the newest state known (loaded with the conversation, or answered by an action of its card),
+ * else as the agent showed it. A pending one that is not the last of the conversation was superseded on the server
+ * when the newer one was saved.
+ */
+export function currentDraft(shown: DraftView, known: Readonly<Record<string, DraftView>>, lastId: string | null): DraftView {
+  const draft = known[shown.id] ?? shown;
+  return draft.status === "pending" && lastId !== null && draft.id !== lastId ? { ...draft, status: "superseded" } : draft;
 }

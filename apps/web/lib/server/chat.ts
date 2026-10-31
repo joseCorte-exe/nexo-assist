@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { toAISdkStream } from "@mastra/ai-sdk";
 import { streamReply } from "@nexo/agent";
-import { chatInput, type ConversationPart, type NexoUIMessage, textOf, summarizeTurn } from "@nexo/shared";
+import { chatInput, type ConversationPart, type NexoUIMessage, shownDraft, summarizeTurn, textOf, withToolErrors } from "@nexo/shared";
 import { consumeStream, createUIMessageStream, createUIMessageStreamResponse, type InferUIMessageChunk } from "ai";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import type { Db } from "@/db";
-import { conversations, decisions, messages } from "@/db/schema";
+import { conversations, decisions, drafts, messages } from "@/db/schema";
 import { activeConversationOf } from "./conversation";
 import type { Deps } from "./deps";
 import { jsonError, readBody, readEmployeeSession } from "./http";
@@ -65,9 +65,10 @@ async function startTurn(db: Db, { employeeId, id, text, now }: { employeeId: st
           select 1 from ${messages} m
           where m.id = ${id} and m.conversation_id = ${conversations}.id and m.author = 'employee' and m.text = ${text}
         )`,
-        // Something came after it: it was already answered.
+        // A reply came after it: it was already answered. A note of what she did in a card is not a reply.
         answered: sql<number>`exists (
-          select 1 from ${messages} m join ${messages} r on r.conversation_id = m.conversation_id and r.created_at > m.created_at
+          select 1 from ${messages} m join ${messages} r
+            on r.conversation_id = m.conversation_id and r.created_at > m.created_at and r.author in ('agent', 'analyst')
           where m.id = ${id}
         )`,
       })
@@ -91,8 +92,9 @@ async function saveReply(
   db: Db,
   { conversationId, startedAt, now, reply }: { conversationId: string; startedAt: Date; now: Date; reply: NexoUIMessage },
 ) {
-  // The counter belongs to the moment the reply streamed; the conversation has the current one.
-  const parts = reply.parts.filter((part) => part.type !== "data-conversation");
+  // The counter belongs to the moment the reply streamed; the conversation has the current one. A tool input the
+  // agent refused is saved as the error it was, so the reply still matches the schemas when it is read back.
+  const parts = withToolErrors(reply.parts.filter((part) => part.type !== "data-conversation"));
   const { record, toolsUsed } = summarizeTurn(parts);
   const at = new Date(Math.max(now.getTime(), startedAt.getTime() + 1));
   await db.batch([
@@ -103,6 +105,16 @@ async function saveReply(
       .set({ firstResponseAt: sql`coalesce(${conversations.firstResponseAt}, ${at.getTime()})` })
       .where(eq(conversations.id, conversationId)),
   ]);
+}
+
+/**
+ * A reply that failed is not saved, so no card would ever show the drafts it made: they are discarded, never left
+ * pending without a way to confirm or cancel them.
+ */
+async function discardDrafts(db: Db, reply: NexoUIMessage) {
+  const ids = reply.parts.flatMap((part) => shownDraft(part)?.id ?? []);
+  if (ids.length === 0) return;
+  await db.update(drafts).set({ status: "cancelled" }).where(and(inArray(drafts.id, ids), eq(drafts.status, "pending")));
 }
 
 /**
@@ -136,6 +148,7 @@ export async function chat(request: NextRequest, deps: Deps) {
       // step or token limits did finish, and is saved as it is.
       if (finishReason === undefined || finishReason === "error") {
         console.error("agent reply not saved", { conversationId: conversation.id, finishReason });
+        await discardDrafts(deps.db, responseMessage);
         return;
       }
       await saveReply(deps.db, { conversationId: conversation.id, startedAt, now: deps.now(), reply: responseMessage });

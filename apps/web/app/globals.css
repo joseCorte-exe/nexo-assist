@@ -205,6 +205,15 @@
   }
 }
 
+/* A state of the draft card takes the place of the one before: opacity only, the card keeps its height. */
+.fade-enter {
+  transition: opacity 150ms var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+  }
+}
+
 /* The decision record opens to its own height; closing is quicker than opening. */
 .decision-panel {
   display: grid;

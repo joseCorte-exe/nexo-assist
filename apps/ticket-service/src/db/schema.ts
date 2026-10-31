@@ -38,6 +38,8 @@ export const tickets = sqliteTable("tickets", {
   lastItResponseAt: timestamp("last_it_response_at"),
   dueAt: timestamp("due_at").notNull(),
   resolvedAt: timestamp("resolved_at"),
+  /** The last reopening: a new opening for the deadline (RN-02), until IT answers after it. */
+  reopenedAt: timestamp("reopened_at"),
 }, (table) => [
   // The tickets of an employee, most recent first: the list and the lookup of the chat both start here.
   index("tickets_opened_by_created_at_idx").on(table.openedBy, table.createdAt),
@@ -61,9 +63,14 @@ export const kbArticles = sqliteTable("kb_articles", {
   keywords: text("keywords", { mode: "json" }).$type<string[]>().notNull(),
 });
 
-/** Saved in the same transaction as the ticket, so a retry returns what was already written. */
+/** Saved in the same transaction as the write, so a retry returns what was already written. */
 export const idempotencyKeys = sqliteTable("idempotency_keys", {
   key: text("key").primaryKey(),
+  /**
+   * The request the key was used for and whose it was ("PATCH /tickets/INC-20311 for emp-ana"): reused for another one,
+   * it is refused. The default only marks the keys saved before the column, which no new request replays.
+   */
+  scope: text("scope").notNull().default("POST /tickets"),
   response: text("response", { mode: "json" }).notNull(),
   createdAt: timestamp("created_at").notNull(),
 });
