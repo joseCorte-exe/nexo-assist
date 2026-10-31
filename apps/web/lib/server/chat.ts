@@ -3,7 +3,7 @@ import { toAISdkStream } from "@mastra/ai-sdk";
 import { saveNote, streamReply } from "@nexo/agent";
 import { chatInput, type ConversationPart, type NexoUIMessage, shownDraft, summarizeTurn, textOf, withToolErrors } from "@nexo/shared";
 import { consumeStream, createUIMessageStream, createUIMessageStreamResponse, type InferUIMessageChunk } from "ai";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import type { Db } from "@/db";
 import { conversations, decisions, drafts, messages } from "@/db/schema";
@@ -107,13 +107,18 @@ async function saveReply(
       .update(conversations)
       .set({ firstResponseAt: sql`coalesce(${conversations.firstResponseAt}, ${at.getTime()})` })
       .where(eq(conversations.id, conversationId)),
-    // How sure the agent was when it transferred: the console says it of an agent that asked for help.
+    // How sure the agent was when it transferred: the console says it of an agent that asked for help. The note of the
+    // transfer, written while the agent answered, moves after the reply that announces it, where nexo.pen draws it.
     ...(transferred
       ? [
           db
             .update(conversations)
             .set({ transferConfidence: record?.confidence ?? null })
             .where(and(eq(conversations.id, conversationId), eq(conversations.state, "waiting_for_analyst"))),
+          db
+            .update(messages)
+            .set({ createdAt: new Date(at.getTime() + 1) })
+            .where(and(eq(messages.conversationId, conversationId), eq(messages.event, "transferred"), gte(messages.createdAt, startedAt))),
         ]
       : []),
   ]);

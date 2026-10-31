@@ -92,6 +92,17 @@ describe("the transfer in the chat", () => {
     });
   });
 
+  it("puts the note after the reply that announced it, as nexo.pen draws them", async () => {
+    const deps = await testDeps();
+    await say(deps, "Quero falar com um analista.");
+    const rows = await deps.db
+      .select({ author: messages.author })
+      .from(messages)
+      .where(eq(messages.conversationId, (await anaConversation(deps)).id))
+      .orderBy(messages.createdAt);
+    expect(rows.map((row) => row.author)).toEqual(["employee", "agent", "system"]);
+  });
+
   it("shows the employee the note and who she waits for when the chat loads", async () => {
     const deps = await testDeps();
     await say(deps, "Quero falar com um analista.");
@@ -102,10 +113,9 @@ describe("the transfer in the chat", () => {
       waitUntil: "2026-10-29T13:00:00.000Z",
       analyst: null,
     });
-    // The note is written while the agent answers, so it comes before the reply.
-    expect(loaded.messages.find((message) => message.role === "system")).toMatchObject({
+    expect(loaded.messages.at(-1)).toMatchObject({
       role: "system",
-      parts: [{ type: "data-note", data: { event: "transferred", level: "N1", analystName: null, at: NOW.toISOString() } }],
+      parts: [{ type: "data-note", data: { event: "transferred", level: "N1", analystName: null, at: expect.any(String) } }],
     });
   });
 });
