@@ -1,7 +1,11 @@
 import { createTool } from "@mastra/core/tools";
 import {
   type Affected,
+  type AnalystLevel,
   CATEGORY_LABEL,
+  LEVEL_LABEL,
+  routeTransfer,
+  type TransferReason,
   type Category,
   changeRefusal,
   type DraftOperation,
@@ -30,8 +34,36 @@ import {
 } from "@nexo/shared";
 import { z } from "zod";
 
-/** The part of the ticket-service the tools use: the help center, the employee's tickets and the duplicate lookup. */
-export type TicketDesk = Pick<TicketServiceClient, "searchArticles" | "listEmployeeTickets" | "getTicket" | "listCandidates">;
+/**
+ * The part of the ticket-service the tools use: the help center, the employee's tickets, the duplicate lookup and the
+ * mark a transfer leaves on a ticket.
+ */
+export type TicketDesk = Pick<
+  TicketServiceClient,
+  "searchArticles" | "listEmployeeTickets" | "getTicket" | "listCandidates" | "transferTicket"
+>;
+
+/** A transfer as the tool hands it to be saved: the conversation goes to an analyst of the level, with the summary. */
+export type TransferRecord = {
+  conversationId: string;
+  level: AnalystLevel;
+  reason: TransferReason;
+  summary: string;
+  ticketId: string | null;
+  waitUntil: Date;
+  at: Date;
+};
+
+/**
+ * Where transfers are kept: the conversations database, which the web owns. It only moves a conversation that is still
+ * with the agent, and answers the id of the note it left, the key of the mark on the ticket.
+ */
+export type TransferStore = {
+  transfer: (transfer: TransferRecord) => Promise<{ transferred: true; noteId: string } | { transferred: false }>;
+};
+
+/** Set in the request context by the agent when the decision came below 0.6: the transfer is the doubt of the agent. */
+export const FORCED_TRANSFER = "forcedTransfer";
 
 /** A draft as the tool hands it to be saved: what the card shows, plus what the console and the analyst need. */
 export type DraftRecord = {
@@ -84,7 +116,17 @@ type TurnContext = z.infer<typeof turnContext>;
 type DraftFailure = Extract<DraftTicketOutput, { ok: false }>;
 const failure = (reason: DraftFailure["reason"], message: string): DraftFailure => ({ ok: false, reason, message });
 
-export function createTools({ ticketService, drafts, now }: { ticketService: TicketDesk; drafts: DraftStore; now: () => Date }) {
+export function createTools({
+  ticketService,
+  drafts,
+  transfers,
+  now,
+}: {
+  ticketService: TicketDesk;
+  drafts: DraftStore;
+  transfers: TransferStore;
+  now: () => Date;
+}) {
   const summarize = (ticket: Ticket, at: Date): TicketSummary => ({
     id: ticket.id,
     title: ticket.title,
@@ -312,6 +354,70 @@ export function createTools({ ticketService, drafts, now }: { ticketService: Tic
     },
   });
 
+  /**
+   * The level and the wait come from routeTransfer, with the ticket as the service has it: the model never says a case
+   * is critical or overdue. A ticket the service cannot read now is left out rather than holding the employee back.
+   */
+  const transferToAnalyst = createTool({
+    id: "transferToAnalyst",
+    description:
+      "Passa a conversa para um analista do service desk, com um resumo do caso. O código escolhe o Suporte N1 ou N2 e calcula a espera; você para de responder até um analista devolver a conversa.",
+    ...nexoToolSchemas.transferToAnalyst,
+    requestContextSchema: turnContext,
+    execute: async (input, context) => {
+      const employeeId = employeeOf(context);
+      const conversationId = context.requestContext.get("conversationId");
+      const forced = (context.requestContext as { get: (key: string) => unknown }).get(FORCED_TRANSFER) === true;
+      let ticket: Ticket | null = null;
+      if (input.ticketId) {
+        const result = await ticketService.getTicket(input.ticketId, employeeId);
+        if (result.ok && !result.data) {
+          return {
+            ok: false as const,
+            reason: "ticket_not_found" as const,
+            message: `Não encontrei o ${input.ticketId} entre os chamados dele. Transfira sem o número.`,
+          };
+        }
+        if (result.ok) ticket = result.data;
+      }
+      const at = now();
+      const { impact, urgency, affected } = input;
+      const route = routeTransfer({
+        requested: forced ? "agent_unsure" : input.reason,
+        ticket: ticket && { priority: ticket.priority, status: ticket.status, dueAt: new Date(ticket.dueAt) },
+        classification: impact && urgency && affected ? { impact, urgency, affected } : null,
+        at,
+      });
+      const saved = await transfers.transfer({
+        conversationId,
+        level: route.level,
+        reason: route.reason,
+        summary: input.summary,
+        ticketId: ticket?.id ?? null,
+        waitUntil: route.waitUntil,
+        at,
+      });
+      if (!saved.transferred) {
+        return { ok: false as const, reason: "not_with_agent" as const, message: "Um analista já está com esta conversa." };
+      }
+      if (ticket) {
+        const body = { employeeId, level: route.level, summary: input.summary };
+        const marked = await ticketService.transferTicket(ticket.id, body, saved.noteId);
+        // The conversation is with the analyst either way; the history of the ticket only misses the line.
+        if (!marked.ok) console.error("transfer not noted on the ticket", { ticketId: ticket.id, error: marked.error.code });
+      }
+      return {
+        ok: true as const,
+        level: route.level,
+        levelLabel: LEVEL_LABEL[route.level],
+        transferReason: route.reason,
+        ticketId: ticket?.id ?? null,
+        waitUntil: route.waitUntil.toISOString(),
+        waitText: deadlineWords(route.waitUntil, at),
+      };
+    },
+  });
+
   return {
     recordDecision,
     searchArticles,
@@ -321,6 +427,7 @@ export function createTools({ ticketService, drafts, now }: { ticketService: Tic
     offerTicketChoice,
     offerReplies,
     draftTicket,
+    transferToAnalyst,
   };
 }
 

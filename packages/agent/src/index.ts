@@ -2,6 +2,7 @@
 export {
   type AgentMemory,
   type AgentModel,
+  CONSOLE_NOTE,
   createMemory,
   createNexoAgent,
   type NexoAgent,
@@ -10,7 +11,7 @@ export {
   streamReply,
   type Turn,
 } from "./agent";
-export type { DraftRecord, DraftStore, TicketDesk } from "./tools";
+export type { DraftRecord, DraftStore, TicketDesk, TransferRecord, TransferStore } from "./tools";
 export { simulatedModel } from "./models/simulated";
 
 /** The model of the agent: Claude Haiku 5.5, or the simulated one when NEXO_AGENT_MODEL=simulated. */

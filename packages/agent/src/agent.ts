@@ -5,7 +5,7 @@ import { LibSQLStore } from "@mastra/libsql";
 import { Memory } from "@mastra/memory";
 import { nexoToolSchemas } from "@nexo/shared";
 import { instructions, workingMemoryTemplate } from "./instructions";
-import { createTools, type DraftStore, OFFER_TOOLS, type TicketDesk } from "./tools";
+import { createTools, type DraftStore, FORCED_TRANSFER, OFFER_TOOLS, type TicketDesk, type TransferStore } from "./tools";
 
 // Explicit limits, so one reply never runs away with time or cost (ARQUITETURA.md, section 9).
 const MAX_STEPS = 5;
@@ -29,15 +29,25 @@ export type AgentMemory = ReturnType<typeof createMemory>;
 
 /** Prefix of the notes of what happened on the screen, which the instructions tell the model how to read. */
 export const SCREEN_NOTE = "(ação na tela)";
+/** Prefix of what happened with an analyst: assumed, wrote, released or closed (feature 5). */
+export const CONSOLE_NOTE = "(atendimento)";
 
 /**
- * Copies to the conversation's memory something the employee did outside the agent (confirmed, edited or cancelled a
- * draft), so the model knows it next turn. It goes in as her message: Mastra leaves system messages out of what the
- * model reads. The same id saved again replaces the note instead of repeating it.
+ * Copies to the conversation's memory something that happened outside the agent: what the employee did in a card, what
+ * happened in the console, or a message of hers the agent did not answer because an analyst had the conversation. It
+ * goes in as her message, since Mastra leaves system messages out of what the model reads; the prefix tells the notes
+ * from her own words, which go without one. The same id saved again replaces the note instead of repeating it.
  */
 export async function saveNote(
   memory: Pick<AgentMemory, "saveMessages">,
-  { id, conversationId, employeeId, text, at }: { id: string; conversationId: string; employeeId: string; text: string; at: Date },
+  {
+    id,
+    conversationId,
+    employeeId,
+    text,
+    at,
+    prefix = SCREEN_NOTE,
+  }: { id: string; conversationId: string; employeeId: string; text: string; at: Date; prefix?: string | null },
 ) {
   await memory.saveMessages({
     messages: [
@@ -47,7 +57,7 @@ export async function saveNote(
         createdAt: at,
         threadId: conversationId,
         resourceId: employeeId,
-        content: { format: 2, parts: [{ type: "text", text: `${SCREEN_NOTE} ${text}` }] },
+        content: { format: 2, parts: [{ type: "text", text: prefix ? `${prefix} ${text}` : text }] },
       },
     ],
   });
@@ -61,6 +71,7 @@ export function createNexoAgent({
   memory,
   ticketService,
   drafts,
+  transfers,
   now = () => new Date(),
 }: {
   model: AgentModel;
@@ -68,6 +79,8 @@ export function createNexoAgent({
   ticketService: TicketDesk;
   /** Where draftTicket keeps the drafts: the conversations database. */
   drafts: DraftStore;
+  /** Where transferToAnalyst moves the conversation: the conversations database. */
+  transfers: TransferStore;
   /** The clock of the overdue (RN-02) and of "há N dias". */
   now?: () => Date;
 }) {
@@ -83,7 +96,7 @@ export function createNexoAgent({
     },
     model,
     memory,
-    tools: createTools({ ticketService, drafts, now }),
+    tools: createTools({ ticketService, drafts, transfers, now }),
   });
 }
 
@@ -97,7 +110,7 @@ export type Turn = {
   text: string;
 };
 
-type ToolResult = { toolName: string; output?: unknown };
+type ToolResult = { toolName: string; input?: unknown; output?: unknown };
 type Step = { text: string; toolResults: ReadonlyArray<ToolResult> };
 
 /** The Mastra tool the model calls to keep the summary of the case (the working memory). */
@@ -105,6 +118,12 @@ const WORKING_MEMORY_TOOL = "updateWorkingMemory";
 
 /** Every tool but the offers, for the steps after a draft was shown. */
 const AFTER_DRAFT_TOOLS = [...Object.keys(nexoToolSchemas).filter((tool) => !OFFER_TOOLS.has(tool)), WORKING_MEMORY_TOOL];
+
+/** Below this, the agent does not know what to do and an analyst takes the case (ARQUITETURA.md, section 2). */
+const MIN_CONFIDENCE = 0.6;
+
+/** Tools that close a reply once the model wrote its sentence about them: the screen draws the rest. */
+const CLOSING_TOOLS = new Set(["draftTicket", "transferToAnalyst"]);
 
 /** A tool that ran and answered ok. The model gets the output wrapped as { type: "json", value }. */
 function answeredOk({ output }: ToolResult) {
@@ -123,31 +142,49 @@ function replyDone(step: Step | undefined) {
   return (
     step.text.trim() !== "" &&
     step.toolResults.every(
-      (result) => result.toolName === WORKING_MEMORY_TOOL || (result.toolName === "draftTicket" && answeredOk(result)),
+      (result) => result.toolName === WORKING_MEMORY_TOOL || (CLOSING_TOOLS.has(result.toolName) && answeredOk(result)),
     )
   );
 }
 
+/** A tool of the reply that ran and answered ok. */
+const ran = (steps: ReadonlyArray<Step>, toolName: string) =>
+  steps.some((step) => step.toolResults.some((result) => result.toolName === toolName && answeredOk(result)));
+
+/** The confidence recordDecision gave in the first step, if the input was a valid one. */
+function recordedConfidence(step: Step | undefined): number | null {
+  const input = step?.toolResults.find((result) => result.toolName === "recordDecision")?.input as { confidence?: unknown } | undefined;
+  return typeof input?.confidence === "number" ? input.confidence : null;
+}
+
 /** One reply of the agent: the Mastra stream, which the route turns into the chat stream and saves at the end. */
 export function streamReply(agent: NexoAgent, { conversationId, employeeId, text }: Turn) {
+  // Whose tickets the tools read: the employee of the session, never a value the model writes. A draft and a transfer
+  // belong to the conversation of the turn.
+  const requestContext = new RequestContext<unknown>([
+    ["employeeId", employeeId],
+    ["conversationId", conversationId],
+  ]);
   return agent.stream(text, {
     memory: { thread: conversationId, resource: employeeId },
-    // Whose tickets the tools read: the employee of the session, never a value the model writes. A draft belongs to
-    // the conversation of the turn.
-    requestContext: new RequestContext([
-      ["employeeId", employeeId],
-      ["conversationId", conversationId],
-    ]),
+    requestContext,
     maxSteps: MAX_STEPS,
     // An offer that was shown hands the turn to the employee, who answers with a click: calling the model again would
     // only cost. One that could not be shown (refused input, no ticket of hers, service down) lets the model explain.
     stopWhen: ({ steps }: { steps: ReadonlyArray<Step> }) => replyDone(steps.at(-1)),
     // recordDecision is mandatory in the first step; afterwards the model chooses. Once a draft is shown, the offers go:
     // its card has Confirmar, Editar and Cancelar, and quick replies under it would only send those words as a message.
+    // Below 0.6 the step after the decision transfers, as the doubt of the agent: the code says so, not the model. Once
+    // transferred, the model only says to whom and until when.
     prepareStep: ({ stepNumber, steps }) => {
       if (stepNumber === 0) return { toolChoice: { type: "tool", toolName: "recordDecision" } };
-      const drafted = steps.some((step) => step.toolResults.some((result) => result.toolName === "draftTicket" && answeredOk(result)));
-      return drafted ? { activeTools: AFTER_DRAFT_TOOLS } : undefined;
+      if (ran(steps, "transferToAnalyst")) return { activeTools: [WORKING_MEMORY_TOOL] };
+      const confidence = stepNumber === 1 ? recordedConfidence(steps[0]) : null;
+      if (confidence !== null && confidence < MIN_CONFIDENCE) {
+        requestContext.set(FORCED_TRANSFER, true);
+        return { toolChoice: { type: "tool", toolName: "transferToAnalyst" } };
+      }
+      return ran(steps, "draftTicket") ? { activeTools: AFTER_DRAFT_TOOLS } : undefined;
     },
     modelSettings: { maxOutputTokens: MAX_OUTPUT_TOKENS, timeout: { totalMs: TOTAL_TIMEOUT_MS } },
   });
