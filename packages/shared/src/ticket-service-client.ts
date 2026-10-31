@@ -1,9 +1,11 @@
 import { z } from "zod";
 import { kbArticleSchema } from "./help-center";
-import { analystSchema, employeeSchema, type Person } from "./people";
+import { analystSchema, type Employee, employeeSchema, type Person } from "./people";
 import type { Category } from "./domain";
 import {
   type CreateTicketInput,
+  type TicketAssignInput,
+  type TicketTransferInput,
   type EmployeeTicketsStatus,
   type TicketFollowUpInput,
   type TicketDetail,
@@ -161,6 +163,25 @@ export function createTicketServiceClient(options: Options) {
     /** Adds a follow-up of the employee to an open ticket of hers. The key is the draft, so a retry adds it once. */
     addFollowUp: (ticketId: string, input: TicketFollowUpInput, idempotencyKey: string) =>
       request(ticketSchema, "PATCH", `/tickets/${encodeURIComponent(ticketId)}`, { body: input, idempotencyKey }),
+    /** The people of a page of the console. Nobody to look up is answered without a call. */
+    listEmployeesByIds: async (ids: readonly string[]): Promise<TicketServiceResult<Employee[]>> =>
+      ids.length === 0
+        ? { ok: true, data: [] }
+        : request(z.array(employeeSchema), "GET", `/employees?${new URLSearchParams({ ids: ids.join(",") })}`),
+    /** Employees whose name has the text, for the search of the console. */
+    searchEmployees: (text: string) => request(z.array(employeeSchema), "GET", `/employees?${new URLSearchParams({ q: text })}`),
+    /** The "Disponível" of the console. Setting it twice answers the same, so it is retried like a read. */
+    setAvailability: (analystId: string, available: boolean) =>
+      request(analystSchema, "PATCH", `/analysts/${encodeURIComponent(analystId)}`, {
+        body: { available },
+        idempotencyKey: `availability-${analystId}-${available}`,
+      }),
+    /** Notes the transfer on the ticket. The key is the note of the transfer, so a retry notes it once. */
+    transferTicket: (ticketId: string, input: TicketTransferInput, idempotencyKey: string) =>
+      request(ticketSchema, "POST", `/tickets/${encodeURIComponent(ticketId)}/transfer`, { body: input, idempotencyKey }),
+    /** Puts the ticket in service with the analyst who assumed the conversation. The key is the note of it. */
+    assignTicket: (ticketId: string, input: TicketAssignInput, idempotencyKey: string) =>
+      request(ticketSchema, "POST", `/tickets/${encodeURIComponent(ticketId)}/assign`, { body: input, idempotencyKey }),
     /** Reopens a ticket of hers resolved up to 7 days ago. The key is the draft, so a retry reopens it once. */
     reopenTicket: (ticketId: string, input: TicketFollowUpInput, idempotencyKey: string) =>
       request(ticketSchema, "POST", `/tickets/${encodeURIComponent(ticketId)}/reopen`, { body: input, idempotencyKey }),

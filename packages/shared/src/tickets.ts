@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { affected, category, priority, ticketStatus, ticketType, updateAuthor } from "./domain";
+import { affected, analystLevel, category, priority, ticketStatus, ticketType, updateAuthor } from "./domain";
 
 const TICKET_ID = /^(INC|REQ)-\d{5}$/;
 
@@ -83,3 +83,18 @@ export type TicketFollowUpInput = z.infer<typeof ticketFollowUpInput>;
 
 /** Query of GET /employees/:id/tickets/candidates: the tickets that could be the same problem, open or resolved up to 7 days ago. */
 export const candidatesQuery = z.object({ category });
+
+/** Body of POST /tickets/:id/transfer: the agent passed the conversation about the ticket to an analyst of a level. */
+export const ticketTransferInput = z.object({
+  employeeId: z.string().min(1),
+  level: analystLevel,
+  summary: z.string().trim().min(1).max(600),
+});
+export type TicketTransferInput = z.infer<typeof ticketTransferInput>;
+
+/** Body of POST /tickets/:id/assign: an analyst assumed the conversation about the ticket. */
+export const ticketAssignInput = z.object({ employeeId: z.string().min(1), analystId: z.string().min(1) });
+export type TicketAssignInput = z.infer<typeof ticketAssignInput>;
+
+/** How many people the console asks for at once: the employees of a page of the list. */
+export const MAX_EMPLOYEE_IDS = 200;
