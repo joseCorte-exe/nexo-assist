@@ -1,4 +1,5 @@
 import { type DecisionRecord, decisionRecord, type NexoUIMessage, type StoredDecision } from "./chat";
+import type { DraftView } from "./drafts";
 
 // Reading the parts of a chat message, the same way on the server, which saves them, and on the screen, which draws
 // them, live and after a reload.
@@ -34,11 +35,17 @@ export function summarizeTurn(parts: Parts): StoredDecision {
 }
 
 /** What Mastra hands the model when a tool input fails its schema, so the model can fix the call. */
-const isRefusedInput = (output: unknown): output is { error: true; message: string } =>
+export const isRefusedInput = (output: unknown): output is { error: true; message: string } =>
   typeof output === "object" &&
   output !== null &&
   (output as { error?: unknown }).error === true &&
   typeof (output as { message?: unknown }).message === "string";
+
+/** The draft a finished draftTicket showed the employee, or null for any other part. */
+export function shownDraft(part: Parts[number]): DraftView | null {
+  if (part.type !== "tool-draftTicket" || part.state !== "output-available" || isRefusedInput(part.output)) return null;
+  return part.output.ok ? part.output.draft : null;
+}
 
 /**
  * A tool input the agent refused streams as a normal result with { error: true }, which matches no output schema: the

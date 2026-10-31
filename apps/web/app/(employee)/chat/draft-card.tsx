@@ -5,9 +5,12 @@ import {
   type Category,
   CATEGORY_LABEL,
   DRAFT_COPY,
+  DRAFT_DESCRIPTION_MAX,
+  DRAFT_TITLE_MAX,
   type DraftView,
   draftLabel,
   draftView,
+  editDraftInput,
   PRIORITY_LABEL,
   REJECTION_LABEL,
 } from "@nexo/shared";
@@ -33,8 +36,6 @@ const AFFECTED_LABEL: Record<Affected, string> = {
 const CATEGORIES = Object.entries(CATEGORY_LABEL) as Array<[Category, string]>;
 
 const dot = "size-1.5 shrink-0 rounded-full";
-const TITLE_MAX = 90;
-const DESCRIPTION_MAX = 1000;
 
 type Props = {
   draft: DraftView;
@@ -399,12 +400,11 @@ function DraftEditor({ draft, kind, reference, shortcut, busy, onSaved, onClose,
 
   async function save() {
     if (saving || busy) return;
-    const found = {
-      title: isNew && !title.trim() ? "Escreva um título." : undefined,
-      description: !description.trim() ? "Descreva o problema." : undefined,
-    };
-    if (found.title || found.description) {
-      setErrors(found);
+    // The same check and words as the server's.
+    const checked = editDraftInput.safeParse({ ...(isNew ? { title } : {}), description });
+    if (!checked.success) {
+      const found = Object.fromEntries(checked.error.issues.map((issue) => [issue.path[0], issue.message]));
+      setErrors({ title: found.title, description: found.description });
       (found.title ? titleRef.current : descriptionRef.current)?.focus();
       return;
     }
@@ -442,12 +442,12 @@ function DraftEditor({ draft, kind, reference, shortcut, busy, onSaved, onClose,
           <DraftState draft={draft} editing />
         </Eyebrow>
         {isNew ? (
-          <EditField id={ids.title} label="Título" error={errors.title} count={title.length} max={TITLE_MAX} warnFrom={80}>
+          <EditField id={ids.title} label="Título" error={errors.title} count={title.length} max={DRAFT_TITLE_MAX} warnFrom={80}>
             <input
               id={ids.title}
               ref={titleRef}
               value={title}
-              maxLength={TITLE_MAX}
+              maxLength={DRAFT_TITLE_MAX}
               enterKeyHint="next"
               readOnly={saving}
               aria-invalid={errors.title ? true : undefined}
@@ -473,14 +473,14 @@ function DraftEditor({ draft, kind, reference, shortcut, busy, onSaved, onClose,
           label={DRAFT_COPY[draft.operation].description}
           error={errors.description}
           count={description.length}
-          max={DESCRIPTION_MAX}
+          max={DRAFT_DESCRIPTION_MAX}
           warnFrom={900}
         >
           <textarea
             id={ids.description}
             ref={descriptionRef}
             value={description}
-            maxLength={DESCRIPTION_MAX}
+            maxLength={DRAFT_DESCRIPTION_MAX}
             readOnly={saving}
             aria-invalid={errors.description ? true : undefined}
             aria-describedby={errors.description ? `${ids.description}-error` : undefined}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { NexoUIMessage } from "./chat";
-import { decisionOf, summarizeTurn, textOf, withToolErrors } from "./chat-parts";
+import { decisionOf, isRefusedInput, shownDraft, summarizeTurn, textOf, withToolErrors } from "./chat-parts";
 
 const decision = {
   understanding: "Quer saber o horário do service desk",
@@ -96,5 +96,45 @@ describe("withToolErrors", () => {
   it("keeps every other part as it was", () => {
     const parts = [tool("searchArticles", { query: "vpn" }, { ok: false, message: "fora do ar" }), text("Oi")];
     expect(withToolErrors(parts)).toEqual(parts);
+  });
+});
+
+describe("shownDraft", () => {
+  const draft = {
+    id: "draft-1",
+    number: 381,
+    operation: "create",
+    status: "pending",
+    ticketId: null,
+    type: "INC",
+    title: "VPN não conecta no notebook",
+    description: "Erro 809 desde ontem.",
+    category: "network_vpn",
+    subcategory: "VPN",
+    priority: "high",
+    affected: "only_me",
+    rejectedReason: null,
+    deadline: "4 horas úteis",
+    dueAt: "2026-10-26T17:00:00.000Z",
+    createdAt: "2026-10-26T13:00:00.000Z",
+  };
+
+  it("is the draft a finished draftTicket showed the employee", () => {
+    expect(shownDraft(tool("draftTicket", {}, { ok: true, draft, dueText: "hoje, até 14:00" }))).toEqual(draft);
+  });
+
+  it("is nothing for a draft not made, a call still running or another tool", () => {
+    expect(shownDraft(tool("draftTicket", {}, { ok: false, reason: "unavailable", message: "Fora do ar." }))).toBeNull();
+    expect(shownDraft({ type: "tool-draftTicket", toolCallId: "c", state: "input-available", input: {} } as Part)).toBeNull();
+    expect(shownDraft(tool("getTicket", {}, { ok: true, draft }))).toBeNull();
+    expect(shownDraft(text("Oi"))).toBeNull();
+  });
+});
+
+describe("isRefusedInput", () => {
+  it("tells apart what Mastra hands the model for an input that failed the schema", () => {
+    expect(isRefusedInput({ error: true, message: "Para criar, falta title." })).toBe(true);
+    expect(isRefusedInput({ ok: false, reason: "unavailable", message: "Fora do ar." })).toBe(false);
+    expect(isRefusedInput(undefined)).toBe(false);
   });
 });

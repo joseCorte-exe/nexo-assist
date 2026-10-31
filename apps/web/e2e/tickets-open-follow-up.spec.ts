@@ -105,6 +105,11 @@ test("she edits the title and the category in the card, never the priority", asy
     return { height, radius: style.borderRadius, left: style.paddingLeft, size: style.fontSize, weight: style.fontWeight };
   };
   expect(await draft.getByLabel("Categoria").evaluate(look)).toEqual(await draft.getByLabel("Título").evaluate(look));
+  // An empty title is caught in the card, in the words of the contract the server checks with.
+  await draft.getByLabel("Título").fill("  ");
+  await draft.getByRole("button", { name: "Salvar" }).click();
+  await expect(draft.getByText("Escreva o título.")).toBeVisible();
+  await expect(draft.getByLabel("Título")).toBeFocused();
   await draft.getByLabel("Título").fill("VPN não conecta no notebook — erro 809");
   await draft.getByLabel("Categoria").selectOption("software");
   await expect(draft.getByLabel("Prioridade")).toHaveCount(0);

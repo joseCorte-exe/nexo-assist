@@ -1,4 +1,4 @@
-import { DRAFT_COPY, type NexoUIMessage } from "@nexo/shared";
+import { DRAFT_COPY, isRefusedInput, type NexoUIMessage } from "@nexo/shared";
 
 type Part = NexoUIMessage["parts"][number];
 type StepState = "running" | "done" | "failed";
@@ -74,16 +74,13 @@ export function stepsOf(part: Part): Step[] {
 
 type DraftPart = Extract<Part, { type: "tool-draftTicket" }>;
 
-/** An input Mastra refused: the model fixes it on its own, so it is not an action to show. */
-const refusedInput = (output: unknown) => (output as { error?: unknown } | undefined)?.error === true;
-
 /**
  * The draft as the design names it: a new ticket is classified, its deadline looked up and the draft made. A
  * possible duplicate is something the agent found, not a failure.
  */
 function draftSteps(part: DraftPart): Step[] {
   const key = part.toolCallId;
-  if (part.state === "output-error" || (part.state === "output-available" && refusedInput(part.output))) return [];
+  if (part.state === "output-error" || (part.state === "output-available" && isRefusedInput(part.output))) return [];
   if (part.state !== "output-available") return [{ key, label: "montando o rascunho", state: "running" }];
   const { output } = part;
   if (!output.ok) {

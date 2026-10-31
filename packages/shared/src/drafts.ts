@@ -24,6 +24,9 @@ const CREATE_ONLY = ["title", "category", "subcategory", "impact", "urgency", "a
 const REQUIRED_TO_CREATE = ["title", "category", "impact", "urgency", "affected"] as const;
 /** Fewer characters than this cannot tell an analyst what happens, since when and where. */
 const MIN_CREATE_DESCRIPTION = 40;
+/** What the card fits: the agent drafts and the employee edits within the same limits. */
+export const DRAFT_TITLE_MAX = 90;
+export const DRAFT_DESCRIPTION_MAX = 1000;
 
 /**
  * Input of draftTicket. Flat, so every provider takes its JSON schema; what each operation needs is checked here, and a
@@ -39,14 +42,14 @@ export const draftTicketInput = z
       .string()
       .trim()
       .min(5)
-      .max(90)
+      .max(DRAFT_TITLE_MAX)
       .optional()
       .describe("Só em create. Curto e específico, como \"VPN não conecta no notebook — erro 809\"."),
     description: z
       .string()
       .trim()
       .min(1)
-      .max(1000)
+      .max(DRAFT_DESCRIPTION_MAX)
       .describe(
         "create: o que acontece, desde quando, em qual equipamento ou sistema, a mensagem de erro, o que já foi tentado e o impacto no trabalho, para o analista não precisar perguntar de novo. update e reopen: só a informação nova.",
       ),
@@ -178,13 +181,13 @@ export const editDraftInput = z
       .string({ error: "Escreva o título." })
       .trim()
       .min(1, "Escreva o título.")
-      .max(90, "O título pode ter até 90 caracteres.")
+      .max(DRAFT_TITLE_MAX, `O título pode ter até ${DRAFT_TITLE_MAX} caracteres.`)
       .optional(),
     description: z
       .string({ error: "Escreva a descrição." })
       .trim()
       .min(1, "Escreva a descrição.")
-      .max(1000, "A descrição pode ter até 1.000 caracteres.")
+      .max(DRAFT_DESCRIPTION_MAX, "A descrição pode ter até 1.000 caracteres.")
       .optional(),
     category: category.optional(),
   })

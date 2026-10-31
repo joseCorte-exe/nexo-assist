@@ -81,5 +81,5 @@ export const ticketFollowUpInput = z.object({
 });
 export type TicketFollowUpInput = z.infer<typeof ticketFollowUpInput>;
 
-/** Query of GET /employees/:id/tickets/candidates: the open tickets that could be the same problem. */
+/** Query of GET /employees/:id/tickets/candidates: the tickets that could be the same problem, open or resolved up to 7 days ago. */
 export const candidatesQuery = z.object({ category });

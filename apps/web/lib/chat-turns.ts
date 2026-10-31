@@ -4,6 +4,7 @@ import {
   decisionOf,
   findTicketIds,
   type NexoUIMessage,
+  shownDraft,
   type TicketCard,
   type TicketSummary,
   textOf,
@@ -112,7 +113,8 @@ function agentTurn(message: NexoUIMessage, answer: string | null, busy: boolean)
     } else if (part.type === "tool-getTicket" && part.state === "output-available" && part.output.ok) {
       blocks.push({ kind: "ticket", key: part.toolCallId, ticket: part.output.ticket });
     } else if (part.type === "tool-draftTicket") {
-      if (part.state === "output-available" && part.output.ok) draft = { kind: "draft", key: part.toolCallId, draft: part.output.draft };
+      const shown = shownDraft(part);
+      if (shown) draft = { kind: "draft", key: part.toolCallId, draft: shown };
     } else {
       addOffer(blocks, part, text, answer, mode);
     }
@@ -178,9 +180,9 @@ export function messageCount(messages: readonly NexoUIMessage[], status: ChatSta
 export function lastDraftId(messages: readonly NexoUIMessage[]): string | null {
   for (let index = messages.length - 1; index >= 0; index--) {
     const parts = messages[index]?.parts ?? [];
-    for (let at = parts.length - 1; at >= 0; at--) {
-      const part = parts[at];
-      if (part?.type === "tool-draftTicket" && part.state === "output-available" && part.output.ok) return part.output.draft.id;
+    for (const part of [...parts].reverse()) {
+      const shown = shownDraft(part);
+      if (shown) return shown.id;
     }
   }
   return null;

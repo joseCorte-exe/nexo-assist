@@ -151,7 +151,7 @@ export function createTicketServiceClient(options: Options) {
       request(z.array(kbArticleSchema), "GET", `/kb/search?${new URLSearchParams({ q: query })}`),
     createTicket: (input: CreateTicketInput, idempotencyKey: string) =>
       request(ticketSchema, "POST", "/tickets", { body: input, idempotencyKey }),
-    /** The open tickets of the employee in a category: the ones a new ticket could duplicate. */
+    /** The tickets of the employee in a category a new ticket could duplicate: the open ones and the ones resolved up to 7 days ago. */
     listCandidates: (employeeId: string, category: Category) =>
       request(
         z.array(ticketSchema),

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { toAISdkStream } from "@mastra/ai-sdk";
 import { streamReply } from "@nexo/agent";
-import { chatInput, type ConversationPart, type NexoUIMessage, summarizeTurn, textOf, withToolErrors } from "@nexo/shared";
+import { chatInput, type ConversationPart, type NexoUIMessage, shownDraft, summarizeTurn, textOf, withToolErrors } from "@nexo/shared";
 import { consumeStream, createUIMessageStream, createUIMessageStreamResponse, type InferUIMessageChunk } from "ai";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NextRequest } from "next/server";
@@ -112,9 +112,7 @@ async function saveReply(
  * pending without a way to confirm or cancel them.
  */
 async function discardDrafts(db: Db, reply: NexoUIMessage) {
-  const ids = reply.parts.flatMap((part) =>
-    part.type === "tool-draftTicket" && part.state === "output-available" && part.output.ok ? [part.output.draft.id] : [],
-  );
+  const ids = reply.parts.flatMap((part) => shownDraft(part)?.id ?? []);
   if (ids.length === 0) return;
   await db.update(drafts).set({ status: "cancelled" }).where(and(inArray(drafts.id, ids), eq(drafts.status, "pending")));
 }

@@ -399,6 +399,34 @@ describe("POST /api/drafts/:id/cancel", () => {
     expect(deps.notes).toHaveLength(1);
   });
 
+  it("answers an action the draft can no longer take with the draft as it is, or with why not, for every state", async () => {
+    const notValid = { code: "draft_not_pending", message: "Este rascunho não vale mais. Confira o mais recente." };
+    const notEditable = { code: "draft_not_pending", message: "Este rascunho não pode mais ser editado." };
+    const underWay = { code: "draft_confirming", message: "A confirmação deste rascunho já começou. Confirme de novo; o chamado não será duplicado." };
+    const created = { code: "draft_confirmed", message: "Este chamado já foi criado." };
+    const answers = {
+      confirmed: { confirm: "view", cancel: created, edit: notEditable },
+      rejected: { confirm: "view", cancel: "view", edit: notEditable },
+      cancelled: { confirm: notValid, cancel: "view", edit: notEditable },
+      superseded: { confirm: notValid, cancel: "view", edit: notEditable },
+      confirming: { cancel: underWay, edit: underWay },
+    } as const;
+    for (const [status, byAction] of Object.entries(answers)) {
+      for (const [action, expected] of Object.entries(byAction)) {
+        const deps = await testDeps();
+        const draft = await anaWithDraft(deps);
+        await deps.db.update(drafts).set({ status: status as DraftView["status"] }).where(eq(drafts.id, draft.id));
+        const response =
+          action === "confirm" ? await confirm(deps, draft.id) : action === "cancel" ? await cancel(deps, draft.id) : await edit(deps, draft.id, { title: "Outro título" });
+        const body = await response.json();
+        if (expected === "view") expect([status, action, response.status, body.status]).toEqual([status, action, 200, status]);
+        else expect([status, action, response.status, body.error]).toEqual([status, action, 409, expected]);
+        expect(await statusOf(deps, draft.id)).toBe(status);
+        expect(deps.ticketService.writes).toEqual([]);
+      }
+    }
+  });
+
   it("refuses to cancel what was already created", async () => {
     const deps = await testDeps();
     const draft = await anaWithDraft(deps);

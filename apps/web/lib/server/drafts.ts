@@ -96,15 +96,42 @@ async function draftOf(db: Db, id: string, employeeId: string) {
 }
 
 const draftNotFound = () => jsonError(404, "draft_not_found", "Rascunho não encontrado.");
-const draftNotPending = () => jsonError(409, "draft_not_pending", "Este rascunho não vale mais. Confira o mais recente.");
-const draftConfirming = () =>
-  jsonError(409, "draft_confirming", "A confirmação deste rascunho já começou. Confirme de novo; o chamado não será duplicado.");
 const viewOf = (row: DraftRow) => NextResponse.json<DraftView>(toDraftView(row));
+
+type Action = "confirm" | "cancel" | "edit";
+
+/**
+ * The states each action of the card moves a draft from. A confirmation also leaves confirming, since confirming again
+ * cannot duplicate anything; once it started, nothing else can.
+ */
+const MOVES_FROM: Record<Action, DraftRow["status"][]> = {
+  confirm: ["pending", "confirming"],
+  cancel: ["pending"],
+  edit: ["pending"],
+};
+
+/**
+ * What a draft answers to an action it cannot take now, or null when it can: the draft as it is when the action
+ * already happened (two clicks, two tabs), or why not.
+ */
+function cannot(action: Action, draft: DraftRow): Response | null {
+  if (MOVES_FROM[action].includes(draft.status)) return null;
+  if (draft.status === "confirming") {
+    return jsonError(409, "draft_confirming", "A confirmação deste rascunho já começou. Confirme de novo; o chamado não será duplicado.");
+  }
+  if (action === "confirm") {
+    return draft.status === "confirmed" || draft.status === "rejected"
+      ? viewOf(draft)
+      : jsonError(409, "draft_not_pending", "Este rascunho não vale mais. Confira o mais recente.");
+  }
+  if (action === "cancel") return draft.status === "confirmed" ? jsonError(409, "draft_confirmed", "Este chamado já foi criado.") : viewOf(draft);
+  return jsonError(409, "draft_not_pending", "Este rascunho não pode mais ser editado.");
+}
 
 type Settle = {
   draft: DraftRow;
   employeeId: string;
-  /** The states the draft may move from: a confirmation leaves confirming, everything else leaves pending. */
+  /** The states the draft may move from. */
   from: DraftRow["status"][];
   event: string;
   set: Partial<DraftRow>;
@@ -149,8 +176,13 @@ async function settle(deps: Deps, { draft, employeeId, from, event, set, note }:
 /** The write of the ticket-service each operation means, with the draft as the idempotency key. */
 function writeTicket(deps: Deps, draft: DraftRow, employeeId: string): Promise<TicketServiceResult<Ticket>> {
   const change = { employeeId, text: draft.description };
-  if (draft.operation === "update") return deps.ticketService.addFollowUp(draft.ticketId!, change, draft.id);
-  if (draft.operation === "reopen") return deps.ticketService.reopenTicket(draft.ticketId!, change, draft.id);
+  if (draft.operation !== "create") {
+    // The tool saves a follow-up and a reopening with the ticket they change.
+    if (!draft.ticketId) throw new Error(`Draft ${draft.id} changes no ticket`);
+    return draft.operation === "update"
+      ? deps.ticketService.addFollowUp(draft.ticketId, change, draft.id)
+      : deps.ticketService.reopenTicket(draft.ticketId, change, draft.id);
+  }
   return deps.ticketService.createTicket(
     {
       employeeId,
@@ -188,14 +220,14 @@ export async function confirmDraftHandler(request: NextRequest, deps: Deps, id: 
   const found = await draftOf(deps.db, id, employeeId);
   if (!found) return draftNotFound();
   const { conversationState } = found;
-  if (found.draft.status === "confirmed" || found.draft.status === "rejected") return viewOf(found.draft);
-  if (found.draft.status !== "pending" && found.draft.status !== "confirming") return draftNotPending();
+  const refused = cannot("confirm", found.draft);
+  if (refused) return refused;
   if (conversationState === "closed") return jsonError(409, "conversation_closed", "Esta conversa foi encerrada.");
 
   const [draft] = await deps.db
     .update(drafts)
     .set({ status: "confirming" })
-    .where(and(eq(drafts.id, id), inArray(drafts.status, ["pending", "confirming"])))
+    .where(and(eq(drafts.id, id), inArray(drafts.status, MOVES_FROM.confirm)))
     .returning();
   // It left pending meanwhile: answer it as it is now.
   if (!draft) return confirmDraftHandler(request, deps, id);
@@ -229,12 +261,11 @@ export async function cancelDraftHandler(request: NextRequest, deps: Deps, id: s
   const found = await draftOf(deps.db, id, employeeId);
   if (!found) return draftNotFound();
   const { draft } = found;
-  if (draft.status === "confirmed") return jsonError(409, "draft_confirmed", "Este chamado já foi criado.");
-  if (draft.status === "confirming") return draftConfirming();
-  if (draft.status !== "pending") return viewOf(draft);
+  const refused = cannot("cancel", draft);
+  if (refused) return refused;
   const note = `Descartei o rascunho ${draftLabel(draft.number)}. Nada foi enviado.`;
-  const row = await settle(deps, { draft, employeeId, from: ["pending"], event: "cancelled", set: { status: "cancelled" }, note });
-  return row.status === "confirming" ? draftConfirming() : viewOf(row);
+  const row = await settle(deps, { draft, employeeId, from: MOVES_FROM.cancel, event: "cancelled", set: { status: "cancelled" }, note });
+  return cannot("cancel", row) ?? viewOf(row);
 }
 
 const quote = (text: string) => `"${text.length > 200 ? `${text.slice(0, 199)}…` : text}"`;
@@ -252,8 +283,8 @@ export async function editDraftHandler(request: NextRequest, deps: Deps, id: str
   const found = await draftOf(deps.db, id, employeeId);
   if (!found) return draftNotFound();
   const { draft } = found;
-  if (draft.status === "confirming") return draftConfirming();
-  if (draft.status !== "pending") return jsonError(409, "draft_not_pending", "Este rascunho não pode mais ser editado.");
+  const refused = cannot("edit", draft);
+  if (refused) return refused;
   const { title, description, category } = body.data;
   if (draft.operation !== "create" && (title !== undefined || category !== undefined)) {
     return jsonError(422, "field_not_editable", "Num complemento ou reabertura, só o texto pode ser editado.");
@@ -289,9 +320,8 @@ export async function editDraftHandler(request: NextRequest, deps: Deps, id: str
   if (said.length === 0) return viewOf(draft);
 
   const note = `Editei o rascunho ${draftLabel(draft.number)}: ${said.join(", ")}.`;
-  const row = await settle(deps, { draft, employeeId, from: ["pending"], event: `edited-${randomUUID()}`, set, note });
-  if (row.status === "confirming") return draftConfirming();
-  return row.status === "pending" ? viewOf(row) : jsonError(409, "draft_not_pending", "Este rascunho não pode mais ser editado.");
+  const row = await settle(deps, { draft, employeeId, from: MOVES_FROM.edit, event: `edited-${randomUUID()}`, set, note });
+  return cannot("edit", row) ?? viewOf(row);
 }
 
 /** The drafts of a conversation in their current state, oldest first: what the cards of the chat draw. */
