@@ -1,8 +1,9 @@
 "use client";
 
 import { MESSAGE_LIMIT } from "@nexo/shared";
-import { type KeyboardEvent, type RefObject, useRef, useState } from "react";
+import { type KeyboardEvent, type RefObject, useEffect, useRef, useState } from "react";
 import { ArrowUpIcon } from "@/components/design-icons";
+import { createTypingSignal } from "@/lib/typing";
 
 type Props = {
   count: number;
@@ -17,9 +18,6 @@ type Props = {
   onTyping?: (typing: boolean) => void;
 };
 
-/** Without a keystroke for this long, she stopped writing. */
-const TYPING_IDLE_MS = 4_000;
-
 /** "Escreva para o Nexo…", Enviar and the counter. Enter sends, Shift+Enter breaks the line. */
 export function Composer({
   count,
@@ -31,31 +29,17 @@ export function Composer({
   onTyping,
 }: Props) {
   const [text, setText] = useState("");
-  const typing = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  /** Says she writes on the first keystroke, and that she stopped after a pause or once the message went. */
-  function typed(next: string) {
-    if (!onTyping) return;
-    const wasTyping = typing.current !== null;
-    if (typing.current) clearTimeout(typing.current);
-    if (!next.trim()) {
-      typing.current = null;
-      if (wasTyping) onTyping(false);
-      return;
-    }
-    if (!wasTyping) onTyping(true);
-    typing.current = setTimeout(() => {
-      typing.current = null;
-      onTyping(false);
-    }, TYPING_IDLE_MS);
-  }
+  const onTypingRef = useRef(onTyping);
+  onTypingRef.current = onTyping;
+  const [typing] = useState(() => createTypingSignal((writing) => onTypingRef.current?.(writing)));
+  useEffect(() => typing.stop, [typing]);
 
   function send() {
     const trimmed = text.trim();
     if (busy || !trimmed) return inputRef.current?.focus();
     onSend(trimmed);
     setText("");
-    typed("");
+    typing.typed("");
     inputRef.current?.focus();
   }
 
@@ -86,7 +70,7 @@ export function Composer({
           value={text}
           onChange={(event) => {
             setText(event.target.value);
-            typed(event.target.value);
+            typing.typed(event.target.value);
           }}
           onKeyDown={onKeyDown}
           maxLength={2000}

@@ -67,6 +67,10 @@ describe("conversationMeta", () => {
     expect(conversationMeta({ ...ana, state: "with_analyst", analyst: RAFAEL })).toBe("online · Financeiro");
     expect(conversationMeta({ ...ana, online: false, state: "with_agent", ticketId: null })).toBe("Financeiro");
   });
+
+  it("says she is writing in place of online", () => {
+    expect(conversationMeta({ ...ana, typing: true, state: "with_analyst", analyst: RAFAEL })).toBe("digitando… · Financeiro");
+  });
 });
 
 describe("headerMode", () => {

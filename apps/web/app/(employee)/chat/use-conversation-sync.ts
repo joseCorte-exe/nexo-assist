@@ -44,8 +44,11 @@ export function useConversationSync({
     if (latest.take(ticket)) loaded.current(saved);
   }, [latest]);
 
+  // The beat every 20 s repeats whether she writes, so it never turns "digitando…" off in the middle of a word.
+  const writing = useRef(false);
   const ping = useCallback(
-    async (typing: boolean) => {
+    async (typing: boolean = writing.current) => {
+      writing.current = typing;
       const response = await fetch("/api/conversation/presence", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -81,7 +84,7 @@ export function useConversationSync({
 
   useEffect(() => {
     const beat = () => {
-      if (document.visibilityState === "visible") void ping(false);
+      if (document.visibilityState === "visible") void ping();
     };
     beat();
     const timer = setInterval(beat, PRESENCE_MS);

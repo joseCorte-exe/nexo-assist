@@ -32,9 +32,13 @@ export function avatarTone(id: string) {
   return AVATAR_TONES[hash % AVATAR_TONES.length]!;
 }
 
-/** Under the name of the open conversation: "online · Financeiro · INC-20311". The ticket only while she waits. */
+/**
+ * Under the name of the open conversation: "online · Financeiro · INC-20311", with "digitando…" in place of online while
+ * she writes. The ticket only while she waits.
+ */
 export function conversationMeta(conversation: ConsoleConversation): string {
-  const parts = [conversation.online ? "online" : null, conversation.employee.department || null];
+  const presence = conversation.typing ? "digitando…" : conversation.online ? "online" : null;
+  const parts = [presence, conversation.employee.department || null];
   if (conversation.state === "waiting_for_analyst" && conversation.ticketId) parts.push(conversation.ticketId);
   return parts.filter(Boolean).join(" · ");
 }
