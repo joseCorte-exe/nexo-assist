@@ -2,11 +2,13 @@
 export {
   type AgentMemory,
   type AgentModel,
+  caseNotes,
   CONSOLE_NOTE,
   createMemory,
   createNexoAgent,
   type NexoAgent,
   rememberNote,
+  RESUME_NOTE,
   SCREEN_NOTE,
   saveNote,
   streamReply,

@@ -499,7 +499,7 @@ describe("liveTurns, with an analyst (feature 5)", () => {
       id: "a9",
       role: "assistant",
       parts: [
-        { type: "data-conversation", data: { id: "conv-1", state: "with_analyst", messageCount: 4, targetLevel: "N2", waitUntil: null, analyst: null } },
+        { type: "data-conversation", data: { id: "conv-1", state: "with_analyst", messageCount: 4, targetLevel: "N2", waitUntil: null, analyst: null, limitReached: false } },
       ],
     };
     expect(liveTurns([user("u1", "Oi"), counter], "ready", { paused: true })).toEqual([{ kind: "employee", id: "u1", text: "Oi", unsent: false }]);

@@ -1,6 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { type AgentMemory, CONSOLE_NOTE, rememberNote } from "@nexo/agent";
-import { type Analyst, type AnalystLevel, type ChatNote, LEVEL_LABEL, type NexoUIMessage, type NoteView, type TransferReason } from "@nexo/shared";
+import {
+  type Analyst,
+  type AnalystLevel,
+  type ChatNote,
+  LEVEL_LABEL,
+  MESSAGE_LIMIT,
+  type NexoUIMessage,
+  type NoteView,
+  type TransferReason,
+} from "@nexo/shared";
 import { and, eq, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { conversations, messages } from "@/db/schema";
@@ -15,10 +24,18 @@ import { afterReplyPlace } from "./messages";
 type Row = typeof conversations.$inferSelect;
 type Who = Pick<Analyst, "id" | "name" | "level">;
 
-/** Why an analyst cannot do it: the conversation ended, they do not attend it, or another analyst does. */
-export type ConsoleRefusal = "closed" | "not_assumed" | "taken";
+/**
+ * Why an analyst cannot do it: the conversation ended, they do not attend it, another analyst does, or the limit of
+ * messages keeps it from going back to the agent.
+ */
+export type ConsoleRefusal = "closed" | "not_assumed" | "taken" | "limit_reached";
 /** Why the agent cannot transfer: it no longer has the conversation. */
 type AgentRefusal = "not_with_agent";
+/**
+ * Why the limit does not apply as planned: under 30 messages, ended, or it changed hands since it was planned (decide
+ * again on the row as it is).
+ */
+export type LimitRefusal = "under_limit" | "closed" | "changed";
 export type Decision<Refusal extends string> = "apply" | "already" | { refused: Refusal };
 
 export type Move<Refusal extends string> = {
@@ -41,7 +58,51 @@ export type TransferFields = {
   turnStartedAt: Date;
 };
 
+/** What the limit does with the conversation, as planned on the row it read (limit.ts). */
+export type LimitPlan =
+  /** With the agent and nothing pending. */
+  | { kind: "close" }
+  /** With the agent and something pending: to the level of the case, from her message the last reply answered. */
+  | {
+      kind: "transfer";
+      /** The reason is the limit, unless its case is critical or overdue (routeTransfer). */
+      fields: { level: AnalystLevel; reason: TransferReason; summary: string; ticketId: string | null; waitUntil: Date; since: Date };
+    }
+  /** An analyst has her (by name, unless the directory is down), or she waits for the level. */
+  | { kind: "analyst"; analyst: { id: string; name: string | null } | null; level: AnalystLevel | null };
+
 const refuse = <Refusal extends string>(refused: Refusal) => ({ refused });
+
+/** Whether the row is still where the plan was made: the agent has it, or the same analyst or level. */
+function stillAsPlanned(row: Row, plan: LimitPlan) {
+  if (plan.kind !== "analyst") return row.state === "with_agent";
+  if (plan.analyst) return row.state === "with_analyst" && row.analystId === plan.analyst.id;
+  return row.state === "waiting_for_analyst" && row.targetLevel === plan.level;
+}
+
+/** The note of the limit: what the console and the chat draw, and what the agent reads. */
+function limitNote(plan: LimitPlan): Move<LimitRefusal>["note"] {
+  const lead = `A conversa chegou ao limite de ${MESSAGE_LIMIT} mensagens e`;
+  if (plan.kind === "close") {
+    return { authorId: null, note: { event: "limit_reached", then: "closed", level: null, analystName: null }, text: `${lead} foi encerrada.`, memory: true };
+  }
+  if (plan.kind === "transfer") {
+    const { level } = plan.fields;
+    return {
+      authorId: null,
+      note: { event: "limit_reached", then: "transferred", level, analystName: null },
+      text: `${lead} foi transferida para o ${LEVEL_LABEL[level]}.`,
+      memory: true,
+    };
+  }
+  const { analyst, level } = plan;
+  return {
+    authorId: null,
+    note: { event: "limit_reached", then: "analyst", level, analystName: analyst?.name ?? null },
+    text: analyst ? `${lead} continua com ${analyst.name ?? "o analista"}.` : `${lead} espera o ${level ? LEVEL_LABEL[level] : "analista"}.`,
+    memory: true,
+  };
+}
 
 /** Whether this analyst attends the conversation, and may write in it or close it; if not, why. */
 export function attends(row: Row, who: Who): "apply" | { refused: ConsoleRefusal } {
@@ -50,7 +111,13 @@ export function attends(row: Row, who: Who): "apply" | { refused: ConsoleRefusal
   return row.analystId === who.id ? "apply" : refuse("taken");
 }
 
-export const moves = {
+export const moves: {
+  transfer: (fields: TransferFields) => Move<AgentRefusal>;
+  assume: (who: Who) => Move<ConsoleRefusal>;
+  release: (who: Who) => Move<ConsoleRefusal>;
+  close: (who: Who) => Move<ConsoleRefusal>;
+  reachLimit: (plan: LimitPlan, lastMessageAt?: Date | null) => Move<LimitRefusal>;
+} = {
   /** The agent hands the conversation to an analyst of the level, while it still has it. */
   transfer: ({ level, reason, summary, ticketId, waitUntil, confidence, turnStartedAt }: TransferFields): Move<AgentRefusal> => ({
     decide: (row) => (row.state === "with_agent" ? "apply" : refuse("not_with_agent")),
@@ -88,10 +155,11 @@ export const moves = {
     },
   }),
 
-  /** Back to the agent: one waiting for an analyst, or one this analyst attends. */
+  /** Back to the agent: one waiting for an analyst, or one this analyst attends, unless the limit keeps it from the agent. */
   release: (who: Who): Move<ConsoleRefusal> => ({
     decide: (row) => {
       if (row.state === "closed") return refuse("closed");
+      if (row.limitReachedAt) return refuse("limit_reached");
       if (row.state === "with_agent") return "already";
       return row.state === "with_analyst" && row.analystId !== who.id ? refuse("taken") : "apply";
     },
@@ -116,6 +184,32 @@ export const moves = {
       memory: true,
     },
   }),
+
+  /**
+   * The limit of messages, once, at 30 of hers or more (ARQUITETURA.md, section 1): closes or transfers what the agent
+   * has, or only marks what an analyst has. A row no longer where the plan was made is refused as changed, to be
+   * planned again.
+   */
+  reachLimit: (plan: LimitPlan, lastMessageAt: Date | null = null): Move<LimitRefusal> => ({
+    decide: (row) => {
+      if (row.limitReachedAt) return "already";
+      if (row.state === "closed") return refuse("closed");
+      if (row.messageCount < MESSAGE_LIMIT) return refuse("under_limit");
+      return stillAsPlanned(row, plan) ? "apply" : refuse("changed");
+    },
+    set: (at) => {
+      if (plan.kind === "close") return { state: "closed", outcome: "limit_reached", closedAt: at, limitReachedAt: at };
+      if (plan.kind === "analyst") return { limitReachedAt: at };
+      const { level, reason, summary, ticketId, waitUntil, since } = plan.fields;
+      return {
+        ...moves.transfer({ level, reason, summary, ticketId, waitUntil, confidence: null, turnStartedAt: since }).set(at),
+        limitReachedAt: at,
+      };
+    },
+    note: limitNote(plan),
+    // After the newest message, even the reply saved in the same millisecond.
+    notePlace: (at) => (lastMessageAt && lastMessageAt.getTime() >= at.getTime() ? new Date(lastMessageAt.getTime() + 1) : at),
+  }),
 };
 
 /** A move that keeps losing the race to other moves gives up after this many reads. */
@@ -133,10 +227,14 @@ export async function applyMove<Refusal extends string>(
   conversationId: string,
   move: Move<Refusal>,
   at: Date,
+  /** The row as the caller just read it, to decide on without reading it again; read again only after a lost race. */
+  read?: Row,
 ): Promise<MoveResult<Refusal>> {
   const { db } = deps;
+  let known = read;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const [row] = await db.select().from(conversations).where(eq(conversations.id, conversationId)).limit(1);
+    const [row] = known ? [known] : await db.select().from(conversations).where(eq(conversations.id, conversationId)).limit(1);
+    known = undefined;
     if (!row) return { ok: false, refused: "not_found", row: null };
     const decision = move.decide(row);
     if (decision === "already") return { ok: true, row, noteId: null };

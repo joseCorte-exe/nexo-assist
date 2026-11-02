@@ -12,7 +12,8 @@ type SampleMessage = {
   text: string;
   ago: number;
   /** A note of the console: what happened, and the analyst who did it (or, for a transfer, nobody). */
-  event?: ConversationEvent;
+  /** The notes the sample data has; the limit is left to the tests and the walkthrough. */
+  event?: Exclude<ConversationEvent, "limit_reached">;
   analystId?: string;
   decision?: { understanding: string; action: string; toolsUsed: string[]; confidence: number; reason: string };
 };
@@ -287,7 +288,7 @@ const analystOf = (id: string) => {
 };
 
 /** A note as the moves of the conversation leave it: where a transfer went, and who assumed, released or closed. */
-function sampleNote({ event, analystId }: SampleMessage & { event: ConversationEvent }, level: AnalystLevel | null, at: Date): ChatNote {
+function sampleNote({ event, analystId }: SampleMessage & { event: Exclude<ConversationEvent, "limit_reached"> }, level: AnalystLevel | null, at: Date): ChatNote {
   if (event === "transferred") {
     if (!level) throw new Error("A sample transfer needs the level of its conversation");
     return { event, level, at: at.toISOString() };

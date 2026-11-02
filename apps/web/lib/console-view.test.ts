@@ -28,6 +28,7 @@ const ana: ConsoleConversation = {
   waitUntil: at("2026-10-26T12:05"),
   transferredAt: at("2026-10-26T10:05"),
   assumedAt: null,
+  limitReached: false,
   analyst: null,
   lastActivityAt: at("2026-10-26T10:05"),
   preview: null,

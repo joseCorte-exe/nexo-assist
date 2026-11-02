@@ -16,6 +16,7 @@ import { createDraftStore } from "./drafts";
 import { createTransferStore } from "./transfers";
 import {
   ana,
+  conversationAt,
   fakeTicketService,
   NOW,
   rafael,
@@ -100,7 +101,7 @@ describe("POST /api/chat", () => {
     const conversation = await anaConversation(deps);
     expect(chunks[0]).toEqual({
       type: "data-conversation",
-      data: { id: conversation!.id, state: "with_agent", messageCount: 1, targetLevel: null, waitUntil: null, analyst: null },
+      data: { id: conversation!.id, state: "with_agent", messageCount: 1, targetLevel: null, waitUntil: null, analyst: null, limitReached: false },
     });
   });
 
@@ -215,7 +216,7 @@ describe("POST /api/chat", () => {
     // The whole conversation as the chat shows it: who she waits for, and until when.
     expect(chunks[1]).toEqual({
       type: "data-conversation",
-      data: { id: "conv-carla", state: "waiting_for_analyst", messageCount: 2, targetLevel: "N1", waitUntil: "2026-10-29T12:48:00.000Z", analyst: null },
+      data: { id: "conv-carla", state: "waiting_for_analyst", messageCount: 2, targetLevel: "N1", waitUntil: "2026-10-29T12:48:00.000Z", analyst: null, limitReached: false },
     });
     expect(model.calls).toHaveLength(0);
     const saved = await messagesOf(deps, "conv-carla");
@@ -510,4 +511,126 @@ describe("POST /api/chat under concurrent messages", () => {
     expect(counts.find(({ employeeId }) => employeeId === "emp-ana")?.count).toBe(5);
     expect(counts.find(({ employeeId }) => employeeId === "emp-elisa")?.count).toBe(4);
   }, 30_000);
+});
+
+describe("POST /api/chat at the limit of 30 messages (feature 6)", () => {
+  const plain = () => [{ toolCalls: [{ toolName: "recordDecision", input: decision }] }, { text: answer }];
+  const asking = () => [
+    { toolCalls: [{ toolName: "recordDecision", input: decision }] },
+    { text: "Desde quando o notebook está lento?" },
+  ];
+  const limitNotes = async (deps: TestDeps, id: string) =>
+    (await messagesOf(deps, id)).filter((message) => message.parts?.some((part) => part.type === "data-note"));
+
+  it("answers the 30th message, then closes the conversation when nothing is pending", async () => {
+    const model = scriptedModel(plain());
+    const deps = await testDeps({ agent: testAgent(model) });
+    await conversationAt(deps, { count: 29, lastReply: [{ type: "text", text: "Pronto." }] });
+    const chunks = await readStream(await chat(await say("Valeu, era isso"), deps));
+    await deps.settled();
+
+    // The 30th is counted and answered like any other.
+    expect(chunks[0]).toMatchObject({ data: { messageCount: 30, state: "with_agent", limitReached: false } });
+    expect(model.calls).toHaveLength(2);
+    const [row] = await deps.db.select().from(conversations).where(eq(conversations.id, "conv-ana"));
+    expect(row).toMatchObject({ state: "closed", outcome: "limit_reached" });
+    // The note goes after the reply.
+    const saved = await messagesOf(deps, "conv-ana");
+    expect(saved.slice(-3).map(({ author }) => author)).toEqual(["employee", "agent", "system"]);
+    expect(await limitNotes(deps, "conv-ana")).toHaveLength(1);
+  });
+
+  it("transfers at the limit when the 30th reply asks her something", async () => {
+    const deps = await testDeps({ agent: testAgent(scriptedModel(asking())) });
+    await conversationAt(deps, { count: 29, lastReply: [{ type: "text", text: "Pronto." }] });
+    await readStream(await chat(await say("O notebook está lento"), deps));
+    await deps.settled();
+
+    const [row] = await deps.db.select().from(conversations).where(eq(conversations.id, "conv-ana"));
+    expect(row).toMatchObject({ state: "waiting_for_analyst", targetLevel: "N1", transferReason: "message_limit" });
+  });
+
+  it("opens a new conversation with the message after a conversation the limit closed", async () => {
+    const model = scriptedModel([...plain(), ...plain()]);
+    const deps = await testDeps({ agent: testAgent(model) });
+    await conversationAt(deps, { count: 29, lastReply: [{ type: "text", text: "Pronto." }] });
+    await readStream(await chat(await say("Valeu, era isso"), deps));
+    await deps.settled();
+    deps.now = () => new Date(NOW.getTime() + 60_000);
+    const chunks = await readStream(await chat(await say("Outra coisa: a impressora"), deps));
+    await deps.settled();
+
+    const conversation = await anaConversation(deps);
+    expect(conversation).toMatchObject({ state: "with_agent", messageCount: 1 });
+    expect(conversation?.id).not.toBe("conv-ana");
+    expect(chunks[0]).toMatchObject({ data: { id: conversation!.id, messageCount: 1, limitReached: false } });
+  });
+
+  it("does not let the agent answer a 31st message: the limit applies first, and the message goes where it went", async () => {
+    // The 30th was left without an answer (the model failed and she never pressed "Tentar de novo").
+    const model = scriptedModel(plain());
+    const deps = await testDeps({ agent: testAgent(model) });
+    await conversationAt(deps, { count: 30, lastReply: null });
+    const chunks = await readStream(await chat(await say("Alguém aí?"), deps));
+    await deps.settled();
+
+    expect(model.calls).toHaveLength(0);
+    // Her 30th had no answer: pending, so an analyst gets it, and this one waits with it.
+    expect(chunks.map((chunk) => chunk.type)).toEqual(["start", "data-conversation", "finish"]);
+    expect(chunks[1]).toMatchObject({ data: { id: "conv-ana", state: "waiting_for_analyst", messageCount: 31, limitReached: true } });
+    expect((await messagesOf(deps, "conv-ana")).at(-1)).toMatchObject({ author: "employee", text: "Alguém aí?" });
+  });
+
+  it("answers the 30th sent again after a failure, before the limit applies", async () => {
+    const model = scriptedModel([new Error("overloaded"), ...plain()]);
+    const deps = await testDeps({ agent: testAgent(model) });
+    await conversationAt(deps, { count: 29, lastReply: [{ type: "text", text: "Pronto." }] });
+    const message = { id: "msg-ana-30", text: "Valeu, era isso" };
+    await readStream(await chat(await post(message), deps));
+    await deps.settled();
+    const [still] = await deps.db.select().from(conversations).where(eq(conversations.id, "conv-ana"));
+    expect(still).toMatchObject({ state: "with_agent", limitReachedAt: null });
+
+    await readStream(await chat(await post(message), deps));
+    await deps.settled();
+    const [row] = await deps.db.select().from(conversations).where(eq(conversations.id, "conv-ana"));
+    expect(row).toMatchObject({ state: "closed", outcome: "limit_reached", messageCount: 30 });
+  });
+
+  it("notes the limit once when she reaches it while an analyst has her, and keeps her writing to the analyst", async () => {
+    const model = scriptedModel([]);
+    const deps = await testDeps({ agent: testAgent(model) });
+    await conversationAt(deps, { count: 29, lastReply: [{ type: "text", text: "Pronto." }], state: "with_analyst" });
+    const thirtieth = await readStream(await chat(await say("Obrigada, Rafael"), deps));
+    const thirtyFirst = await readStream(await chat(await say("Mais uma coisa"), deps));
+
+    expect(thirtieth[1]).toMatchObject({ data: { state: "with_analyst", messageCount: 30, limitReached: true } });
+    expect(thirtyFirst[1]).toMatchObject({ data: { state: "with_analyst", messageCount: 31, limitReached: true } });
+    expect(model.calls).toHaveLength(0);
+    expect(await limitNotes(deps, "conv-ana")).toHaveLength(1);
+  });
+});
+
+describe("POST /api/chat coming back another day (feature 6)", () => {
+  const plain = () => [{ toolCalls: [{ toolName: "recordDecision", input: decision }] }, { text: answer }];
+
+  it("tells the agent, before her message, that the conversation resumes after a pause on another day", async () => {
+    const deps = await testDeps({ agent: testAgent(scriptedModel(plain())) });
+    // Her last message was on Friday the 23rd; NOW is Monday the 26th.
+    await conversationAt(deps, { count: 3, lastReply: [{ type: "text", text: "Pronto." }], end: new Date("2026-10-23T18:00:00Z") });
+    await readStream(await chat(await say("E aí, alguma novidade?"), deps));
+    await deps.settled();
+
+    expect(deps.notes).toEqual([
+      "(retomada) A conversa continua hoje, 26 out, depois de uma pausa: a mensagem anterior é de 23 out. O que as ferramentas disseram antes pode ter mudado; consulte de novo antes de falar da situação de um chamado.",
+    ]);
+  });
+
+  it("says nothing to the agent within the same day", async () => {
+    const deps = await testDeps({ agent: testAgent(scriptedModel(plain())) });
+    await conversationAt(deps, { count: 3, lastReply: [{ type: "text", text: "Pronto." }], end: new Date(NOW.getTime() - 3 * 60 * 60 * 1000) });
+    await readStream(await chat(await say("Voltei"), deps));
+    await deps.settled();
+    expect(deps.notes).toEqual([]);
+  });
 });

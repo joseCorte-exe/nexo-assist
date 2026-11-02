@@ -29,8 +29,10 @@ export type AgentMemory = ReturnType<typeof createMemory>;
 
 /** Prefix of the notes of what happened on the screen, which the instructions tell the model how to read. */
 export const SCREEN_NOTE = "(ação na tela)";
-/** Prefix of what happened with an analyst: assumed, wrote, released or closed (feature 5). */
+/** Prefix of what happened with an analyst: assumed, wrote, released or closed (feature 5), and of the limit (feature 6). */
 export const CONSOLE_NOTE = "(atendimento)";
+/** Prefix of the note that she came back on another day (feature 6). */
+export const RESUME_NOTE = "(retomada)";
 
 /**
  * Copies to the conversation's memory something that happened outside the agent: what the employee did in a card, what
@@ -73,6 +75,19 @@ export async function rememberNote(memory: Pick<AgentMemory, "saveMessages">, no
   } catch (error) {
     // Only the kind of error: its details can quote what the employee wrote.
     console.error("note not copied to the agent memory", { conversationId: note.conversationId, noteId: note.id, error: (error as Error).name });
+  }
+}
+
+/**
+ * The summary of the case the agent kept in its working memory for the conversation, for the analyst the code transfers
+ * to at the limit. A memory that cannot be read only costs the summary: null, logged.
+ */
+export async function caseNotes(memory: Pick<AgentMemory, "getWorkingMemory">, { conversationId, employeeId }: { conversationId: string; employeeId: string }) {
+  try {
+    return await memory.getWorkingMemory({ threadId: conversationId, resourceId: employeeId });
+  } catch (error) {
+    console.error("working memory not read", { conversationId, error: (error as Error).name });
+    return null;
   }
 }
 

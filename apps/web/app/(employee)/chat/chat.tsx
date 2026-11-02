@@ -16,7 +16,7 @@ import {
 import { DefaultChatTransport } from "ai";
 import { CircleAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { SystemNote } from "@/components/system-note";
+import { noteIcon, SystemNote } from "@/components/system-note";
 import { THINKING_LABEL } from "@/lib/agent-actions";
 import { currentDraft, lastDraftId, liveTurns, messageCount, type Turn, withSaved } from "@/lib/chat-turns";
 import { firstName } from "@/lib/format";
@@ -200,7 +200,7 @@ export function Chat({
               turn.kind === "employee" ? (
                 <EmployeeMessage key={turn.id} text={turn.text} unsent={turn.unsent} onRetry={retry} />
               ) : turn.kind === "note" ? (
-                <SystemNote key={turn.id} event={turn.note.event} text={noteText(turn.note)} />
+                <SystemNote key={turn.id} event={noteIcon(turn.note)} text={noteText(turn.note)} />
               ) : turn.kind === "analyst" ? (
                 <AnalystMessage key={turn.id} turn={turn} />
               ) : (

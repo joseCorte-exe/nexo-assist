@@ -22,7 +22,7 @@ import {
   SearchIcon,
   SendHorizontalIcon,
 } from "@/components/console-icons";
-import { SystemNote } from "@/components/system-note";
+import { noteIcon, SystemNote } from "@/components/system-note";
 import { avatarTone, conversationMeta, type HistoryItem, headerMode, historyItems, takeoverBar } from "@/lib/console-view";
 import { firstName, formatConfidence, initials } from "@/lib/format";
 import { usePinnedScroll } from "@/lib/use-pinned-scroll";
@@ -334,7 +334,7 @@ function HistoryEntry({
   if (message.author === "system") {
     const text = message.note ? `${noteLabel(message.note)} · ${clockTime(new Date(message.at))}` : message.text;
     if (message.note?.event === "transferred" && summary) return <TransferNote text={text} summary={summary} />;
-    return <SystemNote event={message.note?.event ?? null} text={text} className="pt-[18px] pb-1" />;
+    return <SystemNote event={message.note ? noteIcon(message.note) : null} text={text} className="pt-[18px] pb-1" />;
   }
   if (message.author === "employee") {
     return (

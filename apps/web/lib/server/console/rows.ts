@@ -64,6 +64,7 @@ export function toConsoleConversation(
     waitUntil: c.waitUntil?.toISOString() ?? null,
     transferredAt: c.transferredAt?.toISOString() ?? null,
     assumedAt: c.assumedAt?.toISOString() ?? null,
+    limitReached: c.limitReachedAt !== null,
     analyst: c.analystId ? signOf(analysts.get(c.analystId)) : null,
     lastActivityAt: (c.lastActivityAt ?? c.createdAt).toISOString(),
     preview: preview && {
