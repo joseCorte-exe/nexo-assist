@@ -99,7 +99,14 @@ A medida pela rede variava até 15 KB entre rodadas, por isso ficou a do build. 
 
 ## Considerações
 
-- O modelo real (Haiku 5.5) não foi rodado nesta feature: não há `ANTHROPIC_API_KEY` nesta máquina. O limite não passa pelo modelo. A única coisa nova para ele é a nota "(retomada)", que tem instrução própria e foi testada com o modelo simulado.
+- Com o modelo real (Haiku 5.5), a história rodou em 02/11/2026, com build de produção e a pilha inteira. Foram duas cenas, três vezes cada, e as seis passaram:
+
+  | Cena | Tempo da resposta | O que aconteceu |
+  |---|---|---|
+  | Gabriela volta três dias depois e pergunta da impressora | 7,4 s · 5,3 s · 6,8 s | Nas três, o Haiku consultou de novo os chamados e a central de ajuda antes de responder. No motivo da decisão, ele cita a conversa de outro dia ("a situação pode ter mudado desde 30 out"). Não cumprimentou de novo. Em duas, perguntou o modelo e o erro; em uma, foi direto para abrir o chamado ("Quem está sendo afetado?") |
+  | A 30ª mensagem, sem nada pendente | 4,9 s · 3,8 s · 4,3 s | Nas três, ele respondeu o horário pela central de ajuda, sem fechar com pergunta, e a conversa encerrou com a nota do limite |
+
+  O limite em si não passa pelo modelo. O código decide pelo que ficou salvo. A rodada mostra que o Haiku segue a nota "(retomada)" e que uma resposta simples na 30ª não vira transferência por engano.
 - "Pergunta no texto" é a resposta que termina em "?". É uma regra simples e de propósito: na dúvida, a conversa vai para um analista, que é o lado seguro.
 - O resumo do caso no limite usa a memória de trabalho do agent. Sem ela, diz por que veio e pede para ler a conversa.
 - "Nova conversa" não cria nada no servidor. A conversa nova só nasce na primeira mensagem, então não ficam conversas vazias nos números do login.
