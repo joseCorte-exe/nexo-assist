@@ -19,7 +19,7 @@ import {
   transferToAnalystOutput,
   type Urgency,
 } from "@nexo/shared";
-import { CONSOLE_NOTE, SCREEN_NOTE } from "../agent";
+import { CONSOLE_NOTE, RESUME_NOTE, SCREEN_NOTE } from "../agent";
 import { codedModel, type ModelStep } from "./stream";
 
 // A stand-in for the LLM with fixed rules, for the end-to-end tests and for running the app without a key
@@ -163,8 +163,10 @@ function intentOf(question: string, previous: PreviousTurn): Intent {
 
 const userText = (message: LanguageModelV4Prompt[number] | undefined) =>
   message?.role === "user" ? message.content.map((part) => (part.type === "text" ? part.text : "")).join(" ") : "";
+/** Her own words: the notes of the screen, of the console and of her coming back are context, not what she said. */
+const NOTES = [SCREEN_NOTE, CONSOLE_NOTE, RESUME_NOTE];
 const isEmployeeMessage = (message: LanguageModelV4Prompt[number] | undefined) =>
-  message?.role === "user" && !userText(message).startsWith(SCREEN_NOTE) && !userText(message).startsWith(CONSOLE_NOTE);
+  message?.role === "user" && !NOTES.some((note) => userText(message).startsWith(note));
 
 type TurnState = {
   question: string;
