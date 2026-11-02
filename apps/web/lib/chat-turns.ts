@@ -8,10 +8,12 @@ import {
   shownDraft,
   type TicketCard,
   type TicketSummary,
+  localDay,
   textOf,
 } from "@nexo/shared";
 import type { ChatStatus } from "ai";
 import { type Step, stepsOf } from "./agent-actions";
+import { dayLabel } from "./console-view";
 
 // What the chat draws. Saved messages and the ones arriving in the stream are the same UI messages, read here once.
 
@@ -233,4 +235,19 @@ export function withSaved(current: NexoUIMessage[], saved: NexoUIMessage[], stat
   const unsent = status === "error" && last?.role === "user" && !saved.some((message) => message.id === last.id) ? [last] : [];
   const next = [...saved, ...unsent];
   return sameMessages(current, next) ? current : unsent.length > 0 ? next : saved;
+}
+
+/**
+ * The pills of the days, by the id of the message each one opens: only when the conversation spans more than one São
+ * Paulo day (a conversation of one day draws none, as the design of the chat), and then for every day, the first one
+ * too, with the console's "Hoje", "Ontem" or "23 out". A message on its way has no date yet: it is now.
+ */
+export function dayBreaks(messages: readonly NexoUIMessage[], now: Date): Map<string, string> {
+  const firsts: Array<{ id: string; at: string; day: number }> = [];
+  for (const message of messages) {
+    const at = message.metadata?.at ?? now.toISOString();
+    const day = localDay(new Date(at));
+    if (firsts.at(-1)?.day !== day) firsts.push({ id: message.id, at, day });
+  }
+  return firsts.length < 2 ? new Map() : new Map(firsts.map(({ id, at }) => [id, dayLabel(at, now)]));
 }

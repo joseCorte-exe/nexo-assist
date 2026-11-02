@@ -21,10 +21,13 @@ const PRESENCE_MS = 20_000;
 export function useConversationSync({
   conversationId,
   state,
+  awaitingLimit = false,
   onLoaded,
 }: {
   conversationId: string | null;
   state: ConversationState | null;
+  /** The message that reached the limit was answered: it reads until the limit shows, as while an analyst has it. */
+  awaitingLimit?: boolean;
   /** serverWins: the messages as saved replace what the chat has, instead of being merged with it. */
   onLoaded: (saved: ConversationResponse, options: { serverWins: boolean }) => void;
 }) {
@@ -72,7 +75,7 @@ export function useConversationSync({
     [refresh],
   );
 
-  usePolling(async () => void (await refresh()), { intervalMs: POLL_MS, hiddenIntervalMs: HIDDEN_POLL_MS, enabled: state !== null && isPaused(state) });
+  usePolling(async () => void (await refresh()), { intervalMs: POLL_MS, hiddenIntervalMs: HIDDEN_POLL_MS, enabled: awaitingLimit || (state !== null && isPaused(state)) });
 
   useEffect(() => {
     const beat = () => {

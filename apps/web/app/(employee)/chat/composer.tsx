@@ -1,12 +1,14 @@
 "use client";
 
-import { MESSAGE_LIMIT } from "@nexo/shared";
 import { type KeyboardEvent, type RefObject, useEffect, useRef, useState } from "react";
 import { ArrowUpIcon } from "@/components/design-icons";
 import { createTypingSignal } from "@/lib/typing";
 
 type Props = {
-  count: number;
+  /** The line under the field: the count, what is left near the limit, or who stays with her past it. */
+  counter: { text: string; tone: "muted" | "warning" };
+  /** Tell a screen reader the counter, once, when it starts counting down and at the last message. */
+  announceCounter?: boolean;
   /** While the agent answers she can keep writing; only sending waits. */
   busy: boolean;
   onSend: (text: string) => void;
@@ -20,7 +22,8 @@ type Props = {
 
 /** "Escreva para o Nexo…", Enviar and the counter. Enter sends, Shift+Enter breaks the line. */
 export function Composer({
-  count,
+  counter,
+  announceCounter = false,
   busy,
   onSend,
   inputRef,
@@ -88,8 +91,14 @@ export function Composer({
           Enviar
         </button>
       </div>
-      <p id="chat-counter" className="self-end text-12.5 text-ink-3">
-        {count}/{MESSAGE_LIMIT} mensagens nesta sessão
+      <p
+        id="chat-counter"
+        className={`self-end text-12.5 tabular-nums transition-colors duration-200 ${counter.tone === "warning" ? "text-warning-text" : "text-ink-3"}`}
+      >
+        {counter.text}
+      </p>
+      <p role="status" className="sr-only">
+        {announceCounter ? counter.text : ""}
       </p>
     </form>
   );

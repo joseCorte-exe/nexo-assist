@@ -139,16 +139,19 @@ function Header({
         </p>
       ) : (
         <>
-          <button
-            ref={releaseRef}
-            type="button"
-            onClick={() => void state.act("release")}
-            aria-disabled={state.acting !== null}
-            className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg pr-3 pl-2.5 text-13.5 font-medium whitespace-nowrap text-ink-2 outline-1 -outline-offset-[0.5px] outline-field transition-[background-color,scale] duration-150 ease-out hover:bg-desk active:scale-[0.96] aria-disabled:cursor-progress max-lg:hidden"
-          >
-            <BotIcon aria-hidden className="size-3.5" />
-            Devolver ao agent
-          </button>
+          {/* Past the limit of messages the conversation does not go back to the agent: only Encerrar. */}
+          {mode.release ? (
+            <button
+              ref={releaseRef}
+              type="button"
+              onClick={() => void state.act("release")}
+              aria-disabled={state.acting !== null}
+              className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg pr-3 pl-2.5 text-13.5 font-medium whitespace-nowrap text-ink-2 outline-1 -outline-offset-[0.5px] outline-field transition-[background-color,scale] duration-150 ease-out hover:bg-desk active:scale-[0.96] aria-disabled:cursor-progress max-lg:hidden"
+            >
+              <BotIcon aria-hidden className="size-3.5" />
+              Devolver ao agent
+            </button>
+          ) : null}
           <button
             ref={closeRef}
             type="button"
@@ -176,7 +179,7 @@ function Header({
         name={firstName(conversation.employee.name)}
         panelOpen={panelOpen}
         onTogglePanel={onTogglePanel}
-        canRelease={mode.kind === "actions"}
+        canRelease={mode.kind === "actions" && mode.release}
         onRelease={() => void state.act("release")}
       />
     </header>
@@ -333,7 +336,11 @@ function HistoryEntry({
   const { message, grouped } = item;
   if (message.author === "system") {
     const text = message.note ? `${noteLabel(message.note)} · ${clockTime(new Date(message.at))}` : message.text;
-    if (message.note?.event === "transferred" && summary) return <TransferNote text={text} summary={summary} />;
+    if (message.note?.event === "transferred" && summary) return <TransferNote text={text} summary={summary} by="agent" />;
+    // At the limit the code wrote the summary, from the case the agent kept.
+    if (message.note?.event === "limit_reached" && message.note.then === "transferred" && summary) {
+      return <TransferNote text={text} summary={summary} by="limit" />;
+    }
     return <SystemNote event={message.note ? noteIcon(message.note) : null} text={text} className="pt-[18px] pb-1" />;
   }
   if (message.author === "employee") {
@@ -460,8 +467,9 @@ function DecisionTag({ message }: { message: ConsoleMessage }) {
   );
 }
 
-/** The note of the transfer opens the summary the agent wrote for the analyst. */
-function TransferNote({ text, summary }: { text: string; summary: string }) {
+/** The note of the transfer opens the summary for the analyst: the agent's, or the one the code wrote at the limit. */
+function TransferNote({ text, summary, by }: { text: string; summary: string; by: "agent" | "limit" }) {
+  const label = by === "agent" ? "Resumo do agent" : "Resumo do caso";
   const [open, setOpen] = useState(false);
   return (
     <div className="flex flex-col items-center gap-2 pt-[18px] pb-1">
@@ -472,15 +480,15 @@ function TransferNote({ text, summary }: { text: string; summary: string }) {
           type="button"
           aria-expanded={open}
           onClick={() => setOpen((current) => !current)}
-          title="Ver o resumo do agent"
+          title={`Ver o ${label.toLowerCase()}`}
           className="absolute inset-0 cursor-pointer rounded-md"
         >
-          <span className="sr-only">Ver o resumo do agent</span>
+          <span className="sr-only">Ver o {label.toLowerCase()}</span>
         </button>
       </div>
       {open ? (
         <p className="fade-enter max-w-[520px] rounded-xl bg-white px-4 py-3 text-13.5 text-pretty text-ink-2 shadow-bubble">
-          <span className="font-semibold text-ink">Resumo do agent: </span>
+          <span className="font-semibold text-ink">{label}: </span>
           {summary}
         </p>
       ) : null}

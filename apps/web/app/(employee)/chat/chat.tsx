@@ -8,8 +8,11 @@ import {
   type ConversationResponse,
   type ConversationView,
   clockTime,
+  counterText,
   type DraftView,
   employeeNoteLabel,
+  LIMIT_WARNING_FROM,
+  MESSAGE_LIMIT,
   type NexoUIMessage,
   textOf,
 } from "@nexo/shared";
@@ -18,7 +21,7 @@ import { CircleAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { noteIcon, SystemNote } from "@/components/system-note";
 import { THINKING_LABEL } from "@/lib/agent-actions";
-import { currentDraft, lastDraftId, liveTurns, messageCount, type Turn, withSaved } from "@/lib/chat-turns";
+import { currentDraft, dayBreaks, lastDraftId, liveTurns, messageCount, type Turn, withSaved } from "@/lib/chat-turns";
 import { firstName } from "@/lib/format";
 import { useNow } from "@/lib/use-now";
 import { usePinnedScroll } from "@/lib/use-pinned-scroll";
@@ -121,15 +124,24 @@ export function Chat({
       const known = conversationRef.current;
       if (part?.type === "data-conversation" && (part.data.id !== known?.id || part.data.state !== known?.state)) setConversation(part.data);
       const transferred = message.parts.some((one) => one.type === "tool-transferToAnalyst" && one.state === "output-available" && one.output.ok);
-      if (transferred || (part?.type === "data-conversation" && part.data.state !== "with_agent")) void sync.refresh();
+      // The message that reached the limit was answered: the limit applies on the server right after, and the chat reads it.
+      const atLimit = part?.type === "data-conversation" && part.data.messageCount >= MESSAGE_LIMIT;
+      if (transferred || atLimit || (part?.type === "data-conversation" && part.data.state !== "with_agent")) void sync.refresh();
     },
   });
 
   const paused = conversation !== null && isPaused(conversation.state);
+  const statusRef = useRef(status);
+  statusRef.current = status;
+  const busy = status === "submitted" || status === "streaming";
+  const count = messageCount(messages, status, savedCount);
+  // The Nexo answered the message that reached the limit: the chat reads the conversation until the limit applies.
+  const awaitingLimit = conversation?.state === "with_agent" && !conversation.limitReached && count >= MESSAGE_LIMIT && !busy;
   // Everything the chat learns from the server lands here: the conversation, its counter, its drafts and its messages.
   const sync = useConversationSync({
     conversationId: conversation?.id ?? null,
     state: conversation?.state ?? null,
+    awaitingLimit,
     onLoaded: (saved, { serverWins }) => {
       if (saved.conversation) setConversation(saved.conversation);
       setDrafts(byId(saved.drafts));
@@ -144,15 +156,18 @@ export function Chat({
     clearError();
   }
 
-  const statusRef = useRef(status);
-  statusRef.current = status;
-  const busy = status === "submitted" || status === "streaming";
   const turns = liveTurns(messages, status, { paused });
   const words = composerWords(conversation);
   const now = useNow();
   useTitleBadge(turns);
-  const count = messageCount(messages, status, savedCount);
+  const days = dayBreaks(messages, now);
+  const counter = counterText(count, {
+    state: conversation?.state ?? "with_agent",
+    limitReached: conversation?.limitReached ?? false,
+    analystName: conversation?.analyst?.name ?? null,
+  });
   const lastDraft = lastDraftId(messages);
+  const ended = conversation?.state === "closed" && !busy;
 
   function renderDraft(shown: DraftView, key: string) {
     return (
@@ -169,7 +184,22 @@ export function Chat({
     );
   }
 
+  /**
+   * A new conversation: the screen of an empty chat, with nothing asked of the server until her first message, so no empty
+   * conversation is ever created. The Nexo remembers nothing of the old one, so nothing of it stays on screen.
+   */
+  function startOver() {
+    setMessages([]);
+    setDrafts({});
+    setSavedCount(0);
+    setFailures(0);
+    setConversation(null);
+    inputRef.current?.focus();
+  }
+
   function send(text: string) {
+    // Written after a conversation that ended, it opens a new one: the screen starts over with it.
+    if (conversationRef.current?.state === "closed") startOver();
     void sendMessage({ text });
   }
 
@@ -196,7 +226,8 @@ export function Chat({
             aria-label="Conversa"
             className="mx-auto mt-auto flex w-full max-w-[856px] flex-col gap-5 px-6 pt-7 max-md:px-4 pb-1"
           >
-            {turns.map((turn) =>
+            {turns.map((turn) => [
+              days.has(turn.id) ? <DayPill key={`day-${turn.id}`} label={days.get(turn.id)!} /> : null,
               turn.kind === "employee" ? (
                 <EmployeeMessage key={turn.id} text={turn.text} unsent={turn.unsent} onRetry={retry} />
               ) : turn.kind === "note" ? (
@@ -213,14 +244,16 @@ export function Chat({
                   onChoose={choose}
                 />
               ),
-            )}
+            ])}
+            {ended ? <NewConversation onStart={startOver} /> : null}
           </section>
         )}
       </div>
       <div className="mx-auto w-full max-w-[856px] px-6 pt-2.5 max-md:px-4 pb-[18px]">
         {conversation?.state === "waiting_for_analyst" ? <WaitingRow conversation={conversation} now={now} /> : null}
         <Composer
-          count={count}
+          counter={counter}
+          announceCounter={counter.tone === "warning" && (count === LIMIT_WARNING_FROM || count === MESSAGE_LIMIT - 1)}
           busy={busy}
           onSend={send}
           inputRef={inputRef}
@@ -232,6 +265,33 @@ export function Chat({
       <Announcer turn={turns.at(-1)} />
       <ConsoleAnnouncer turns={turns} />
     </main>
+  );
+}
+
+/** The pill that opens a day, as the console draws it, when the conversation spans more than one. */
+function DayPill({ label }: { label: string }) {
+  return (
+    <div className="flex justify-center">
+      <span className="rounded-full bg-day-pill px-2.5 py-1 text-12 font-medium text-ink-3">{label}</span>
+    </div>
+  );
+}
+
+/**
+ * Under the note that ended the conversation: the way to start another, as secondary as the starters of the empty chat,
+ * 16 px below the note. Writing in the composer does the same.
+ */
+function NewConversation({ onStart }: { onStart: () => void }) {
+  return (
+    <div className="fade-enter -mt-1 flex justify-center">
+      <button
+        type="button"
+        onClick={onStart}
+        className="rounded-lg bg-white px-3 py-[7px] text-13.5 font-medium text-ink outline-1 -outline-offset-[0.5px] outline-rule transition-[background-color,scale] duration-150 ease-out hover:bg-desk active:scale-[0.96]"
+      >
+        Nova conversa
+      </button>
+    </div>
   );
 }
 

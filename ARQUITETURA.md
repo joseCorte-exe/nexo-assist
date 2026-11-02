@@ -145,7 +145,7 @@ Status do chamado e o que muda cada um (só o que o design mostra):
 
 | Tabela | Campos principais |
 |---|---|
-| conversations | id, employee_id, state, outcome, target_level (N1, N2), transfer_reason, transfer_summary, analyst_id, ticket_id, message_count, wait_until, created_at, first_response_at, closed_at |
+| conversations | id, employee_id, state, outcome, target_level (N1, N2), transfer_reason, transfer_summary, analyst_id, ticket_id, message_count, wait_until, created_at, first_response_at, closed_at, limit_reached_at |
 | messages | id, conversation_id, author (employee, agent, analyst, system), text, parts (as partes da resposta do agent como saíram no stream: decisão, ferramentas, texto e, depois, cards, opções e rascunho, com um resumo dos ids para o agent lembrar no turno seguinte), created_at |
 | decisions | id, message_id, understanding, action, tools_used, confidence, reason |
 | drafts | id, conversation_id, operation (create, update, reopen), title, description, type, category, subcategory, impact, urgency, priority, affected, ticket_id, status (pending, confirmed, cancelled) |

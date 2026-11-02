@@ -78,7 +78,9 @@ describe("headerMode", () => {
   it("shows the waiting pill, the agent pill, and the actions of whoever attends", () => {
     expect(headerMode(ana, RAFAEL.id)).toEqual({ kind: "pill", tone: "warning", text: "Aguardando atendente" });
     expect(headerMode({ ...ana, state: "with_agent" }, RAFAEL.id)).toEqual({ kind: "pill", tone: "success", text: "Agent atendendo" });
-    expect(headerMode({ ...ana, state: "with_analyst", analyst: RAFAEL }, RAFAEL.id)).toEqual({ kind: "actions" });
+    expect(headerMode({ ...ana, state: "with_analyst", analyst: RAFAEL }, RAFAEL.id)).toEqual({ kind: "actions", release: true });
+    // Past the limit it does not go back to the agent: only Encerrar.
+    expect(headerMode({ ...ana, state: "with_analyst", analyst: RAFAEL, limitReached: true }, RAFAEL.id)).toEqual({ kind: "actions", release: false });
     expect(headerMode({ ...ana, state: "with_analyst", analyst: RAFAEL }, "analyst-juliana")).toEqual({
       kind: "pill",
       tone: "primary",
@@ -89,6 +91,14 @@ describe("headerMode", () => {
 });
 
 describe("takeoverBar", () => {
+  it("does not offer to hand back a waiting conversation the limit sent, and says why", () => {
+    expect(takeoverBar({ ...ana, limitReached: true }, RAFAEL.id, NOW)).toMatchObject({
+      kind: "take",
+      body: "Limite de mensagens · agent pausado · até 12:05",
+      release: false,
+    });
+  });
+
   it("tells who waits and until when, with both buttons", () => {
     expect(takeoverBar(ana, RAFAEL.id, NOW)).toEqual({
       kind: "take",

@@ -43,7 +43,8 @@ export function conversationMeta(conversation: ConsoleConversation): string {
   return parts.filter(Boolean).join(" · ");
 }
 
-export type HeaderMode = { kind: "pill"; tone: TagTone; text: string } | { kind: "actions" };
+/** release: whether it can go back to the agent; past the limit of messages it cannot. */
+export type HeaderMode = { kind: "pill"; tone: TagTone; text: string } | { kind: "actions"; release: boolean };
 
 /** What the header of the open conversation shows on its right: a pill with its state, or the actions of who attends. */
 export function headerMode(conversation: ConsoleConversation, viewerId: string): HeaderMode {
@@ -55,7 +56,7 @@ export function headerMode(conversation: ConsoleConversation, viewerId: string):
     case "with_analyst":
       return conversation.analyst && conversation.analyst.id !== viewerId
         ? { kind: "pill", tone: "primary", text: `Com ${conversation.analyst.name}` }
-        : { kind: "actions" };
+        : { kind: "actions", release: !conversation.limitReached };
     case "closed":
       return { kind: "pill", tone: "muted", text: "Encerrada" };
   }
@@ -85,8 +86,12 @@ export function takeoverBar(conversation: ConsoleConversation, viewerId: string,
       return {
         kind: "take",
         title: `${name} espera um atendente`,
-        body: conversation.waitUntil ? `Agent pausado · até ${untilText(conversation.waitUntil, now)}` : "Agent pausado",
-        release: true,
+        body: [conversation.limitReached ? "Limite de mensagens" : null, conversation.limitReached ? "agent pausado" : "Agent pausado"]
+          .concat(conversation.waitUntil ? [`até ${untilText(conversation.waitUntil, now)}`] : [])
+          .filter(Boolean)
+          .join(" · "),
+        // Past the limit of messages it does not go back to the agent.
+        release: !conversation.limitReached,
         placeholder: LOCKED_PLACEHOLDER,
       };
     case "with_agent":
@@ -104,8 +109,8 @@ export type HistoryItem =
   | { kind: "day"; key: string; label: string }
   | { kind: "message"; key: string; message: ConsoleMessage; grouped: boolean };
 
-/** "Hoje", "Ontem" or "20 out": the pill that opens each day. */
-function dayLabel(iso: string, now: Date) {
+/** "Hoje", "Ontem" or "20 out": the pill that opens each day, in the console and in the chat. */
+export function dayLabel(iso: string, now: Date) {
   const days = localDay(now) - localDay(new Date(iso));
   if (days === 0) return "Hoje";
   if (days === 1) return "Ontem";
