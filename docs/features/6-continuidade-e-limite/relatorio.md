@@ -7,7 +7,7 @@ O plano está em [plano.md](plano.md). Aqui ficam o que foi pedido, a prova de c
 | Pedido | Prova |
 |---|---|
 | Front e back | No back, `applyLimit`, o movimento `reachLimit`, a recusa do devolver depois do limite, a 31ª mensagem que aplica o limite antes, a nota de retomada para o agent e a leitura da última conversa encerrada. Na tela, o contador, a nota do limite, "Nova conversa", as pílulas de dia, o "Devolver ao agent" que some e o resumo do caso no console. |
-| Fiel ao design | O nexo.pen não desenha nenhum destes estados. Eles saem das peças que já existem, decididas com o design-engineer, e as medidas na tela batem com as peças originais (tabela abaixo). |
+| Fiel ao design | As 8 telas que o nexo.pen desenha (login, chat vazio, com o agent, esperando, com o analista, e o console na lista, esperando e assumido) ficaram iguais ao `main` pixel a pixel: 0 pixel de diferença, e o `main` já foi medido contra o nexo.pen nas features 3 a 5. Os estados novos, que o nexo.pen não desenha, saem das peças que já existem, decididas com o design-engineer, e as medidas batem com as peças originais. |
 | Lógica do back | O que é pendente, o nível, a espera e o resumo saem do código e do que está salvo. O modelo não decide nada no limite. A mudança e a nota vão no mesmo batch, sobre a versão lida. Quem perde a corrida planeja de novo. |
 | Desempenho | `applyLimit` lê tudo numa ida ao banco e escreve em outra. A última conversa da pessoa sai de um índice novo, `(employee_id, created_at)`. |
 | Padrão do contrato | Tudo novo do contrato fica em `packages/shared`: `continuity.ts`, o motivo `message_limit`, a nota `limit_reached`, `limitReached` na conversa e no console e `messageMeta` com a hora de cada mensagem. Nenhuma rota nova. |
@@ -39,19 +39,38 @@ Todas passam e os tipos fecham nos quatro pacotes. Por pacote: shared 217, ticke
 
 O arquivo [continuity-and-limit.spec.ts](../../../apps/web/e2e/continuity-and-limit.spec.ts) roda a história com duas pessoas. Gabriela volta a uma conversa de três dias atrás e vê os dois dias em pílulas. Depois, perto do limite, o contador conta o que falta; a 30ª é respondida e, sem nada pendente, a conversa fecha; ela recarrega, vê o fim, clica em "Nova conversa" e recomeça. Elisa abre e vê como a última conversa dela terminou. Escrevendo ali, a tela recomeça limpa. Depois ela bate o limite com uma pergunta aberta, a conversa vai para o N1, e o Rafael vê "Limite de mensagens" na lista, abre o resumo do caso pela nota, assume sem ter "Devolver ao agent", conversa com ela e encerra. O arquivo prepara as cenas de dias e de 29 mensagens direto no banco do teste e apaga o que escreveu ao terminar, para os números do login continuarem os mesmos.
 
-Dois testes antigos mudaram por causa do comportamento novo: o texto do contador passou de "nesta sessão" para "nesta conversa", e "pedir a conversa sem id" agora devolve a última encerrada em vez de nada.
+Um teste antigo mudou por causa do comportamento novo: "pedir a conversa sem id" agora devolve a última encerrada em vez de nada.
 
 O e2e achou um defeito antes da entrega: o resumo para o analista só abria pela nota de transferência comum. A nota do limite também abre, como "Resumo do caso".
 
 ## Fidelidade
 
-Não existe quadro no nexo.pen para estes estados, então a medida é contra as peças reutilizadas, na tela real (1440 × 900):
+### O que o nexo.pen desenha não mudou
+
+As telas que o nexo.pen desenha foram fotografadas no `main` e nesta branch, com os mesmos dados de exemplo, a 1440 × 900, em builds de produção. Os dígitos viram 0 nas duas, para os horários de um seed rodado em outro minuto não contarem como diferença.
+
+| Tela | Pixels diferentes |
+|---|---|
+| Login | 0 de 1.296.000 |
+| Chat vazio (Ana) | 0 |
+| Chat com o agent (Bruno) | 0 |
+| Chat esperando o analista (Carla) | 0 |
+| Chat com o analista (Fábio) | 0 |
+| Console, Para você | 0 |
+| Console, conversa esperando (Diego) | 0 |
+| Console, conversa assumida (Fábio) | 0 |
+
+A primeira medição achou 106 pixels no contador, em três letras. Eu tinha posto `tabular-nums` e uma transição de cor nele, e passado a desenhá-lo como um texto só; o chat sempre o desenhou em quatro pedaços ("12", "/", "30", " mensagens…"), e o navegador põe as letras de pedaços separados a uma fração de pixel das de um texto inteiro. Os três voltaram como eram. O texto também voltou a ser o do design, "nesta sessão", com "Restam 5 mensagens nesta sessão" nas últimas cinco. Imagens: [main-x-feature6-chat.png](provas/main-x-feature6-chat.png) e [main-x-feature6-console.png](provas/main-x-feature6-console.png).
+
+### Os estados novos
+
+Não existe quadro no nexo.pen para eles, então a medida é contra as peças reutilizadas, na tela real (1440 × 900):
 
 | Peça nova | Peça de origem | Resultado |
 |---|---|---|
 | Botão "Nova conversa" | chip de sugestão da tela vazia | altura 31 px, raio 8 px, 13,5/17 px peso 500, mesma cor, mesmo contorno |
 | Pílula de dia no chat | pílula de dia do console | altura 23 px, 12/15 px peso 500, mesma cor de texto. O fundo muda de propósito: o console a desenha branca sobre o cinza dele; o chat é branco, então ela usa o cinza das pílulas neutras (`bg-desk`) |
-| Contador | contador da feature 2 | mesma posição e 12,5/15 px; ganha `tabular-nums` e o tom de aviso do sistema nas últimas cinco |
+| Contador | contador da feature 2 | o mesmo, pixel a pixel, até 24; nas últimas cinco, o texto diz quanto falta no tom de aviso do sistema |
 | Nota do limite | nota do console (`SystemNote`) | mesma peça. O ícone segue o que o limite fez: encerrou, transferiu ou ficou com o analista |
 
 No celular, a nota quebra em duas linhas. O "·" fica no fim da linha de cima, nunca abrindo a de baixo; o leitor de tela lê o texto original.
@@ -101,3 +120,4 @@ A medida pela rede variava até 15 KB entre rodadas, por isso ficou a do build. 
 - [chat-7-limite-transferiu.png](provas/chat-7-limite-transferiu.png) e [chat-8-analista-continua.png](provas/chat-8-analista-continua.png): o limite com pergunta aberta, e o Rafael na conversa.
 - [console-1-limite-esperando.png](provas/console-1-limite-esperando.png) e [console-2-assumido-so-encerrar.png](provas/console-2-assumido-so-encerrar.png): a lista, o resumo do caso e o assumido só com Encerrar.
 - [celular-resta-1.png](provas/celular-resta-1.png) e [celular-limite-encerrou.png](provas/celular-limite-encerrou.png): 375 px.
+- [main-x-feature6-chat.png](provas/main-x-feature6-chat.png) e [main-x-feature6-console.png](provas/main-x-feature6-console.png): main, feature 6 e a diferença, toda preta.

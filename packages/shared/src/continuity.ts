@@ -125,7 +125,7 @@ export function counterText(
   if (limitReached && paused) return { text: `Limite do Nexo atingido · ${analystName ?? "um analista"} continua com você`, tone: "muted" };
   const left = MESSAGE_LIMIT - count;
   if (state === "with_agent" && count >= LIMIT_WARNING_FROM && left > 0) {
-    return { text: left === 1 ? "Resta 1 mensagem nesta conversa" : `Restam ${left} mensagens nesta conversa`, tone: "warning" };
+    return { text: left === 1 ? "Resta 1 mensagem nesta sessão" : `Restam ${left} mensagens nesta sessão`, tone: "warning" };
   }
-  return { text: `${Math.min(count, MESSAGE_LIMIT)}/${MESSAGE_LIMIT} mensagens nesta conversa`, tone: "muted" };
+  return { text: `${Math.min(count, MESSAGE_LIMIT)}/${MESSAGE_LIMIT} mensagens nesta sessão`, tone: "muted" };
 }

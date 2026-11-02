@@ -23,7 +23,7 @@ export default function AttendanceLoading() {
               Enviar
             </span>
           </div>
-          <p className="self-end text-12.5 text-ink-3">–/{MESSAGE_LIMIT} mensagens nesta conversa</p>
+          <p className="self-end text-12.5 text-ink-3">–/{MESSAGE_LIMIT} mensagens nesta sessão</p>
         </div>
       </main>
     </>

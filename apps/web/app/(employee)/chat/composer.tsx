@@ -93,13 +93,31 @@ export function Composer({
       </div>
       <p
         id="chat-counter"
-        className={`self-end text-12.5 tabular-nums transition-colors duration-200 ${counter.tone === "warning" ? "text-warning-text" : "text-ink-3"}`}
+        className={`self-end text-12.5 ${counter.tone === "warning" ? "text-warning-text" : "text-ink-3"}`}
       >
-        {counter.text}
+        <CounterText text={counter.text} />
       </p>
       <p role="status" className="sr-only">
         {announceCounter ? counter.text : ""}
       </p>
     </form>
+  );
+}
+
+/**
+ * The count in the four runs of text the chat always drew it with ("12", "/", "30", " mensagens…"): the browser places
+ * the letters of separate runs a fraction of a pixel apart from one run, and nexo.pen was measured against these.
+ */
+function CounterText({ text }: { text: string }) {
+  const runs = text.match(/^(\d+)(\/)(\d+)( .+)$/);
+  if (!runs) return text;
+  const [, count, slash, limit, rest] = runs;
+  return (
+    <>
+      {count}
+      {slash}
+      {limit}
+      {rest}
+    </>
   );
 }

@@ -56,7 +56,7 @@ test("Gabriela comes back three days later to the same conversation, each day op
 
   // Where she stopped, with the counter of the conversation.
   await expect(page.getByRole("article", { name: "Você" }).first()).toHaveText("A impressora do 3º andar não imprime");
-  await expect(counter(page)).toHaveText("2/30 mensagens nesta conversa");
+  await expect(counter(page)).toHaveText("2/30 mensagens nesta sessão");
   // A conversation of a single day has no pill, as the chat of the design.
   await expect(page.getByText(dayAndMonth(lastAt), { exact: true })).toHaveCount(0);
 
@@ -64,7 +64,7 @@ test("Gabriela comes back three days later to the same conversation, each day op
   // Now it spans two days: each opens with its pill, today's above what she wrote now.
   await expect(page.getByText(dayAndMonth(lastAt), { exact: true })).toBeVisible();
   await expect(page.getByText("Hoje", { exact: true })).toBeVisible();
-  await expect(counter(page)).toHaveText("3/30 mensagens nesta conversa");
+  await expect(counter(page)).toHaveText("3/30 mensagens nesta sessão");
   await expect(replies(page).last()).toContainText("8h");
 });
 
@@ -73,11 +73,11 @@ test("near the limit the counter says what is left; the 30th is answered and, wi
   const page = await newPage(browser);
   await signIn(page, "gabriela.rocha@nexo.com.br");
 
-  await expect(counter(page)).toHaveText("Restam 2 mensagens nesta conversa");
+  await expect(counter(page)).toHaveText("Restam 2 mensagens nesta sessão");
   await expect(counter(page)).toHaveClass(/text-warning-text/);
   await ask(page, "Qual o horário do service desk?");
-  await expect(counter(page)).toHaveText("Resta 1 mensagem nesta conversa");
-  await expect(page.getByRole("status").filter({ hasText: "Resta 1 mensagem nesta conversa" })).toBeAttached();
+  await expect(counter(page)).toHaveText("Resta 1 mensagem nesta sessão");
+  await expect(page.getByRole("status").filter({ hasText: "Resta 1 mensagem nesta sessão" })).toBeAttached();
 
   await ask(page, "E qual o horário do service desk no plantão?");
   // The 30th is answered like any other, then the limit closes it: one note, the way to start over, and the composer for it.
@@ -87,19 +87,19 @@ test("near the limit the counter says what is left; the 30th is answered and, wi
   await expect(page.getByRole("separator", { name: /Limite de 30 mensagens/ })).toHaveCount(1);
   await expect(page.getByRole("button", { name: "Nova conversa" })).toBeVisible();
   await expect(composer(page)).toHaveAttribute("placeholder", "Comece uma nova conversa…");
-  await expect(counter(page)).toHaveText("30/30 mensagens nesta conversa");
+  await expect(counter(page)).toHaveText("30/30 mensagens nesta sessão");
 
   // A reload shows how it ended, until she starts another.
   await page.reload();
   await expect(page.getByRole("separator", { name: /conversa encerrada/ })).toBeVisible();
   await page.getByRole("button", { name: "Nova conversa" }).click();
   await expect(page.getByRole("heading", { name: "Oi, Gabriela. O que está acontecendo?" })).toBeVisible();
-  await expect(counter(page)).toHaveText("0/30 mensagens nesta conversa");
+  await expect(counter(page)).toHaveText("0/30 mensagens nesta sessão");
   await expect(composer(page)).toBeFocused();
 
   await ask(page, "Qual o horário do service desk?");
   await expect(page.getByRole("article", { name: "Você" })).toHaveCount(1);
-  await expect(counter(page)).toHaveText("1/30 mensagens nesta conversa");
+  await expect(counter(page)).toHaveText("1/30 mensagens nesta sessão");
 });
 
 test("Elisa reads how her last conversation ended, and writing there starts a new one on a clean screen", async ({ browser }) => {
@@ -118,7 +118,7 @@ test("with a question open at the limit an analyst gets it, and Rafael can only 
   await conversationWith("emp-elisa", { count: 29, lastAt: new Date(Date.now() - 20 * 60 * 1000), topic: "Dúvidas sobre o Teams" });
   const elisa = await newPage(browser);
   await signIn(elisa, "elisa.prado@nexo.com.br");
-  await expect(counter(elisa)).toHaveText("Resta 1 mensagem nesta conversa");
+  await expect(counter(elisa)).toHaveText("Resta 1 mensagem nesta sessão");
 
   await ask(elisa, "Minha impressora não imprime");
   await expect(replies(elisa).last().getByRole("button", { name: "Só eu" })).toBeVisible();

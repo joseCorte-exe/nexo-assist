@@ -127,18 +127,18 @@ describe("counterText", () => {
   const withAgent = { state: "with_agent" as const, limitReached: false, analystName: null };
 
   it("counts the conversation until the last five", () => {
-    expect(counterText(0, withAgent)).toEqual({ text: "0/30 mensagens nesta conversa", tone: "muted" });
-    expect(counterText(24, withAgent)).toEqual({ text: "24/30 mensagens nesta conversa", tone: "muted" });
+    expect(counterText(0, withAgent)).toEqual({ text: "0/30 mensagens nesta sessão", tone: "muted" });
+    expect(counterText(24, withAgent)).toEqual({ text: "24/30 mensagens nesta sessão", tone: "muted" });
   });
 
   it("tells what is left from 25 on, while the Nexo answers", () => {
-    expect(counterText(25, withAgent)).toEqual({ text: "Restam 5 mensagens nesta conversa", tone: "warning" });
-    expect(counterText(29, withAgent)).toEqual({ text: "Resta 1 mensagem nesta conversa", tone: "warning" });
+    expect(counterText(25, withAgent)).toEqual({ text: "Restam 5 mensagens nesta sessão", tone: "warning" });
+    expect(counterText(29, withAgent)).toEqual({ text: "Resta 1 mensagem nesta sessão", tone: "warning" });
   });
 
   it("does not warn while an analyst has her: nothing changes for her at 30", () => {
     expect(counterText(27, { state: "with_analyst", limitReached: false, analystName: "Rafael Lima" })).toEqual({
-      text: "27/30 mensagens nesta conversa",
+      text: "27/30 mensagens nesta sessão",
       tone: "muted",
     });
   });
@@ -155,6 +155,6 @@ describe("counterText", () => {
   });
 
   it("a conversation closed by the limit counts 30 of 30", () => {
-    expect(counterText(30, { state: "closed", limitReached: true, analystName: null })).toEqual({ text: "30/30 mensagens nesta conversa", tone: "muted" });
+    expect(counterText(30, { state: "closed", limitReached: true, analystName: null })).toEqual({ text: "30/30 mensagens nesta sessão", tone: "muted" });
   });
 });
