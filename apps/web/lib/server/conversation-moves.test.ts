@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { conversations } from "@/db/schema";
-import { moves } from "./conversation-moves";
+import { attends, moves } from "./conversation-moves";
 
 // Who may move a conversation, and from where (ARQUITETURA.md, sections 2 and 6), without a database: the rules are
 // written once, here, and the update only checks the row did not change since it was read.
@@ -31,6 +31,8 @@ const row = (fields: Partial<Row>): Row => ({
   lastActivityAt: NOW,
   employeeSeenAt: null,
   employeeTypingUntil: null,
+  needsAnalystSince: null,
+  version: 0,
   ...fields,
 });
 
@@ -47,6 +49,7 @@ const transfer = moves.transfer({
   ticketId: "INC-20311",
   waitUntil: NOW,
   confidence: 0.82,
+  turnStartedAt: new Date(NOW.getTime() - 4_000),
 });
 
 describe("transfer", () => {
@@ -56,8 +59,21 @@ describe("transfer", () => {
   });
 
   it("waits for the level with the summary and the confidence, and notes where it went", () => {
-    expect(transfer.set(NOW)).toMatchObject({ state: "waiting_for_analyst", targetLevel: "N2", transferConfidence: 0.82, transferredAt: NOW });
+    expect(transfer.set(NOW)).toMatchObject({
+      state: "waiting_for_analyst",
+      targetLevel: "N2",
+      transferConfidence: 0.82,
+      transferredAt: NOW,
+      // She needs an analyst from the message the transferring reply answered.
+      needsAnalystSince: new Date(NOW.getTime() - 4_000),
+    });
     expect(transfer.note).toEqual({ authorId: null, note: { event: "transferred", level: "N2" }, text: "Transferida para o Suporte N2.", memory: false });
+  });
+
+  it("puts its note after the reply that announced it, even in the millisecond the turn started", () => {
+    const started = new Date(NOW.getTime() - 4_000);
+    expect(transfer.notePlace?.(NOW)).toEqual(NOW);
+    expect(transfer.notePlace?.(started)).toEqual(new Date(started.getTime() + 2));
   });
 });
 
@@ -102,6 +118,15 @@ describe("release", () => {
   });
 });
 
+describe("attends", () => {
+  it("lets only the analyst attending write, and says why to anyone else", () => {
+    expect(attends(withRafael, rafael)).toBe("apply");
+    expect(attends(withRafael, juliana)).toEqual({ refused: "taken" });
+    expect(attends(waiting, rafael)).toEqual({ refused: "not_assumed" });
+    expect(attends(closedByRafael, rafael)).toEqual({ refused: "closed" });
+  });
+});
+
 describe("close", () => {
   it("ends a conversation this analyst attends", () => {
     expect(moves.close(rafael).decide(withRafael)).toBe("apply");
@@ -112,7 +137,7 @@ describe("close", () => {
     expect(moves.close(rafael).decide(closedByRafael)).toBe("already");
     expect(moves.close(juliana).decide(closedByRafael)).toEqual({ refused: "closed" });
     expect(moves.close(rafael).decide(closedByHer)).toEqual({ refused: "closed" });
-    expect(moves.close(juliana).decide(withRafael)).toEqual({ refused: "not_assumed" });
+    expect(moves.close(juliana).decide(withRafael)).toEqual({ refused: "taken" });
     expect(moves.close(rafael).decide(waiting)).toEqual({ refused: "not_assumed" });
   });
 });

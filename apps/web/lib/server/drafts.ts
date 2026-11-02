@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { type DraftStore, saveNote } from "@nexo/agent";
+import { type DraftStore, rememberNote } from "@nexo/agent";
 import {
   CATEGORY_LABEL,
   DRAFT_COPY,
@@ -164,12 +164,8 @@ async function settle(deps: Deps, { draft, employeeId, from, event, set, note }:
     const [current] = await deps.db.select().from(drafts).where(eq(drafts.id, draft.id));
     return current ?? draft;
   }
-  try {
-    await saveNote(deps.memory, { id, conversationId: draft.conversationId, employeeId, text: note, at });
-  } catch (error) {
-    // The draft and its note in the conversation are saved: a memory that did not take the note only costs context.
-    console.error("note not copied to the agent memory", { draftId: draft.id, event, error: (error as Error).name });
-  }
+  // The draft and its note in the conversation are saved: the memory only adds context.
+  await rememberNote(deps.memory, { id, conversationId: draft.conversationId, employeeId, text: note, at });
   return row;
 }
 

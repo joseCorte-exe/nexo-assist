@@ -350,6 +350,10 @@ export async function seed(db: Db, now: Date = new Date()) {
 
       const { transfer } = conversation;
       const transferredAt = transfer ? ago(transfer.ago) : null;
+      // The message of hers the transferring reply answered: the last one she wrote up to the transfer.
+      const asked = transfer
+        ? conversation.messages.filter((message) => message.author === "employee" && message.ago >= transfer.ago).at(-1)
+        : undefined;
 
       await tx.insert(conversations).values({
         id: conversation.id,
@@ -364,6 +368,7 @@ export async function seed(db: Db, now: Date = new Date()) {
         messageCount: conversation.messages.filter((message) => message.author === "employee").length,
         transferConfidence: transfer?.confidence ?? null,
         transferredAt,
+        needsAnalystSince: asked ? ago(asked.ago) : null,
         assumedAt: assumedAgo(conversation),
         waitUntil:
           transfer && transferredAt && conversation.state === "waiting_for_analyst"

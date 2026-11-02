@@ -19,6 +19,16 @@ import type { decisions, messages } from "@/db/schema";
 type MessageRow = typeof messages.$inferSelect;
 type DecisionRow = typeof decisions.$inferSelect;
 
+// Where what a turn writes goes in the conversation: her message where the turn started, the reply right after it, and
+// what the reply did (the note of a transfer) after the reply, even within the same millisecond. The messages are read
+// in the order of created_at.
+
+/** The place of the agent reply: right after the message it answers. */
+export const replyPlace = (turnStartedAt: Date) => new Date(turnStartedAt.getTime() + 1);
+
+/** The place of something the reply did at a moment: after the reply. */
+export const afterReplyPlace = (turnStartedAt: Date, at: Date) => new Date(Math.max(at.getTime(), turnStartedAt.getTime() + 2));
+
 /** The data of the first part of a type, as it was saved, to be checked against its schema. */
 function dataOf(row: MessageRow, type: "data-note" | "data-analyst"): unknown {
   const part = row.parts?.find((one) => one.type === type);

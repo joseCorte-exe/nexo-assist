@@ -8,6 +8,8 @@ import { createTools, newReplyTurn, type TicketDesk, type TransferRecord, type T
 
 // Monday 10:05 in São Paulo.
 const NOW = new Date("2026-10-26T13:05:00Z");
+/** Her message, a few seconds before the transfer. */
+const TURN_STARTED_AT = new Date(NOW.getTime() - 4_000);
 const DAY = 24 * 60 * 60 * 1000;
 
 function detail(fields: Partial<TicketDetail> & Pick<TicketDetail, "id" | "priority">, openedDaysAgo: number): TicketDetail {
@@ -77,7 +79,7 @@ function replyContext({ confidence = null as number | null, employeeId = "emp-an
   return new RequestContext<unknown>([
     ["employeeId", employeeId],
     ["conversationId", "conv-ana"],
-    ["turn", { ...newReplyTurn(), confidence }],
+    ["turn", { ...newReplyTurn(TURN_STARTED_AT), confidence }],
   ]);
 }
 
@@ -108,6 +110,7 @@ describe("transferToAnalyst", () => {
         ticketId: "INC-20311",
         waitUntil: new Date("2026-10-29T13:05:00.000Z"),
         confidence: null,
+        turnStartedAt: TURN_STARTED_AT,
         at: NOW,
       },
     ]);

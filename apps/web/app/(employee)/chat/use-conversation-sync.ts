@@ -1,6 +1,6 @@
 "use client";
 
-import type { ConversationResponse, ConversationState, PresenceResponse } from "@nexo/shared";
+import { type ConversationResponse, type ConversationState, isPaused, type PresenceResponse } from "@nexo/shared";
 import { useCallback, useEffect, useRef } from "react";
 import { latestOnly } from "@/lib/poller";
 import { usePolling } from "@/lib/use-polling";
@@ -12,7 +12,6 @@ const HIDDEN_POLL_MS = 15_000;
 /** The chat tells the console it is open this often; the console counts it online for 45 s. */
 const PRESENCE_MS = 20_000;
 
-const pausedStates = new Set<ConversationState>(["waiting_for_analyst", "with_analyst"]);
 
 /**
  * Keeps her chat in step with the console. While an analyst has the conversation it reads it again every 3 s (15 s in
@@ -26,7 +25,8 @@ export function useConversationSync({
 }: {
   conversationId: string | null;
   state: ConversationState | null;
-  onLoaded: (saved: ConversationResponse) => void;
+  /** replace: the messages as saved, instead of merged with what the chat has. */
+  onLoaded: (saved: ConversationResponse, options: { replace: boolean }) => void;
 }) {
   const loaded = useRef(onLoaded);
   loaded.current = onLoaded;
@@ -35,15 +35,23 @@ export function useConversationSync({
 
   // A read that comes back after a newer one is not drawn over it.
   const latest = useRef(latestOnly()).current;
-  const refresh = useCallback(async () => {
-    const id = known.current.conversationId;
-    const ticket = latest.begin();
-    const query = id ? `?${new URLSearchParams({ conversationId: id })}` : "";
-    const response = await fetch(`/api/conversation${query}`, { cache: "no-store" }).catch(() => null);
-    if (!response?.ok) return;
-    const saved = (await response.json()) as ConversationResponse;
-    if (latest.take(ticket)) loaded.current(saved);
-  }, [latest]);
+  /**
+   * The one read of the conversation the chat makes: the one on screen, even closed, or with replace the active one, its
+   * messages as saved (a reply the network lost). Answers whether the server answered.
+   */
+  const refresh = useCallback(
+    async ({ replace = false }: { replace?: boolean } = {}) => {
+      const id = replace ? null : known.current.conversationId;
+      const ticket = latest.begin();
+      const query = id ? `?${new URLSearchParams({ conversationId: id })}` : "";
+      const response = await fetch(`/api/conversation${query}`, { cache: "no-store" }).catch(() => null);
+      if (!response?.ok) return false;
+      const saved = (await response.json()) as ConversationResponse;
+      if (latest.take(ticket)) loaded.current(saved, { replace });
+      return true;
+    },
+    [latest],
+  );
 
   // The beat every 20 s repeats whether she writes, so it never turns "digitando…" off in the middle of a word.
   const writing = useRef(false);
@@ -63,7 +71,7 @@ export function useConversationSync({
     [refresh],
   );
 
-  usePolling(refresh, { intervalMs: POLL_MS, hiddenIntervalMs: HIDDEN_POLL_MS, enabled: state !== null && pausedStates.has(state) });
+  usePolling(async () => void (await refresh()), { intervalMs: POLL_MS, hiddenIntervalMs: HIDDEN_POLL_MS, enabled: state !== null && isPaused(state) });
 
   useEffect(() => {
     const beat = () => {

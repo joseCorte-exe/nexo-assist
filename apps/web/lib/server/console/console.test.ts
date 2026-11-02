@@ -268,6 +268,7 @@ describe("assume, release and close", () => {
           ticketId: "INC-20311",
           waitUntil: LATER,
           confidence: null,
+          turnStartedAt: NOW,
           at: NOW,
         });
       }
@@ -378,7 +379,25 @@ describe("POST /api/console/conversations/:id/messages", () => {
     const waiting = await write(deps, "conv-diego", "Oi, Diego.");
     expect(waiting.status).toBe(409);
     expect(waiting.body).toEqual({ error: { code: "not_assumed", message: "Assuma o atendimento antes." } });
-    expect((await write(deps, "conv-fabio", "Oi, Fábio.", undefined, await julianaCookie())).status).toBe(409);
+    // Fábio's conversation is with Rafael: she is told who has it.
+    const taken = await write(deps, "conv-fabio", "Oi, Fábio.", undefined, await julianaCookie());
+    expect(taken.status).toBe(409);
+    expect(taken.body).toEqual({ error: { code: "assumed_by_other", message: "Rafael Lima já está atendendo esta conversa." } });
+  });
+
+  it("never writes past a move made between reading the conversation and writing the message", async () => {
+    const deps = await testDeps();
+    const batch = deps.db.batch.bind(deps.db);
+    deps.db.batch = (async (queries: Parameters<typeof batch>[0]) => {
+      deps.db.batch = batch;
+      // Rafael hands Fábio back to the agent and takes him again: the same state, a newer version.
+      await act(deps, releaseHandler, "conv-fabio");
+      await act(deps, assumeHandler, "conv-fabio");
+      return batch(queries);
+    }) as unknown as typeof deps.db.batch;
+    const sent = await write(deps, "conv-fabio", "Oi, Fábio.");
+    expect(sent.status).toBe(409);
+    expect(sent.body.error.code).toBe("conversation_busy");
   });
 
   it("refuses an empty message", async () => {

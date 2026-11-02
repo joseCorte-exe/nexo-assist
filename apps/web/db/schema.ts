@@ -34,6 +34,11 @@ export const conversations = sqliteTable(
     /** The confidence the agent recorded in the reply that transferred: "Agent pediu ajuda · confiança 41%". */
     transferConfidence: real("transfer_confidence"),
     transferredAt: timestamp("transferred_at"),
+    /**
+     * When it started needing an analyst this time: the message of hers the transferring reply answered. Her messages
+     * from then on are unread for an analyst who has not read them.
+     */
+    needsAnalystSince: timestamp("needs_analyst_since"),
     /** The analyst attending, or who closed it. */
     analystId: text("analyst_id"),
     assumedAt: timestamp("assumed_at"),
@@ -52,6 +57,8 @@ export const conversations = sqliteTable(
     /** The chat of the employee was open, and she was writing, until these moments: the console's "online" and "digitando…". */
     employeeSeenAt: timestamp("employee_seen_at"),
     employeeTypingUntil: timestamp("employee_typing_until"),
+    /** Moves with each transfer, assume, release and close: a move only writes over the version it read. */
+    version: integer("version").notNull().default(0),
   },
   (table) => [
     // The list of the console, the most recent activity first.

@@ -55,6 +55,8 @@ export type TransferRecord = {
   waitUntil: Date;
   /** How sure the decision of the reply was, for the console's "Agent pediu ajuda · confiança 41%". */
   confidence: number | null;
+  /** When the reply that transferred started: the message of hers it answers, from which she needs an analyst. */
+  turnStartedAt: Date;
   at: Date;
 };
 
@@ -70,11 +72,11 @@ export type TransferStore = {
 export const MIN_CONFIDENCE = 0.6;
 
 /**
- * What one reply knows across its steps: how sure its decision was, once recorded, and the transfer it made, if any.
- * The agent puts one in the request context of each reply.
+ * What one reply knows across its steps: when it started, how sure its decision was, once recorded, and the transfer it
+ * made, if any. The agent puts one in the request context of each reply.
  */
-export type ReplyTurn = { confidence: number | null; transfer: Promise<TransferToAnalystOutput> | null };
-export const newReplyTurn = (): ReplyTurn => ({ confidence: null, transfer: null });
+export type ReplyTurn = { startedAt: Date; confidence: number | null; transfer: Promise<TransferToAnalystOutput> | null };
+export const newReplyTurn = (startedAt: Date): ReplyTurn => ({ startedAt, confidence: null, transfer: null });
 
 /** A draft as the tool hands it to be saved: what the card shows, plus what the console and the analyst need. */
 export type DraftRecord = {
@@ -387,7 +389,7 @@ export function createTools({
       turn.transfer = transferOnce(input, {
         employeeId: context.requestContext.get("employeeId"),
         conversationId: context.requestContext.get("conversationId"),
-        confidence: turn.confidence,
+        turn,
       });
       const output = await turn.transfer;
       // A refused call is not a transfer: the model may call again, fixed.
@@ -398,7 +400,7 @@ export function createTools({
 
   async function transferOnce(
     input: TransferToAnalystInput,
-    { employeeId, conversationId, confidence }: TurnContext & { confidence: number | null },
+    { employeeId, conversationId, turn: { confidence, startedAt } }: TurnContext & { turn: ReplyTurn },
   ): Promise<TransferToAnalystOutput> {
     let ticket: Ticket | null = null;
     if (input.ticketId) {
@@ -430,6 +432,7 @@ export function createTools({
       ticketId: ticket?.id ?? null,
       waitUntil: route.waitUntil,
       confidence,
+      turnStartedAt: startedAt,
       at,
     });
     if (!saved.transferred) {

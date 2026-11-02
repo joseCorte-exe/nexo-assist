@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { toAISdkStream } from "@mastra/ai-sdk";
-import { saveNote, streamReply } from "@nexo/agent";
-import { chatInput, type ConversationView, type NexoUIMessage, replyText, shownDraft, summarizeTurn, withToolErrors } from "@nexo/shared";
+import { rememberNote, streamReply } from "@nexo/agent";
+import { chatInput, type ConversationView, isPaused, type NexoUIMessage, replyText, shownDraft, summarizeTurn, withToolErrors } from "@nexo/shared";
 import { consumeStream, createUIMessageStream, createUIMessageStreamResponse, type InferUIMessageChunk } from "ai";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NextRequest } from "next/server";
@@ -10,6 +10,7 @@ import { conversations, decisions, drafts, messages } from "@/db/schema";
 import { activeConversationOf, toConversationView, viewColumns } from "./conversation";
 import type { Deps } from "./deps";
 import { jsonError, readBody, readEmployeeSession } from "./http";
+import { replyPlace } from "./messages";
 
 const AGENT_FAILED = "O Nexo não conseguiu responder. Tente de novo.";
 
@@ -80,15 +81,15 @@ async function startTurn(deps: Pick<Deps, "db" | "directory">, { employeeId, id,
   const { mine, answered, ...row } = conversation;
   // Anything but this employee's unanswered message would be answered without being saved or counted.
   if (!mine) return { ok: false, reason: "message_conflict" } satisfies StartedTurn;
-  const paused = row.state !== "with_agent";
+  const paused = isPaused(row.state);
   if (!paused && answered) return { ok: false, reason: "already_answered" } satisfies StartedTurn;
   return { ok: true, conversation: await toConversationView(deps, row), startedAt: now, paused } satisfies StartedTurn;
 }
 
 /**
  * Saves the agent reply with the parts it streamed, its decision, and marks the first response of the conversation, in
- * one batch. The reply goes right after the message it answers, where the turn started: whatever the turn did meanwhile
- * (the note of a transfer) comes after it, as nexo.pen draws them.
+ * one batch. The reply goes right after the message it answers, so whatever it did meanwhile (the note of a transfer)
+ * comes after it, as nexo.pen draws them.
  */
 async function saveReply(
   db: Db,
@@ -100,7 +101,7 @@ async function saveReply(
   const { record, toolsUsed } = summarizeTurn(parts);
   await db.batch([
     // The text column is the reply as a person reads it outside the chat: the console and the list show it.
-    db.insert(messages).values({ id: reply.id, conversationId, author: "agent", text: replyText(parts), parts, createdAt: new Date(startedAt.getTime() + 1) }),
+    db.insert(messages).values({ id: reply.id, conversationId, author: "agent", text: replyText(parts), parts, createdAt: replyPlace(startedAt) }),
     db.insert(decisions).values({ id: `dec-${randomUUID()}`, messageId: reply.id, toolsUsed, ...record }),
     db
       .update(conversations)
@@ -127,11 +128,7 @@ async function pausedTurn(
   deps: Deps,
   { conversation, employeeId, id, text, at }: { conversation: ConversationView; employeeId: string; id: string; text: string; at: Date },
 ) {
-  try {
-    await saveNote(deps.memory, { id, conversationId: conversation.id, employeeId, text, at, prefix: null });
-  } catch (error) {
-    console.error("message not copied to the agent memory", { conversationId: conversation.id, error: (error as Error).name });
-  }
+  await rememberNote(deps.memory, { id, conversationId: conversation.id, employeeId, text, at, prefix: null });
   const stream = createUIMessageStream<NexoUIMessage>({
     execute: ({ writer }) => {
       writer.write({ type: "start" });
@@ -160,7 +157,7 @@ export async function chat(request: NextRequest, deps: Deps) {
 
   const { conversation, startedAt } = turn;
   if (turn.paused) return pausedTurn(deps, { conversation, employeeId, id, text, at: startedAt });
-  const reply = streamReply(deps.agent, { conversationId: conversation.id, employeeId, text });
+  const reply = streamReply(deps.agent, { conversationId: conversation.id, employeeId, text, startedAt });
   const stream = createUIMessageStream<NexoUIMessage>({
     execute: async ({ writer }) => {
       writer.write({ type: "data-conversation", data: conversation });

@@ -36,6 +36,13 @@
       "when": 1793423881857,
       "tag": "0004_console",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1793580669092,
+      "tag": "0005_conversation_version",
+      "breakpoints": true
     }
   ]
 }

@@ -6,6 +6,7 @@ export {
   createMemory,
   createNexoAgent,
   type NexoAgent,
+  rememberNote,
   SCREEN_NOTE,
   saveNote,
   streamReply,

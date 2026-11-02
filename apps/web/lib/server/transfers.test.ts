@@ -129,6 +129,7 @@ describe("createTransferStore", () => {
     ticketId: null,
     waitUntil: new Date(NOW.getTime() + 60 * 60 * 1000),
     confidence: 0.82,
+    turnStartedAt: new Date(NOW.getTime() - 4_000),
     at: NOW,
   });
 

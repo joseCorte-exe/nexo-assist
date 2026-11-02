@@ -1,28 +1,34 @@
 import { randomUUID } from "node:crypto";
-import { type AgentMemory, CONSOLE_NOTE, saveNote } from "@nexo/agent";
+import { type AgentMemory, CONSOLE_NOTE, rememberNote } from "@nexo/agent";
 import { type Analyst, type AnalystLevel, type ChatNote, LEVEL_LABEL, type NexoUIMessage, type NoteView, type TransferReason } from "@nexo/shared";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { conversations, messages } from "@/db/schema";
+import { afterReplyPlace } from "./messages";
 
 // How a conversation moves between the agent and the analysts (ARQUITETURA.md, sections 2 and 6): the agent transfers
 // it; an analyst assumes, releases or closes it. Each move says, without a database, whether it applies to the row as it
-// was read, what it sets and what its note says. applyMove then writes it with an update that only checks the row did
-// not change since it was read, and the note in the same batch, written only if the update changed the row: two clicks,
-// two tabs or two analysts never leave two notes, and a move that lost the race is decided again on the row that won.
+// was read, what it sets and what its note says. applyMove then writes it over the version it read, and the note in the
+// same batch, written only if the update changed the row: two clicks, two tabs or two analysts never leave two notes,
+// and a move that lost the race is decided again on the row that won.
 
 type Row = typeof conversations.$inferSelect;
 type Who = Pick<Analyst, "id" | "name" | "level">;
 
-export type Refusal = "closed" | "not_assumed" | "taken" | "not_with_agent";
-type Decision = "apply" | "already" | { refused: Refusal };
+/** Why an analyst cannot do it: the conversation ended, they do not attend it, or another analyst does. */
+export type ConsoleRefusal = "closed" | "not_assumed" | "taken";
+/** Why the agent cannot transfer: it no longer has the conversation. */
+type AgentRefusal = "not_with_agent";
+export type Decision<Refusal extends string> = "apply" | "already" | { refused: Refusal };
 
-export type Move = {
+export type Move<Refusal extends string> = {
   /** On the row as it was read: move it, answer it as it is (it already is where this move takes it), or refuse. */
-  decide: (row: Row) => Decision;
+  decide: (row: Row) => Decision<Refusal>;
   set: (at: Date) => Partial<Row>;
   /** The note between the messages. The text is what the agent reads: in the text column, and in its memory if asked. */
   note: { authorId: string | null; note: NoteView; text: string; memory: boolean };
+  /** Where the note goes among the messages; when it happened, unless said otherwise. */
+  notePlace?: (at: Date) => Date;
 };
 
 export type TransferFields = {
@@ -32,16 +38,21 @@ export type TransferFields = {
   ticketId: string | null;
   waitUntil: Date;
   confidence: number | null;
+  turnStartedAt: Date;
 };
 
-const refuse = (refused: Refusal): Decision => ({ refused });
+const refuse = <Refusal extends string>(refused: Refusal) => ({ refused });
 
-/** Taken by an analyst: by this one it already is, by another it is theirs. */
-const attended = (row: Row, who: Who): Decision => (row.analystId === who.id ? "already" : refuse("taken"));
+/** Whether this analyst attends the conversation, and may write in it or close it; if not, why. */
+export function attends(row: Row, who: Who): "apply" | { refused: ConsoleRefusal } {
+  if (row.state === "closed") return refuse("closed");
+  if (row.state !== "with_analyst") return refuse("not_assumed");
+  return row.analystId === who.id ? "apply" : refuse("taken");
+}
 
 export const moves = {
   /** The agent hands the conversation to an analyst of the level, while it still has it. */
-  transfer: ({ level, reason, summary, ticketId, waitUntil, confidence }: TransferFields): Move => ({
+  transfer: ({ level, reason, summary, ticketId, waitUntil, confidence, turnStartedAt }: TransferFields): Move<AgentRefusal> => ({
     decide: (row) => (row.state === "with_agent" ? "apply" : refuse("not_with_agent")),
     set: (at) => ({
       state: "waiting_for_analyst",
@@ -52,18 +63,21 @@ export const moves = {
       ticketId,
       waitUntil,
       transferredAt: at,
+      needsAnalystSince: turnStartedAt,
       analystId: null,
       assumedAt: null,
     }),
-    // The agent wrote the reply that announced it: its memory already has it.
+    // The agent wrote the reply that announced it: its memory already has it. The note goes after that reply.
     note: { authorId: null, note: { event: "transferred", level }, text: `Transferida para o ${LEVEL_LABEL[level]}.`, memory: false },
+    notePlace: (at) => afterReplyPlace(turnStartedAt, at),
   }),
 
   /** Any analyst takes a conversation with the agent or waiting, whatever its level: the agent pauses. */
-  assume: (who: Who): Move => ({
+  assume: (who: Who): Move<ConsoleRefusal> => ({
     decide: (row) => {
       if (row.state === "closed") return refuse("closed");
-      return row.state === "with_analyst" ? attended(row, who) : "apply";
+      if (row.state !== "with_analyst") return "apply";
+      return row.analystId === who.id ? "already" : refuse("taken");
     },
     set: (at) => ({ state: "with_analyst", analystId: who.id, assumedAt: at }),
     note: {
@@ -75,7 +89,7 @@ export const moves = {
   }),
 
   /** Back to the agent: one waiting for an analyst, or one this analyst attends. */
-  release: (who: Who): Move => ({
+  release: (who: Who): Move<ConsoleRefusal> => ({
     decide: (row) => {
       if (row.state === "closed") return refuse("closed");
       if (row.state === "with_agent") return "already";
@@ -91,11 +105,9 @@ export const moves = {
   }),
 
   /** Ends one this analyst attends, as closed by the analyst. The ticket does not change. */
-  close: (who: Who): Move => ({
-    decide: (row) => {
-      if (row.state === "closed") return row.outcome === "closed_by_analyst" && row.analystId === who.id ? "already" : refuse("closed");
-      return row.state === "with_analyst" && row.analystId === who.id ? "apply" : refuse("not_assumed");
-    },
+  close: (who: Who): Move<ConsoleRefusal> => ({
+    decide: (row) =>
+      row.state === "closed" && row.outcome === "closed_by_analyst" && row.analystId === who.id ? "already" : attends(row, who),
     set: (at) => ({ state: "closed", outcome: "closed_by_analyst", closedAt: at }),
     note: {
       authorId: who.id,
@@ -109,19 +121,19 @@ export const moves = {
 /** A move that keeps losing the race to other moves gives up after this many reads. */
 const MAX_ATTEMPTS = 3;
 
-export type MoveResult =
+export type MoveResult<Refusal extends string> =
   /** noteId: the note this move left, the key of what the ticket-service does about it; null if it already was so. */
   | { ok: true; row: Row; noteId: string | null }
   | { ok: false; refused: Refusal; row: Row }
   | { ok: false; refused: "not_found" | "busy"; row: null };
 
 /** Reads the row, decides, and moves it if it did not change since; decided again on the row that won otherwise. */
-export async function applyMove(
+export async function applyMove<Refusal extends string>(
   deps: { db: Db; memory: Pick<AgentMemory, "saveMessages"> },
   conversationId: string,
-  move: Move,
+  move: Move<Refusal>,
   at: Date,
-): Promise<MoveResult> {
+): Promise<MoveResult<Refusal>> {
   const { db } = deps;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const [row] = await db.select().from(conversations).where(eq(conversations.id, conversationId)).limit(1);
@@ -135,32 +147,24 @@ export async function applyMove(
     const [[moved]] = await db.batch([
       db
         .update(conversations)
-        .set(move.set(at))
-        .where(
-          and(
-            eq(conversations.id, conversationId),
-            eq(conversations.state, row.state),
-            row.analystId === null ? isNull(conversations.analystId) : eq(conversations.analystId, row.analystId),
-          ),
-        )
+        .set({ ...move.set(at), version: row.version + 1 })
+        .where(and(eq(conversations.id, conversationId), eq(conversations.version, row.version)))
         .returning(),
-      noteIfMoved(db, { noteId, conversationId, authorId, text, note: { ...note, at: at.toISOString() } }),
+      noteIfMoved(db, {
+        noteId,
+        conversationId,
+        authorId,
+        text,
+        note: { ...note, at: at.toISOString() },
+        place: move.notePlace?.(at) ?? at,
+      }),
     ]);
     if (!moved) continue;
-    if (memory) await remember(deps.memory, { noteId, row: moved, text, at });
+    // The move and its note are saved; the memory tells the agent what happened when the conversation comes back to it.
+    if (memory) await rememberNote(deps.memory, { id: noteId, conversationId, employeeId: moved.employeeId, text, at, prefix: CONSOLE_NOTE });
     return { ok: true, row: moved, noteId };
   }
   return { ok: false, refused: "busy", row: null };
-}
-
-/** The note goes to the agent memory, so the agent knows what happened when the conversation comes back to it. */
-async function remember(memory: Pick<AgentMemory, "saveMessages">, { noteId, row, text, at }: { noteId: string; row: Row; text: string; at: Date }) {
-  try {
-    await saveNote(memory, { id: noteId, conversationId: row.id, employeeId: row.employeeId, text, at, prefix: CONSOLE_NOTE });
-  } catch (error) {
-    // The move and its note are saved: a memory that did not take the note only costs the agent context.
-    console.error("note not copied to the agent memory", { conversationId: row.id, error: (error as Error).name });
-  }
 }
 
 /**
@@ -169,18 +173,20 @@ async function remember(memory: Pick<AgentMemory, "saveMessages">, { noteId, row
  */
 const noteParts = (note: ChatNote): NexoUIMessage["parts"] => [{ type: "data-note", data: note }];
 
-/**
- * The note of a move, in the batch right after its update: changes() reads the statement before it. It goes after every
- * message already there and after the place of the reply the agent may be writing (the message it answers + 1 ms), so a
- * note never shows before what led to it, even within the same millisecond.
- */
+/** The note of a move, in the batch right after its update, at its place: changes() reads the statement before it. */
 function noteIfMoved(
   db: Db,
-  { noteId, conversationId, authorId, text, note }: { noteId: string; conversationId: string; authorId: string | null; text: string; note: ChatNote },
+  {
+    noteId,
+    conversationId,
+    authorId,
+    text,
+    note,
+    place,
+  }: { noteId: string; conversationId: string; authorId: string | null; text: string; note: ChatNote; place: Date },
 ) {
   return db.run(sql`
     insert into ${messages} (id, conversation_id, author, author_id, event, text, parts, created_at)
-    select ${noteId}, ${conversationId}, 'system', ${authorId}, ${note.event}, ${text}, ${JSON.stringify(noteParts(note))},
-      max(${new Date(note.at).getTime()}, coalesce((select max(m.created_at) from ${messages} m where m.conversation_id = ${conversationId}), 0) + 2)
+    select ${noteId}, ${conversationId}, 'system', ${authorId}, ${note.event}, ${text}, ${JSON.stringify(noteParts(note))}, ${place.getTime()}
     where changes() = 1`);
 }

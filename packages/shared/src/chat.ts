@@ -13,6 +13,7 @@ import {
   transferReason,
   urgency,
 } from "./domain";
+import type { ConversationState } from "./domain";
 import { kbArticleSchema } from "./help-center";
 import { type DraftView, draftTicketInput, draftTicketOutput } from "./drafts";
 import { ticketId, ticketSummary } from "./tickets";
@@ -259,6 +260,9 @@ export const conversationView = z.object({
   analyst: analystPart.nullable(),
 });
 export type ConversationView = z.infer<typeof conversationView>;
+
+/** An analyst has the conversation, or it waits for one: the agent does not answer her, and the chat reads it again. */
+export const isPaused = (state: ConversationState) => state === "waiting_for_analyst" || state === "with_analyst";
 
 // What each note of a transfer or of the console says: who it goes to, and who did it. Each event has its own shape, so
 // a note never lacks what its sentence needs.

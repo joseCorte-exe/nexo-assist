@@ -4,6 +4,7 @@ import { useChat } from "@ai-sdk/react";
 import {
   apiError,
   type ChatNote,
+  isPaused,
   type ConversationResponse,
   type ConversationView,
   clockTime,
@@ -108,7 +109,7 @@ export function Chat({
     transport,
     generateId: newMessageId,
     onError: (error) => {
-      if (wasAlreadyAnswered(error)) return void showSavedConversation();
+      if (wasAlreadyAnswered(error)) return void showSavedReply();
       setFailures((count) => count + 1);
     },
     onFinish: ({ message, isError }) => {
@@ -124,32 +125,27 @@ export function Chat({
     },
   });
 
-  const paused = conversation?.state === "waiting_for_analyst" || conversation?.state === "with_analyst";
+  const paused = conversation !== null && isPaused(conversation.state);
+  // Everything the chat learns from the server lands here: the conversation, its counter, its drafts and its messages.
   const sync = useConversationSync({
     conversationId: conversation?.id ?? null,
     state: conversation?.state ?? null,
-    onLoaded: (saved) => {
+    onLoaded: (saved, { replace }) => {
       if (saved.conversation) setConversation(saved.conversation);
       setDrafts(byId(saved.drafts));
       setSavedCount(saved.conversation?.messageCount ?? 0);
-      setMessages((current) => withSaved(current, saved.messages, statusRef.current));
+      setMessages((current) => (replace ? saved.messages : withSaved(current, saved.messages, statusRef.current)));
     },
   });
 
   /** The drafts as the server has them now, when a card learned it was showing an old state. */
   async function refreshDrafts() {
-    const response = await fetch("/api/conversation", { cache: "no-store" }).catch(() => null);
-    if (response?.ok) setDrafts(byId(((await response.json()) as ConversationResponse).drafts));
+    await sync.refresh();
   }
 
-  async function showSavedConversation() {
-    const response = await fetch("/api/conversation", { cache: "no-store" }).catch(() => null);
-    if (!response?.ok) return setFailures((count) => count + 1);
-    const saved = (await response.json()) as ConversationResponse;
-    if (saved.conversation) setConversation(saved.conversation);
-    setSavedCount(saved.conversation?.messageCount ?? 0);
-    setDrafts(byId(saved.drafts));
-    setMessages(saved.messages);
+  /** The reply was saved and only its response was lost: the conversation as saved replaces what the chat has. */
+  async function showSavedReply() {
+    if (!(await sync.refresh({ replace: true }))) return setFailures((count) => count + 1);
     clearError();
   }
 

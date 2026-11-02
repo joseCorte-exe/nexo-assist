@@ -63,6 +63,19 @@ export async function saveNote(
   });
 }
 
+/**
+ * saveNote for something that already happened and is saved where it belongs: a memory that did not take the note only
+ * costs the agent context, so the failure is logged, never thrown at the request.
+ */
+export async function rememberNote(memory: Pick<AgentMemory, "saveMessages">, note: Parameters<typeof saveNote>[1]) {
+  try {
+    await saveNote(memory, note);
+  } catch (error) {
+    // Only the kind of error: its details can quote what the employee wrote.
+    console.error("note not copied to the agent memory", { conversationId: note.conversationId, noteId: note.id, error: (error as Error).name });
+  }
+}
+
 /** Any model Mastra takes: a "provider/model" id, or a model object such as the simulated one. */
 export type AgentModel = MastraModelConfig;
 
@@ -108,6 +121,8 @@ export type Turn = {
   /** The Mastra resource, from the session, never from the model. */
   employeeId: string;
   text: string;
+  /** When her message was saved: the reply and what it does go after it. */
+  startedAt: Date;
 };
 
 type ToolResult = { toolName: string; input?: unknown; output?: unknown };
@@ -155,10 +170,10 @@ function recordedConfidence(step: Step | undefined): number | null {
 }
 
 /** One reply of the agent: the Mastra stream, which the route turns into the chat stream and saves at the end. */
-export function streamReply(agent: NexoAgent, { conversationId, employeeId, text }: Turn) {
+export function streamReply(agent: NexoAgent, { conversationId, employeeId, text, startedAt }: Turn) {
   // Whose tickets the tools read: the employee of the session, never a value the model writes. A draft and a transfer
   // belong to the conversation of the turn; a transfer also reads the decision of this reply.
-  const turn = newReplyTurn();
+  const turn = newReplyTurn(startedAt);
   const requestContext = new RequestContext<unknown>([
     ["employeeId", employeeId],
     ["conversationId", conversationId],
