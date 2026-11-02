@@ -49,6 +49,12 @@ describe("conversationTag", () => {
     expect(conversationTag(unknown, RAFAEL.id, NOW).text).toBe("Agent pediu ajuda");
   });
 
+  it("tells a conversation came at the message limit, with its ticket or the contact", () => {
+    const limit = { ...waiting, transferReason: "message_limit" } as const;
+    expect(conversationTag(limit, RAFAEL.id, NOW)).toEqual({ tone: "danger", text: "Limite de mensagens · contato em 25 min" });
+    expect(conversationTag({ ...limit, ticketId: "INC-20311" }, RAFAEL.id, NOW)).toEqual({ tone: "danger", text: "Limite de mensagens · INC-20311" });
+  });
+
   it("tells the analyst a conversation is theirs, or whose it is", () => {
     const assumed = { ...waiting, state: "with_analyst", analyst: RAFAEL } as const;
     expect(conversationTag(assumed, RAFAEL.id, NOW)).toEqual({ tone: "primary", text: "Você está atendendo" });
@@ -109,6 +115,19 @@ describe("noteLabel", () => {
     expect(noteLabel({ event: "released", analystName: "Rafael Lima" })).toBe("Rafael Lima devolveu ao agent");
     expect(noteLabel({ event: "closed", analystName: "Rafael Lima" })).toBe("Rafael Lima encerrou o atendimento");
   });
+
+  it("writes the limit with what happened to the conversation", () => {
+    expect(noteLabel({ event: "limit_reached", then: "closed", level: null, analystName: null })).toBe("Limite de 30 mensagens atingido · conversa encerrada");
+    expect(noteLabel({ event: "limit_reached", then: "transferred", level: "N1", analystName: null })).toBe(
+      "Limite de 30 mensagens atingido · transferida para Suporte N1",
+    );
+    expect(noteLabel({ event: "limit_reached", then: "analyst", level: null, analystName: "Rafael Lima" })).toBe(
+      "Limite de 30 mensagens atingido · com Rafael Lima",
+    );
+    expect(noteLabel({ event: "limit_reached", then: "analyst", level: "N2", analystName: null })).toBe(
+      "Limite de 30 mensagens atingido · esperando o Suporte N2",
+    );
+  });
 });
 
 describe("ticketLine", () => {
@@ -159,5 +178,17 @@ describe("employeeNoteLabel", () => {
     expect(employeeNoteLabel({ event: "assumed", level: "N2", analystName: "Rafael Lima" })).toBe("Rafael Lima entrou na conversa");
     expect(employeeNoteLabel({ event: "released", analystName: "Rafael Lima" })).toBe("Rafael Lima devolveu a conversa ao Nexo");
     expect(employeeNoteLabel({ event: "closed", analystName: "Rafael Lima" })).toBe("Rafael Lima encerrou o atendimento");
+  });
+
+  it("tells her who stays with her when the limit comes while an analyst has her", () => {
+    expect(employeeNoteLabel({ event: "limit_reached", then: "analyst", level: null, analystName: "Rafael Lima" })).toBe(
+      "Limite de 30 mensagens atingido · Rafael Lima continua com você",
+    );
+    expect(employeeNoteLabel({ event: "limit_reached", then: "analyst", level: "N1", analystName: null })).toBe(
+      "Limite de 30 mensagens atingido · o analista continua com você",
+    );
+    expect(employeeNoteLabel({ event: "limit_reached", then: "closed", level: null, analystName: null })).toBe(
+      "Limite de 30 mensagens atingido · conversa encerrada",
+    );
   });
 });

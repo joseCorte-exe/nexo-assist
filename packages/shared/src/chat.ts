@@ -21,7 +21,7 @@ import { ticketId, ticketSummary } from "./tickets";
 // Contracts of the chat (ARQUITETURA.md, section 7): the route body, the parts of the stream and the conversation
 // the screen loads. The agent tools take their schemas from here too, so the screen reads the same shapes.
 
-/** Employee messages per conversation. Only counted in this feature; the limit itself comes in feature 6. */
+/** Employee messages per conversation. The one that reaches it is answered; the limit applies right after (continuity.ts). */
 export const MESSAGE_LIMIT = 30;
 
 // POST /api/chat
@@ -258,6 +258,8 @@ export const conversationView = z.object({
   targetLevel: analystLevel.nullable(),
   waitUntil: z.iso.datetime().nullable(),
   analyst: analystPart.nullable(),
+  /** The limit of messages applied to it: the Nexo answers no more, and an analyst stays with her or it closed. */
+  limitReached: z.boolean(),
 });
 export type ConversationView = z.infer<typeof conversationView>;
 
@@ -270,9 +272,19 @@ const transferredNote = z.object({ event: z.literal("transferred"), level: analy
 const assumedNote = z.object({ event: z.literal("assumed"), level: analystLevel, analystName: z.string() });
 const releasedNote = z.object({ event: z.literal("released"), analystName: z.string() });
 const closedNote = z.object({ event: z.literal("closed"), analystName: z.string() });
+/**
+ * The limit of messages, and what it did: closed the conversation, transferred it to a level, or left it with the analyst
+ * who has it (by name), or with the level it waits for.
+ */
+const limitNote = z.object({
+  event: z.literal("limit_reached"),
+  then: z.enum(["closed", "transferred", "analyst"]),
+  level: analystLevel.nullable(),
+  analystName: z.string().nullable(),
+});
 
 /** A note, ready to be written: "Rafael Lima assumiu · agent pausado". */
-export const noteView = z.discriminatedUnion("event", [transferredNote, assumedNote, releasedNote, closedNote]);
+export const noteView = z.discriminatedUnion("event", [transferredNote, assumedNote, releasedNote, closedNote, limitNote]);
 export type NoteView = z.infer<typeof noteView>;
 
 /** A note in the chat, with its time: "Transferida para Suporte N2 · 10:05". */
@@ -282,6 +294,7 @@ export const chatNote = z.discriminatedUnion("event", [
   assumedNote.extend(at),
   releasedNote.extend(at),
   closedNote.extend(at),
+  limitNote.extend(at),
 ]);
 export type ChatNote = z.infer<typeof chatNote>;
 
@@ -299,11 +312,15 @@ export type NexoTools = {
   };
 };
 
+/** When a saved message was written: the chat opens each day with a pill. A message on its way has none yet: it is now. */
+export const messageMeta = z.object({ at: z.iso.datetime() });
+export type MessageMeta = z.infer<typeof messageMeta>;
+
 /**
  * A message of the chat: text, the parts of each tool and the data-conversation, data-note and data-analyst parts. An agent reply is saved
  * with these same parts, so the screen draws a reply the same way while it streams and after a reload.
  */
-export type NexoUIMessage = UIMessage<never, { conversation: ConversationView; note: ChatNote; analyst: AnalystPart }, NexoTools>;
+export type NexoUIMessage = UIMessage<MessageMeta, { conversation: ConversationView; note: ChatNote; analyst: AnalystPart }, NexoTools>;
 
 /**
  * GET /api/conversation: the active conversation, or none, with its messages in order and its drafts as they are now.

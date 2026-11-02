@@ -33,6 +33,12 @@ describe("routeTransfer", () => {
     expect(route).toMatchObject({ level: "N1", reason: "employee_request" });
   });
 
+  it("sends a conversation at the message limit to N1, unless its case is critical or overdue", () => {
+    expect(routeTransfer({ requested: "message_limit", ticket: null, classification: null, at: NOW })).toMatchObject({ level: "N1", reason: "message_limit" });
+    const overdue = routeTransfer({ requested: "message_limit", ticket: ticket("medium", at("2026-10-23T10:00")), classification: null, at: NOW });
+    expect(overdue).toMatchObject({ level: "N2", reason: "overdue" });
+  });
+
   it("sends the employee's request to N1", () => {
     const route = routeTransfer({ requested: "employee_request", ticket: ticket("high", at("2026-10-26T14:05")), classification: null, at: NOW });
     expect(route).toMatchObject({ level: "N1", reason: "employee_request", priority: "high" });

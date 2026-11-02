@@ -16,3 +16,4 @@ export * from "./deadline";
 export * from "./sao-paulo";
 export * from "./transfer";
 export * from "./console";
+export * from "./continuity";

@@ -7,8 +7,11 @@ import { dueAt, isOverdue } from "./sla";
 
 export const LEVEL_LABEL: Record<AnalystLevel, string> = { N1: "Suporte N1", N2: "Suporte N2" };
 
-/** What the model may ask for. Critical and overdue are only ever decided here, from the ticket or RN-01. */
-export type RequestedReason = Extract<TransferReason, "employee_request" | "agent_unsure">;
+/**
+ * What the model may ask for, plus the limit of messages, which the code asks for. Critical and overdue are only ever
+ * decided here, from the ticket or RN-01.
+ */
+export type RequestedReason = Extract<TransferReason, "employee_request" | "agent_unsure" | "message_limit">;
 
 export type TransferRoute = { level: AnalystLevel; reason: TransferReason; priority: Priority; waitUntil: Date };
 
