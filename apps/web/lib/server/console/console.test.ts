@@ -374,6 +374,17 @@ describe("POST /api/console/conversations/:id/messages", () => {
     expect(saved).toHaveLength(1);
   });
 
+  it("answers a message sent again as sent, even after the conversation moved on", async () => {
+    const deps = await testDeps();
+    await write(deps, "conv-fabio", "Consegue testar agora?", "msg-rafael-3");
+    // The response was lost; meanwhile Rafael closed the service, and the console tries again.
+    await act(deps, closeHandler, "conv-fabio");
+    const again = await write(deps, "conv-fabio", "Consegue testar agora?", "msg-rafael-3");
+    expect(again.status).toBe(201);
+    expect(again.body).toMatchObject({ id: "msg-rafael-3", author: "analyst", text: "Consegue testar agora?" });
+    expect(await deps.db.select().from(messages).where(eq(messages.id, "msg-rafael-3"))).toHaveLength(1);
+  });
+
   it("refuses a message in a conversation the analyst has not assumed", async () => {
     const deps = await testDeps();
     const waiting = await write(deps, "conv-diego", "Oi, Diego.");
@@ -388,11 +399,15 @@ describe("POST /api/console/conversations/:id/messages", () => {
   it("never writes past a move made between reading the conversation and writing the message", async () => {
     const deps = await testDeps();
     const batch = deps.db.batch.bind(deps.db);
+    let calls = 0;
     deps.db.batch = (async (queries: Parameters<typeof batch>[0]) => {
-      deps.db.batch = batch;
-      // Rafael hands Fábio back to the agent and takes him again: the same state, a newer version.
-      await act(deps, releaseHandler, "conv-fabio");
-      await act(deps, assumeHandler, "conv-fabio");
+      // The first batch reads the conversation; before the second one writes the message, Rafael hands Fábio back to
+      // the agent and takes him again: the same state, a newer version.
+      if (++calls === 2) {
+        deps.db.batch = batch;
+        await act(deps, releaseHandler, "conv-fabio");
+        await act(deps, assumeHandler, "conv-fabio");
+      }
       return batch(queries);
     }) as unknown as typeof deps.db.batch;
     const sent = await write(deps, "conv-fabio", "Oi, Fábio.");

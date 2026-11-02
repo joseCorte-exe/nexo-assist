@@ -32,10 +32,10 @@ O plano está em [plano.md](plano.md). Este arquivo junta o que foi pedido, a pr
 
 | Suíte | Antes | Depois |
 |---|---|---|
-| Unidade e integração (Vitest) | 484 | 654 |
+| Unidade e integração (Vitest) | 484 | 655 |
 | Navegador (Playwright) | 42 | 52 |
 
-Todas passam, e os tipos fecham nos quatro pacotes. Por pacote: shared 195, ticket-service 89, agent 102, web 268.
+Todas passam, e os tipos fecham nos quatro pacotes. Por pacote: shared 195, ticket-service 89, agent 102, web 269.
 
 O arquivo [transfer-and-console.spec.ts](../../../apps/web/e2e/transfer-and-console.spec.ts) roda as histórias com dois navegadores, como duas pessoas: Ana pede um analista sobre o chamado vencido; Rafael a acha em "Para você", abre o histórico e os chamados dela, assume; os dois conversam sem o agent; ele devolve, o agent volta a responder; ele assume de novo e encerra; o Disponível liga e desliga e sobrevive a um recarregamento; um funcionário não entra no console; e, num celular, a conversa abre sobre a lista e os chamados só quando pedidos.
 

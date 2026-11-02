@@ -279,7 +279,10 @@ function History({
 }) {
   const { conversation, messages, drafts } = detail;
   const items = historyItems(messages, now);
-  const scroller = usePinnedScroll<HTMLDivElement>([messages.length + pending.length, conversation.id]);
+  // A message the server took shows from the history: its pending copy, if the answer came back late, does not.
+  const saved = new Set(messages.map((message) => message.id));
+  const unsaved = pending.filter((message) => !saved.has(message.id));
+  const scroller = usePinnedScroll<HTMLDivElement>([messages.length + unsaved.length, conversation.id]);
   const draftsById = new Map(drafts.map((draft) => [draft.id, draft]));
   return (
     <div ref={scroller.ref} onScroll={scroller.onScroll} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -287,7 +290,7 @@ function History({
         {items.map((item) => (
           <HistoryEntry key={item.key} item={item} employeeName={conversation.employee.name} summary={conversation.transferSummary} draftsById={draftsById} />
         ))}
-        {pending.map((message) => (
+        {unsaved.map((message) => (
           <article key={message.id} aria-label="Você" className="message-enter flex flex-col items-end gap-1 pt-4">
             <div className="max-w-[420px] rounded-[12px_4px_12px_12px] bg-analyst-bubble px-3 pt-2 pb-1.5 text-14.5/[21px] whitespace-pre-line text-ink opacity-80 shadow-bubble">
               {message.text}

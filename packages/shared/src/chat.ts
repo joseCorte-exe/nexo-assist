@@ -6,6 +6,7 @@ import {
   category,
   conversationEvent,
   conversationState,
+  type ConversationState,
   impact,
   priority,
   ticketStatus,
@@ -13,7 +14,6 @@ import {
   transferReason,
   urgency,
 } from "./domain";
-import type { ConversationState } from "./domain";
 import { kbArticleSchema } from "./help-center";
 import { type DraftView, draftTicketInput, draftTicketOutput } from "./drafts";
 import { ticketId, ticketSummary } from "./tickets";

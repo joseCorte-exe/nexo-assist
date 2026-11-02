@@ -130,22 +130,17 @@ export function Chat({
   const sync = useConversationSync({
     conversationId: conversation?.id ?? null,
     state: conversation?.state ?? null,
-    onLoaded: (saved, { replace }) => {
+    onLoaded: (saved, { serverWins }) => {
       if (saved.conversation) setConversation(saved.conversation);
       setDrafts(byId(saved.drafts));
       setSavedCount(saved.conversation?.messageCount ?? 0);
-      setMessages((current) => (replace ? saved.messages : withSaved(current, saved.messages, statusRef.current)));
+      setMessages((current) => (serverWins ? saved.messages : withSaved(current, saved.messages, statusRef.current)));
     },
   });
 
-  /** The drafts as the server has them now, when a card learned it was showing an old state. */
-  async function refreshDrafts() {
-    await sync.refresh();
-  }
-
   /** The reply was saved and only its response was lost: the conversation as saved replaces what the chat has. */
   async function showSavedReply() {
-    if (!(await sync.refresh({ replace: true }))) return setFailures((count) => count + 1);
+    if (!(await sync.refresh({ serverWins: true }))) return setFailures((count) => count + 1);
     clearError();
   }
 
@@ -168,7 +163,8 @@ export function Chat({
         shortcut={shortcut}
         onChange={(draft) => setDrafts((known) => ({ ...known, [draft.id]: draft }))}
         onDone={() => inputRef.current?.focus()}
-        onStale={refreshDrafts}
+        // A card that learned it showed an old state: the drafts as the server has them now.
+        onStale={() => void sync.refresh()}
       />
     );
   }

@@ -25,8 +25,8 @@ export function useConversationSync({
 }: {
   conversationId: string | null;
   state: ConversationState | null;
-  /** replace: the messages as saved, instead of merged with what the chat has. */
-  onLoaded: (saved: ConversationResponse, options: { replace: boolean }) => void;
+  /** serverWins: the messages as saved replace what the chat has, instead of being merged with it. */
+  onLoaded: (saved: ConversationResponse, options: { serverWins: boolean }) => void;
 }) {
   const loaded = useRef(onLoaded);
   loaded.current = onLoaded;
@@ -36,18 +36,19 @@ export function useConversationSync({
   // A read that comes back after a newer one is not drawn over it.
   const latest = useRef(latestOnly()).current;
   /**
-   * The one read of the conversation the chat makes: the one on screen, even closed, or with replace the active one, its
-   * messages as saved (a reply the network lost). Answers whether the server answered.
+   * The one read of the conversation the chat makes. By default, the conversation on screen, even closed, merged with what
+   * the chat has. serverWins is for a reply the network lost: the server is right about where she is, so it reads her
+   * active conversation, and its messages as saved replace the chat's. Answers whether the server answered.
    */
   const refresh = useCallback(
-    async ({ replace = false }: { replace?: boolean } = {}) => {
-      const id = replace ? null : known.current.conversationId;
+    async ({ serverWins = false }: { serverWins?: boolean } = {}) => {
+      const id = serverWins ? null : known.current.conversationId;
       const ticket = latest.begin();
       const query = id ? `?${new URLSearchParams({ conversationId: id })}` : "";
       const response = await fetch(`/api/conversation${query}`, { cache: "no-store" }).catch(() => null);
       if (!response?.ok) return false;
       const saved = (await response.json()) as ConversationResponse;
-      if (latest.take(ticket)) loaded.current(saved, { replace });
+      if (latest.take(ticket)) loaded.current(saved, { serverWins });
       return true;
     },
     [latest],
