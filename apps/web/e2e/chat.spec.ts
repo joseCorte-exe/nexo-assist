@@ -28,7 +28,7 @@ test("an empty chat greets Ana and counts nothing yet", async ({ page }) => {
   await signInAsAna(page);
   await expect(page.getByRole("heading", { name: "Oi, Ana. O que está acontecendo?" })).toBeVisible();
   await expect(page.getByText("Assistente online")).toBeVisible();
-  await expect(counter(page)).toHaveText("0/30 mensagens nesta sessão");
+  await expect(counter(page)).toHaveText("0/30 mensagens nesta conversa");
   await expect(composer(page)).toBeFocused();
 });
 
@@ -40,7 +40,7 @@ test("a question of the help center is answered with the article, with the actio
   const reply = replies(page).last();
   await expect(reply).toContainText("buscou na central de ajuda");
   await expect(reply).toContainText("Reinstale o cliente de VPN pelo portal de softwares");
-  await expect(counter(page)).toHaveText("1/30 mensagens nesta sessão");
+  await expect(counter(page)).toHaveText("1/30 mensagens nesta conversa");
 
   const detail = reply.getByRole("button", { name: "Ver decisão" });
   await expect(detail).toHaveAttribute("aria-expanded", "false");
@@ -56,7 +56,7 @@ test("a subject of HR goes to its channel", async ({ page }) => {
   const reply = replies(page).last();
   await expect(reply).toContainText("indicou o canal certo");
   await expect(reply).toContainText("rh@nexo.com.br");
-  await expect(counter(page)).toHaveText("2/30 mensagens nesta sessão");
+  await expect(counter(page)).toHaveText("2/30 mensagens nesta conversa");
 });
 
 test("the conversation and its decisions are still there after reloading the page", async ({ page }) => {
@@ -66,7 +66,7 @@ test("the conversation and its decisions are still there after reloading the pag
   await expect(replies(page).first()).toContainText("buscou na central de ajuda");
   await replies(page).first().getByRole("button", { name: "Ver decisão" }).click();
   await expect(replies(page).first().getByRole("definition").nth(2)).toHaveText("Alta · 82%");
-  await expect(counter(page)).toHaveText("2/30 mensagens nesta sessão");
+  await expect(counter(page)).toHaveText("2/30 mensagens nesta conversa");
 });
 
 test("Shift+Enter breaks the line and Enter sends", async ({ page }) => {
@@ -78,7 +78,7 @@ test("Shift+Enter breaks the line and Enter sends", async ({ page }) => {
   await composer(page).press("Enter");
   await expect(composer(page)).toHaveValue("");
   await expect(replies(page).last()).toHaveAttribute("aria-busy", "false", { timeout: 20_000 });
-  await expect(counter(page)).toHaveText("3/30 mensagens nesta sessão");
+  await expect(counter(page)).toHaveText("3/30 mensagens nesta conversa");
 });
 
 test("when the help center is down, the line says so and the agent explains", async ({ page, request }) => {
@@ -108,27 +108,27 @@ test("when the help center is down, the line says so and the agent explains", as
 
 test("a message the network dropped is marked as not sent and goes on the retry, counted once", async ({ page }) => {
   await signInAsAna(page);
-  await expect(counter(page)).toHaveText("4/30 mensagens nesta sessão");
+  await expect(counter(page)).toHaveText("4/30 mensagens nesta conversa");
   await page.route("**/api/chat", (route) => route.abort("internetdisconnected"), { times: 1 });
 
   await composer(page).fill("Qual o horário do service desk?");
   await composer(page).press("Enter");
   const mine = page.getByRole("article", { name: "Você" }).last();
   await expect(mine).toContainText("Não enviada.");
-  await expect(counter(page)).toHaveText("4/30 mensagens nesta sessão");
+  await expect(counter(page)).toHaveText("4/30 mensagens nesta conversa");
 
   await mine.getByRole("button", { name: "Tentar de novo" }).click();
   await expect(replies(page).last()).toHaveAttribute("aria-busy", "false", { timeout: 20_000 });
   await expect(replies(page).last()).toContainText("De segunda a sexta");
   await expect(mine).not.toContainText("Não enviada.");
-  await expect(counter(page)).toHaveText("5/30 mensagens nesta sessão");
+  await expect(counter(page)).toHaveText("5/30 mensagens nesta conversa");
   await page.reload();
-  await expect(counter(page)).toHaveText("5/30 mensagens nesta sessão");
+  await expect(counter(page)).toHaveText("5/30 mensagens nesta conversa");
 });
 
 test("a reply the network lost after it was saved shows up on the retry, counted once", async ({ page }) => {
   await signInAsAna(page);
-  await expect(counter(page)).toHaveText("5/30 mensagens nesta sessão");
+  await expect(counter(page)).toHaveText("5/30 mensagens nesta conversa");
   await page.route(
     "**/api/chat",
     async (route) => {
@@ -147,7 +147,7 @@ test("a reply the network lost after it was saved shows up on the retry, counted
   await mine.getByRole("button", { name: "Tentar de novo" }).click();
   await expect(replies(page).last()).toContainText("rh@nexo.com.br");
   await expect(mine).not.toContainText("Não enviada.");
-  await expect(counter(page)).toHaveText("6/30 mensagens nesta sessão");
+  await expect(counter(page)).toHaveText("6/30 mensagens nesta conversa");
   await expect(page.getByRole("article", { name: "Você" })).toHaveCount(6);
 });
 
