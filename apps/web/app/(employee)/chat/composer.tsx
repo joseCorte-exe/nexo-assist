@@ -1,8 +1,9 @@
 "use client";
 
 import { MESSAGE_LIMIT } from "@nexo/shared";
-import { type KeyboardEvent, type RefObject, useState } from "react";
+import { type KeyboardEvent, type RefObject, useEffect, useRef, useState } from "react";
 import { ArrowUpIcon } from "@/components/design-icons";
+import { createTypingSignal } from "@/lib/typing";
 
 type Props = {
   count: number;
@@ -10,17 +11,35 @@ type Props = {
   busy: boolean;
   onSend: (text: string) => void;
   inputRef: RefObject<HTMLTextAreaElement | null>;
+  /** Who reads what she writes: the Nexo, the analyst waited for, or the one attending. */
+  placeholder?: string;
+  label?: string;
+  /** She started or stopped writing: the console shows "digitando…". */
+  onTyping?: (typing: boolean) => void;
 };
 
 /** "Escreva para o Nexo…", Enviar and the counter. Enter sends, Shift+Enter breaks the line. */
-export function Composer({ count, busy, onSend, inputRef }: Props) {
+export function Composer({
+  count,
+  busy,
+  onSend,
+  inputRef,
+  placeholder = "Escreva para o Nexo…",
+  label = "Mensagem para o Nexo",
+  onTyping,
+}: Props) {
   const [text, setText] = useState("");
+  const onTypingRef = useRef(onTyping);
+  onTypingRef.current = onTyping;
+  const [typing] = useState(() => createTypingSignal((writing) => onTypingRef.current?.(writing)));
+  useEffect(() => typing.stop, [typing]);
 
   function send() {
     const trimmed = text.trim();
     if (busy || !trimmed) return inputRef.current?.focus();
     onSend(trimmed);
     setText("");
+    typing.typed("");
     inputRef.current?.focus();
   }
 
@@ -42,18 +61,21 @@ export function Composer({ count, busy, onSend, inputRef }: Props) {
     >
       <div className="field flex items-end gap-2 rounded-xl bg-white pr-1.5 pl-4 outline-1 -outline-offset-[0.5px] outline-field">
         <label htmlFor="chat-message" className="sr-only">
-          Mensagem para o Nexo
+          {label}
         </label>
         <textarea
           id="chat-message"
           ref={inputRef}
           rows={1}
           value={text}
-          onChange={(event) => setText(event.target.value)}
+          onChange={(event) => {
+            setText(event.target.value);
+            typing.typed(event.target.value);
+          }}
           onKeyDown={onKeyDown}
           maxLength={2000}
           autoFocus
-          placeholder="Escreva para o Nexo…"
+          placeholder={placeholder}
           aria-describedby="chat-counter"
           className="max-h-[153px] min-w-0 flex-1 resize-none bg-transparent py-[13.5px] text-14.5 leading-[21px] text-ink outline-none [field-sizing:content] placeholder:text-ink-3 max-md:text-16"
         />

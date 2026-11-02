@@ -2,6 +2,7 @@ import type {
   Affected,
   AnalystLevel,
   Category,
+  ConversationEvent,
   ConversationOutcome,
   ConversationState,
   DraftOperation,
@@ -16,7 +17,7 @@ import type {
   Urgency,
 } from "@nexo/shared";
 import { sql } from "drizzle-orm";
-import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
 
@@ -30,7 +31,17 @@ export const conversations = sqliteTable(
     targetLevel: text("target_level").$type<AnalystLevel>(),
     transferReason: text("transfer_reason").$type<TransferReason>(),
     transferSummary: text("transfer_summary"),
+    /** The confidence the agent recorded in the reply that transferred: "Agent pediu ajuda · confiança 41%". */
+    transferConfidence: real("transfer_confidence"),
+    transferredAt: timestamp("transferred_at"),
+    /**
+     * When it started needing an analyst this time: the message of hers the transferring reply answered. Her messages
+     * from then on are unread for an analyst who has not read them.
+     */
+    needsAnalystSince: timestamp("needs_analyst_since"),
+    /** The analyst attending, or who closed it. */
     analystId: text("analyst_id"),
+    assumedAt: timestamp("assumed_at"),
     ticketId: text("ticket_id"),
     /** Employee messages only: the x/30 counter. */
     messageCount: integer("message_count").notNull().default(0),
@@ -38,8 +49,22 @@ export const conversations = sqliteTable(
     createdAt: timestamp("created_at").notNull(),
     firstResponseAt: timestamp("first_response_at"),
     closedAt: timestamp("closed_at"),
+    /**
+     * The newest message of the conversation, kept by a trigger on messages (migration 0004), so the console orders and
+     * pages the list on an index instead of reading every message.
+     */
+    lastActivityAt: timestamp("last_activity_at"),
+    /** The chat of the employee was open, and she was writing, until these moments: the console's "online" and "digitando…". */
+    employeeSeenAt: timestamp("employee_seen_at"),
+    employeeTypingUntil: timestamp("employee_typing_until"),
+    /** Moves with each transfer, assume, release and close: a move only writes over the version it read. */
+    version: integer("version").notNull().default(0),
   },
   (table) => [
+    // The list of the console, the most recent activity first.
+    index("conversations_last_activity").on(table.lastActivityAt),
+    // The queues: what waits at a level, and what an analyst attends.
+    index("conversations_state_level").on(table.state, table.targetLevel),
     // Each employee has one active conversation at a time.
     uniqueIndex("conversations_one_active_per_employee")
       .on(table.employeeId)
@@ -55,6 +80,10 @@ export const messages = sqliteTable(
       .notNull()
       .references(() => conversations.id),
     author: text("author").$type<MessageAuthor>().notNull(),
+    /** The analyst who wrote an analyst message, or did what a note of the console tells. */
+    authorId: text("author_id"),
+    /** What a note of the console tells; null in a note of a draft and in every other message. */
+    event: text("event").$type<ConversationEvent>(),
     text: text("text").notNull(),
     /**
      * The parts of an agent reply as it streamed (decision, tools, text), so the chat draws it the same way after a
@@ -127,6 +156,19 @@ export const drafts = sqliteTable(
     // The cards of a conversation load its drafts.
     index("drafts_conversation_created").on(table.conversationId, table.createdAt),
   ],
+);
+
+/** When each analyst last read each conversation: the unread count of the list is what she wrote after it. */
+export const consoleReads = sqliteTable(
+  "console_reads",
+  {
+    analystId: text("analyst_id").notNull(),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => conversations.id),
+    readAt: timestamp("read_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.analystId, table.conversationId] })],
 );
 
 /** Abuse limits: key is "ip:<ip>:<day>" or "global:<day>". Incremented atomically. */

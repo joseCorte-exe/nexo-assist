@@ -1,21 +1,38 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import { apiError, type ConversationResponse, type DraftView, type NexoUIMessage, textOf } from "@nexo/shared";
+import {
+  apiError,
+  type ChatNote,
+  isPaused,
+  type ConversationResponse,
+  type ConversationView,
+  clockTime,
+  type DraftView,
+  employeeNoteLabel,
+  type NexoUIMessage,
+  textOf,
+} from "@nexo/shared";
 import { DefaultChatTransport } from "ai";
 import { CircleAlert } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { SystemNote } from "@/components/system-note";
 import { THINKING_LABEL } from "@/lib/agent-actions";
-import { currentDraft, lastDraftId, liveTurns, messageCount, type Turn } from "@/lib/chat-turns";
+import { currentDraft, lastDraftId, liveTurns, messageCount, type Turn, withSaved } from "@/lib/chat-turns";
+import { firstName } from "@/lib/format";
+import { useNow } from "@/lib/use-now";
+import { usePinnedScroll } from "@/lib/use-pinned-scroll";
 import type { Shortcut } from "@/lib/shortcut";
 import { useWholePixelWidth } from "@/lib/use-whole-pixel-width";
 import { AgentReply } from "./agent-reply";
+import { AnalystMessage } from "./analyst-message";
+import { useChatStatus } from "./chat-status";
 import { Composer } from "./composer";
+import { ConsoleAnnouncer, useTitleBadge } from "./console-updates";
 import { DraftCard } from "./draft-card";
 import { EmptyChat } from "./empty-chat";
-
-/** Closer than this to the bottom, new parts keep the view pinned; farther up, she is reading and is left alone. */
-const PIN_DISTANCE_PX = 80;
+import { useConversationSync } from "./use-conversation-sync";
+import { WaitingRow } from "./waiting-row";
 
 /**
  * The route only takes the new message, with its id: the conversation lives on the server and in the agent memory,
@@ -45,6 +62,25 @@ function wasAlreadyAnswered(error: Error) {
   }
 }
 
+/** The note as she reads it: "Rafael Lima entrou na conversa · 10:12". */
+const noteText = (note: ChatNote) => `${employeeNoteLabel(note)} · ${clockTime(new Date(note.at))}`;
+
+/** Who reads what she writes, in the composer: the Nexo, the analyst waited for, or the one attending. */
+function composerWords(conversation: ConversationView | null) {
+  switch (conversation?.state) {
+    case "waiting_for_analyst":
+      return { placeholder: "Escreva para o analista…", label: "Mensagem para o analista" };
+    case "with_analyst":
+      return conversation.analyst
+        ? { placeholder: `Escreva para ${firstName(conversation.analyst.name)}…`, label: `Mensagem para ${conversation.analyst.name}` }
+        : { placeholder: "Escreva para o analista…", label: "Mensagem para o analista" };
+    case "closed":
+      return { placeholder: "Comece uma nova conversa…", label: "Mensagem para o Nexo, numa nova conversa" };
+    default:
+      return { placeholder: "Escreva para o Nexo…", label: "Mensagem para o Nexo" };
+  }
+}
+
 export function Chat({
   initial,
   employeeName,
@@ -55,6 +91,11 @@ export function Chat({
   /** ⌘↵ or Ctrl ↵, decided on the server from the request. */
   shortcut: Shortcut;
 }) {
+  // Who answers her now, shared with the pill of the top bar.
+  const { conversation, setConversation } = useChatStatus();
+  // The callbacks of the chat outlive a render: they read the conversation of now.
+  const conversationRef = useRef(conversation);
+  conversationRef.current = conversation;
   // How many replies in a row failed: the second one sends the employee to the phone.
   const [failures, setFailures] = useState(0);
   // The counter of the conversation as last loaded from the server; replies bring newer ones in the stream.
@@ -68,32 +109,48 @@ export function Chat({
     transport,
     generateId: newMessageId,
     onError: (error) => {
-      if (wasAlreadyAnswered(error)) return void showSavedConversation();
+      if (wasAlreadyAnswered(error)) return void showSavedReply();
       setFailures((count) => count + 1);
     },
-    onFinish: ({ isError }) => {
-      if (!isError) setFailures(0);
+    onFinish: ({ message, isError }) => {
+      if (isError) return;
+      setFailures(0);
+      // The first part says where the message went: a new conversation, or one an analyst has now. A transfer in this
+      // reply moved it after that part: the conversation is read again, with the note it left.
+      const part = message.parts.find((one) => one.type === "data-conversation");
+      const known = conversationRef.current;
+      if (part?.type === "data-conversation" && (part.data.id !== known?.id || part.data.state !== known?.state)) setConversation(part.data);
+      const transferred = message.parts.some((one) => one.type === "tool-transferToAnalyst" && one.state === "output-available" && one.output.ok);
+      if (transferred || (part?.type === "data-conversation" && part.data.state !== "with_agent")) void sync.refresh();
     },
   });
 
-  /** The drafts as the server has them now, when a card learned it was showing an old state. */
-  async function refreshDrafts() {
-    const response = await fetch("/api/conversation", { cache: "no-store" }).catch(() => null);
-    if (response?.ok) setDrafts(byId(((await response.json()) as ConversationResponse).drafts));
-  }
+  const paused = conversation !== null && isPaused(conversation.state);
+  // Everything the chat learns from the server lands here: the conversation, its counter, its drafts and its messages.
+  const sync = useConversationSync({
+    conversationId: conversation?.id ?? null,
+    state: conversation?.state ?? null,
+    onLoaded: (saved, { serverWins }) => {
+      if (saved.conversation) setConversation(saved.conversation);
+      setDrafts(byId(saved.drafts));
+      setSavedCount(saved.conversation?.messageCount ?? 0);
+      setMessages((current) => (serverWins ? saved.messages : withSaved(current, saved.messages, statusRef.current)));
+    },
+  });
 
-  async function showSavedConversation() {
-    const response = await fetch("/api/conversation", { cache: "no-store" }).catch(() => null);
-    if (!response?.ok) return setFailures((count) => count + 1);
-    const saved = (await response.json()) as ConversationResponse;
-    setSavedCount(saved.conversation?.messageCount ?? 0);
-    setDrafts(byId(saved.drafts));
-    setMessages(saved.messages);
+  /** The reply was saved and only its response was lost: the conversation as saved replaces what the chat has. */
+  async function showSavedReply() {
+    if (!(await sync.refresh({ serverWins: true }))) return setFailures((count) => count + 1);
     clearError();
   }
 
+  const statusRef = useRef(status);
+  statusRef.current = status;
   const busy = status === "submitted" || status === "streaming";
-  const turns = liveTurns(messages, status);
+  const turns = liveTurns(messages, status, { paused });
+  const words = composerWords(conversation);
+  const now = useNow();
+  useTitleBadge(turns);
   const count = messageCount(messages, status, savedCount);
   const lastDraft = lastDraftId(messages);
 
@@ -106,7 +163,8 @@ export function Chat({
         shortcut={shortcut}
         onChange={(draft) => setDrafts((known) => ({ ...known, [draft.id]: draft }))}
         onDone={() => inputRef.current?.focus()}
-        onStale={refreshDrafts}
+        // A card that learned it showed an old state: the drafts as the server has them now.
+        onStale={() => void sync.refresh()}
       />
     );
   }
@@ -126,23 +184,11 @@ export function Chat({
     inputRef.current?.focus();
   }
 
-  const scroller = useRef<HTMLDivElement>(null);
-  const pinned = useRef(true);
-  useLayoutEffect(() => {
-    const element = scroller.current;
-    if (element && pinned.current) element.scrollTop = element.scrollHeight;
-  });
+  const scroller = usePinnedScroll<HTMLDivElement>();
 
   return (
     <main className="flex min-h-0 flex-1 flex-col">
-      <div
-        ref={scroller}
-        onScroll={(event) => {
-          const element = event.currentTarget;
-          pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < PIN_DISTANCE_PX;
-        }}
-        className="flex min-h-0 flex-1 flex-col overflow-y-auto"
-      >
+      <div ref={scroller.ref} onScroll={scroller.onScroll} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         {turns.length === 0 ? (
           <EmptyChat name={employeeName} onPick={send} />
         ) : (
@@ -153,6 +199,10 @@ export function Chat({
             {turns.map((turn) =>
               turn.kind === "employee" ? (
                 <EmployeeMessage key={turn.id} text={turn.text} unsent={turn.unsent} onRetry={retry} />
+              ) : turn.kind === "note" ? (
+                <SystemNote key={turn.id} event={turn.note.event} text={noteText(turn.note)} />
+              ) : turn.kind === "analyst" ? (
+                <AnalystMessage key={turn.id} turn={turn} />
               ) : (
                 <AgentReply
                   key={turn.id}
@@ -168,9 +218,19 @@ export function Chat({
         )}
       </div>
       <div className="mx-auto w-full max-w-[856px] px-6 pt-2.5 max-md:px-4 pb-[18px]">
-        <Composer count={count} busy={busy} onSend={send} inputRef={inputRef} />
+        {conversation?.state === "waiting_for_analyst" ? <WaitingRow conversation={conversation} now={now} /> : null}
+        <Composer
+          count={count}
+          busy={busy}
+          onSend={send}
+          inputRef={inputRef}
+          placeholder={words.placeholder}
+          label={words.label}
+          onTyping={(typing) => void sync.ping(typing)}
+        />
       </div>
       <Announcer turn={turns.at(-1)} />
+      <ConsoleAnnouncer turns={turns} />
     </main>
   );
 }

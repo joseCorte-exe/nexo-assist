@@ -51,6 +51,7 @@ function helpCenter(articles: KbArticle[] | "down"): TicketDesk & { queries: str
     listEmployeeTickets: unexpected,
     getTicket: unexpected,
     listCandidates: unexpected,
+    transferTicket: unexpected,
   };
 }
 
@@ -77,7 +78,7 @@ function draftStore(): DraftStore & { saved: DraftRecord[] } {
   };
 }
 
-const tools = (desk: TicketDesk, drafts: DraftStore = draftStore()) => createTools({ ticketService: desk, drafts, now: () => NOW });
+const tools = (desk: TicketDesk, drafts: DraftStore = draftStore()) => createTools({ ticketService: desk, drafts, transfers: { transfer: unexpected }, now: () => NOW });
 
 // The tools run outside an agent here. Those of the tickets read the employee from the request context, which
 // the route fills with the session; the others need no context.
@@ -239,6 +240,7 @@ function ticketDesk({
       const open = candidates ?? tickets.filter((one) => one.status !== "resolved" && one.category === category);
       return { ok: true, data: employeeId === "emp-ana" ? open : [] };
     },
+    transferTicket: unexpected,
   };
   return { desk, calls };
 }

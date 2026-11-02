@@ -1,4 +1,5 @@
 import {
+  type ChatNote,
   type DecisionRecord,
   type DraftView,
   decisionOf,
@@ -54,7 +55,11 @@ export type AgentTurn = {
   blocks: Block[];
   phase: Phase;
 };
-export type Turn = EmployeeTurn | AgentTurn;
+/** A note of the console: transferred, an analyst joined, handed back to the Nexo, closed. */
+export type NoteTurn = { kind: "note"; id: string; note: ChatNote };
+/** Messages of an analyst in a row, under one sign. */
+export type AnalystTurn = { kind: "analyst"; id: string; name: string; level: "N1" | "N2"; messages: Array<{ id: string; text: string }> };
+export type Turn = EmployeeTurn | AgentTurn | NoteTurn | AnalystTurn;
 
 /** What choosing a ticket of the list sends, as the design writes it: "INC-20311 · Notebook lento…". */
 export const ticketChoiceText = (ticket: Pick<TicketSummary, "id" | "title">) => `${ticket.id} · ${ticket.title}`;
@@ -139,23 +144,38 @@ function settle(turn: AgentTurn, status: ChatStatus): AgentTurn {
  * reply came back, the message is marked as not sent instead. The employee message after a reply is its answer,
  * so what was chosen is the same live and after a reload.
  */
-export function liveTurns(messages: readonly NexoUIMessage[], status: ChatStatus): Turn[] {
+export function liveTurns(all: readonly NexoUIMessage[], status: ChatStatus, { paused = false }: { paused?: boolean } = {}): Turn[] {
+  // A message sent while an analyst had the conversation streams back only its counter: there is nothing to draw.
+  const messages = all.filter((message) => !message.parts.every((part) => part.type === "data-conversation"));
   const answerTo = (index: number) => {
     const next = messages[index + 1];
     return next?.role === "user" ? textOf(next.parts) : null;
   };
   const busy = status === "submitted" || status === "streaming";
-  const turns: Turn[] = messages.map((message, index) =>
-    message.role === "user"
-      ? { kind: "employee", id: message.id, text: textOf(message.parts), unsent: false }
-      : { ...agentTurn(message, answerTo(index), busy), phase: "done" },
-  );
+  const turns: Turn[] = [];
+  messages.forEach((message, index) => {
+    const note = message.parts.find((part) => part.type === "data-note");
+    const sign = message.parts.find((part) => part.type === "data-analyst");
+    if (note?.type === "data-note") {
+      turns.push({ kind: "note", id: message.id, note: note.data });
+    } else if (sign?.type === "data-analyst") {
+      const previous = turns.at(-1);
+      const said = { id: message.id, text: textOf(message.parts) };
+      if (previous?.kind === "analyst" && previous.name === sign.data.name) previous.messages.push(said);
+      else turns.push({ kind: "analyst", id: message.id, name: sign.data.name, level: sign.data.level, messages: [said] });
+    } else if (message.role === "user") {
+      turns.push({ kind: "employee", id: message.id, text: textOf(message.parts), unsent: false });
+    } else {
+      turns.push({ ...agentTurn(message, answerTo(index), busy), phase: "done" });
+    }
+  });
 
   const last = turns.at(-1);
   const lastMessage = messages.at(-1);
   if (last?.kind === "agent" && lastMessage) return [...turns.slice(0, -1), settle(agentTurn(lastMessage, null, busy), status)];
   if (last?.kind === "employee" && status === "error") return [...turns.slice(0, -1), { ...last, unsent: true }];
-  if (last?.kind === "employee" && status !== "ready") {
+  // Nobody answers while an analyst has the conversation: no Nexo thinking under her message.
+  if (last?.kind === "employee" && status !== "ready" && !paused) {
     return [
       ...turns,
       { kind: "agent", id: `${last.id}-reply`, text: "", decision: null, steps: [], blocks: [], phase: "thinking" },
@@ -196,4 +216,21 @@ export function lastDraftId(messages: readonly NexoUIMessage[]): string | null {
 export function currentDraft(shown: DraftView, known: Readonly<Record<string, DraftView>>, lastId: string | null): DraftView {
   const draft = known[shown.id] ?? shown;
   return draft.status === "pending" && lastId !== null && draft.id !== lastId ? { ...draft, status: "superseded" } : draft;
+}
+
+/** The same messages, by id and parts: a read that brought nothing new does not redraw the chat. */
+const sameMessages = (a: readonly NexoUIMessage[], b: readonly NexoUIMessage[]) =>
+  a.length === b.length && a.every((message, index) => message.id === b[index]?.id && message.parts.length === b[index]?.parts.length);
+
+/**
+ * The messages to show after reading the conversation again, while an analyst has it. Never under a message on its way:
+ * it lands with the next read. After a failure, the message that did not reach the server stays at the end, so "Tentar
+ * de novo" still has it to send.
+ */
+export function withSaved(current: NexoUIMessage[], saved: NexoUIMessage[], status: ChatStatus): NexoUIMessage[] {
+  if (status === "submitted" || status === "streaming") return current;
+  const last = current.at(-1);
+  const unsent = status === "error" && last?.role === "user" && !saved.some((message) => message.id === last.id) ? [last] : [];
+  const next = [...saved, ...unsent];
+  return sameMessages(current, next) ? current : unsent.length > 0 ? next : saved;
 }

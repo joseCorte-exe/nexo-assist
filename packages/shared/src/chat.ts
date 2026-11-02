@@ -1,6 +1,19 @@
 import type { UIMessage } from "ai";
 import { z } from "zod";
-import { category, conversationState, priority, ticketStatus, ticketType } from "./domain";
+import {
+  affected,
+  analystLevel,
+  category,
+  conversationEvent,
+  conversationState,
+  type ConversationState,
+  impact,
+  priority,
+  ticketStatus,
+  ticketType,
+  transferReason,
+  urgency,
+} from "./domain";
 import { kbArticleSchema } from "./help-center";
 import { type DraftView, draftTicketInput, draftTicketOutput } from "./drafts";
 import { ticketId, ticketSummary } from "./tickets";
@@ -169,6 +182,54 @@ export const offerRepliesInput = z.object({
 export type OfferRepliesInput = z.infer<typeof offerRepliesInput>;
 export const offerRepliesOutput = z.object({ ok: z.literal(true) });
 
+// The transfer to an analyst (feature 5). The model says why and writes the summary; the level, the wait and whether the
+// case is critical or overdue come from the code (routeTransfer), from the ticket or from RN-01.
+
+/** Fewer characters than this cannot tell the analyst what happens without asking again. */
+const MIN_TRANSFER_SUMMARY = 20;
+
+export const transferToAnalystInput = z
+  .object({
+    reason: z
+      .enum(["employee_request", "agent_unsure"])
+      .describe("employee_request: o funcionário pediu um analista. agent_unsure: você não sabe o que fazer, mesmo com a informação."),
+    summary: z
+      .string()
+      .trim()
+      .min(MIN_TRANSFER_SUMMARY)
+      .max(600)
+      .describe(
+        "O caso para o analista não precisar perguntar de novo: o que acontece, desde quando, o que já foi tentado, o impacto e o que o funcionário quer.",
+      ),
+    ticketId: ticketId.optional().describe("O chamado do funcionário sobre o caso, se houver."),
+    impact: impact.optional().describe("Sem chamado: stopped, degraded ou request, como no draftTicket."),
+    urgency: urgency.optional().describe("Sem chamado: same_day ou none."),
+    affected: affected.optional().describe("Sem chamado: only_me, my_team ou company."),
+  })
+  .superRefine((input, context) => {
+    const given = [input.impact, input.urgency, input.affected].filter((value) => value !== undefined).length;
+    if (given !== 0 && given !== 3) {
+      context.addIssue({ code: "custom", message: "Informe impact, urgency e affected juntos, ou nenhum deles." });
+    }
+  });
+export type TransferToAnalystInput = z.infer<typeof transferToAnalystInput>;
+
+export const transferToAnalystOutput = z.discriminatedUnion("ok", [
+  z.object({
+    ok: z.literal(true),
+    level: analystLevel,
+    /** "Suporte N2", as the employee and the console read it. */
+    levelLabel: z.string(),
+    transferReason,
+    ticketId: z.string().nullable(),
+    waitUntil: z.iso.datetime(),
+    /** The wait in words, for the model to say: "hoje, até 12:05". */
+    waitText: z.string(),
+  }),
+  z.object({ ok: z.literal(false), reason: z.enum(["not_with_agent", "ticket_not_found"]), message: z.string() }),
+]);
+export type TransferToAnalystOutput = z.infer<typeof transferToAnalystOutput>;
+
 /** The schemas of each tool: for the agent that runs them, and to check saved messages when they are read back. */
 export const nexoToolSchemas = {
   recordDecision: { inputSchema: decisionRecord, outputSchema: recordDecisionOutput },
@@ -179,15 +240,56 @@ export const nexoToolSchemas = {
   offerTicketChoice: { inputSchema: offerTicketChoiceInput, outputSchema: offerTicketChoiceOutput },
   offerReplies: { inputSchema: offerRepliesInput, outputSchema: offerRepliesOutput },
   draftTicket: { inputSchema: draftTicketInput, outputSchema: draftTicketOutput },
+  transferToAnalyst: { inputSchema: transferToAnalystInput, outputSchema: transferToAnalystOutput },
 };
 
-/** First part of every chat stream: the conversation the message went to, with the new counter. */
-export const conversationPart = z.object({
+/** Who wrote an analyst message in the chat, and the name she reads above it. */
+export const analystPart = z.object({ name: z.string(), level: analystLevel });
+export type AnalystPart = z.infer<typeof analystPart>;
+
+/**
+ * First part of every chat stream, and the conversation as the chat loads it: where the message went, the counter, who
+ * it waits for, until when, and who attends it.
+ */
+export const conversationView = z.object({
   id: z.string(),
   state: conversationState,
   messageCount: z.number().int().nonnegative(),
+  targetLevel: analystLevel.nullable(),
+  waitUntil: z.iso.datetime().nullable(),
+  analyst: analystPart.nullable(),
 });
-export type ConversationPart = z.infer<typeof conversationPart>;
+export type ConversationView = z.infer<typeof conversationView>;
+
+/** An analyst has the conversation, or it waits for one: the agent does not answer her, and the chat reads it again. */
+export const isPaused = (state: ConversationState) => state === "waiting_for_analyst" || state === "with_analyst";
+
+// What each note of a transfer or of the console says: who it goes to, and who did it. Each event has its own shape, so
+// a note never lacks what its sentence needs.
+const transferredNote = z.object({ event: z.literal("transferred"), level: analystLevel });
+const assumedNote = z.object({ event: z.literal("assumed"), level: analystLevel, analystName: z.string() });
+const releasedNote = z.object({ event: z.literal("released"), analystName: z.string() });
+const closedNote = z.object({ event: z.literal("closed"), analystName: z.string() });
+
+/** A note, ready to be written: "Rafael Lima assumiu · agent pausado". */
+export const noteView = z.discriminatedUnion("event", [transferredNote, assumedNote, releasedNote, closedNote]);
+export type NoteView = z.infer<typeof noteView>;
+
+/** A note in the chat, with its time: "Transferida para Suporte N2 · 10:05". */
+const at = { at: z.iso.datetime() };
+export const chatNote = z.discriminatedUnion("event", [
+  transferredNote.extend(at),
+  assumedNote.extend(at),
+  releasedNote.extend(at),
+  closedNote.extend(at),
+]);
+export type ChatNote = z.infer<typeof chatNote>;
+
+// POST /api/conversation/presence: the chat is open, and whether she is writing. It answers the state of the conversation,
+// so a chat that does not poll still learns an analyst took it.
+export const presenceInput = z.object({ typing: z.boolean() });
+export type PresenceInput = z.infer<typeof presenceInput>;
+export type PresenceResponse = { conversation: Pick<ConversationView, "id" | "state"> | null };
 
 /** The tools of the agent as the stream carries them, typed by the schemas above. */
 export type NexoTools = {
@@ -198,17 +300,17 @@ export type NexoTools = {
 };
 
 /**
- * A message of the chat: text, the parts of each tool and the data-conversation part. An agent reply is saved
+ * A message of the chat: text, the parts of each tool and the data-conversation, data-note and data-analyst parts. An agent reply is saved
  * with these same parts, so the screen draws a reply the same way while it streams and after a reload.
  */
-export type NexoUIMessage = UIMessage<never, { conversation: ConversationPart }, NexoTools>;
+export type NexoUIMessage = UIMessage<never, { conversation: ConversationView; note: ChatNote; analyst: AnalystPart }, NexoTools>;
 
 /**
  * GET /api/conversation: the active conversation, or none, with its messages in order and its drafts as they are now.
  * A saved reply keeps the draft as it was shown; the card draws the current one, confirmed, edited or cancelled since.
  */
 export type ConversationResponse = {
-  conversation: ConversationPart | null;
+  conversation: ConversationView | null;
   messages: NexoUIMessage[];
   drafts: DraftView[];
 };

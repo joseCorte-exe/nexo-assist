@@ -22,8 +22,8 @@ export function promptText(options: { prompt: Array<{ content: unknown }> }) {
 }
 
 /** Runs one reply to the end: its text and the tools it called, in order. Rejects when the model failed. */
-export async function replyOf(agent: NexoAgent, turn: Turn) {
-  const full = await (await streamReply(agent, turn)).getFullOutput();
+export async function replyOf(agent: NexoAgent, { startedAt = new Date(), ...turn }: Omit<Turn, "startedAt"> & { startedAt?: Date }) {
+  const full = await (await streamReply(agent, { ...turn, startedAt })).getFullOutput();
   if (full.error) throw full.error;
   const toolCalls = full.steps.flatMap((step) =>
     step.toolCalls.map(({ payload }) => ({ toolName: payload.toolName, args: payload.args })),

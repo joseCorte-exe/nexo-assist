@@ -1,74 +1,83 @@
-import { conversationPart, type ConversationResponse, type NexoUIMessage, nexoToolSchemas } from "@nexo/shared";
-import { safeValidateUIMessages } from "ai";
-import { and, asc, eq, inArray, ne } from "drizzle-orm";
+import type { ConversationResponse, ConversationView } from "@nexo/shared";
+import { and, asc, eq, isNotNull, ne, or } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
-import type { Db } from "@/db";
 import { conversations, messages } from "@/db/schema";
 import type { Deps } from "./deps";
 import { draftsOf, toDraftView } from "./drafts";
 import { readEmployeeSession } from "./http";
+import { toUIMessage } from "./messages";
 
 /** Each employee has at most one conversation that is not closed. The partial unique index answers this lookup. */
 export const activeConversationOf = (employeeId: string) =>
   and(eq(conversations.employeeId, employeeId), ne(conversations.state, "closed"));
 
+/** What the chat needs of the conversation row. */
+export const viewColumns = {
+  id: conversations.id,
+  state: conversations.state,
+  messageCount: conversations.messageCount,
+  targetLevel: conversations.targetLevel,
+  waitUntil: conversations.waitUntil,
+  analystId: conversations.analystId,
+};
+
+type ViewRow = { [Key in keyof typeof viewColumns]: (typeof conversations.$inferSelect)[Key] };
+
 /**
- * The active conversation of the employee with its messages and drafts, in two round trips. An agent reply comes with the parts it
- * streamed, decision included, so the chat draws it as it did live. The chat page and GET /api/conversation both
- * read it from here.
+ * The conversation as the chat shows it: who it waits for, until when, and who attends it, by the name and level the
+ * directory has now. Only a conversation an analyst attends asks the directory; down, the chat says "o analista".
  */
-export async function loadConversation(db: Db, employeeId: string): Promise<ConversationResponse> {
-  const [conversation] = await db
-    .select({ id: conversations.id, state: conversations.state, messageCount: conversations.messageCount })
-    .from(conversations)
-    .where(activeConversationOf(employeeId))
-    .limit(1);
-  if (!conversation) return { conversation: null, messages: [], drafts: [] };
-
-  // One round trip for both. The notes of what she did in a card are system messages: the card shows it instead.
-  // Analyst messages come with the console, in feature 5.
-  const [rows, draftRows] = await db.batch([
-    db
-      .select({ id: messages.id, author: messages.author, text: messages.text, parts: messages.parts })
-      .from(messages)
-      .where(and(eq(messages.conversationId, conversation.id), inArray(messages.author, ["employee", "agent"])))
-      .orderBy(asc(messages.createdAt)),
-    draftsOf(db, conversation.id),
-  ]);
-
+export async function toConversationView(deps: Pick<Deps, "directory">, { analystId, waitUntil, ...row }: ViewRow): Promise<ConversationView> {
+  const analyst = analystId ? (await deps.directory.analysts())?.get(analystId) : undefined;
   return {
-    conversation,
-    drafts: draftRows.map(toDraftView),
-    messages: await Promise.all(
-      rows.map(async ({ id, author, text, parts }): Promise<NexoUIMessage> => {
-        const asText: NexoUIMessage = { id, role: author === "employee" ? "user" : "assistant", parts: [{ type: "text", text }] };
-        return parts ? savedReply({ ...asText, parts }, asText) : asText;
-      }),
-    ),
+    ...row,
+    waitUntil: waitUntil?.toISOString() ?? null,
+    analyst: analyst ? { name: analyst.name, level: analyst.level } : null,
   };
 }
 
 /**
- * The parts are what the AI SDK streamed, saved as JSON: checked against the schemas of the tools when read, so a
- * change of format shows up here and not on the screen. A reply that no longer matches is shown as its saved text.
+ * The conversation of the employee with its messages and drafts, in two round trips: the active one, or the one the chat
+ * shows, by id, even closed, so the chat sees the analyst close it. Somebody else's conversation is never found. The chat
+ * page and GET /api/conversation both read it from here.
  */
-async function savedReply(message: NexoUIMessage, asText: NexoUIMessage): Promise<NexoUIMessage> {
-  const checked = await safeValidateUIMessages<NexoUIMessage>({
-    messages: [message],
-    dataSchemas: { conversation: conversationPart },
-    tools: nexoToolSchemas,
-  });
-  if (checked.success) return checked.data[0]!;
-  // Only the kind of error: its details can quote what the employee wrote.
-  console.error("saved reply does not match the chat format", { messageId: message.id, error: checked.error.name });
-  return asText;
+export async function loadConversation(
+  deps: Pick<Deps, "db" | "directory">,
+  employeeId: string,
+  conversationId?: string,
+): Promise<ConversationResponse> {
+  const { db } = deps;
+  const [conversation] = await db
+    .select(viewColumns)
+    .from(conversations)
+    .where(
+      conversationId
+        ? and(eq(conversations.id, conversationId), eq(conversations.employeeId, employeeId))
+        : activeConversationOf(employeeId),
+    )
+    .limit(1);
+  if (!conversation) return { conversation: null, messages: [], drafts: [] };
+
+  // One round trip for both. The notes of what she did in a card are system messages without an event: the card shows
+  // it instead. The notes of the console have one.
+  const [rows, draftRows] = await db.batch([
+    db
+      .select()
+      .from(messages)
+      .where(and(eq(messages.conversationId, conversation.id), or(ne(messages.author, "system"), isNotNull(messages.event))))
+      .orderBy(asc(messages.createdAt)),
+    draftsOf(db, conversation.id),
+  ]);
+  const [view, shown] = await Promise.all([toConversationView(deps, conversation), Promise.all(rows.map(toUIMessage))]);
+  return { conversation: view, drafts: draftRows.map(toDraftView), messages: shown };
 }
 
-/** GET /api/conversation. The chat reads it again when the page comes back. */
+/** GET /api/conversation?conversationId=. The chat reads it again when the page comes back, and while an analyst has it. */
 export async function conversationHandler(request: NextRequest, deps: Deps) {
   const session = await readEmployeeSession(request, deps);
   if (!session.ok) return session.response;
-  return NextResponse.json<ConversationResponse>(await loadConversation(deps.db, session.session.id), {
+  const conversationId = request.nextUrl.searchParams.get("conversationId") ?? undefined;
+  return NextResponse.json<ConversationResponse>(await loadConversation(deps, session.session.id, conversationId), {
     headers: { "cache-control": "private, no-store" },
   });
 }

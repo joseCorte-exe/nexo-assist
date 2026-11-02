@@ -16,9 +16,10 @@ import {
   searchArticlesOutput,
   TICKET_STATUS_LABEL,
   type TicketSummary,
+  transferToAnalystOutput,
   type Urgency,
 } from "@nexo/shared";
-import { SCREEN_NOTE } from "../agent";
+import { CONSOLE_NOTE, SCREEN_NOTE } from "../agent";
 import { codedModel, type ModelStep } from "./stream";
 
 // A stand-in for the LLM with fixed rules, for the end-to-end tests and for running the app without a key
@@ -37,6 +38,11 @@ const PROBLEM = /\b(n[aã]o (conecta|funciona|liga|abre|imprime|entra|sincroniza
 /** The problem is back: a resolved ticket may be reopened. */
 const CAME_BACK = /\b(de novo|novamente|voltou)\b/i;
 
+/** She asks for a person: the click of the offer, or the words. */
+const WANTS_ANALYST = /\b(falar com (um |uma |o |a )?(analista|atendente|pessoa)|quero (um |uma )?(analista|atendente))\b/i;
+/** A case the simulated agent does not know what to do with, so the code makes it transfer (confidence under 0.6). */
+const UNSURE = /\b(fecha sozinh[oa]|macros?|tela azul)\b/i;
+
 /** The replies of the offer an overdue ticket gets, as the design shows them. */
 const OVERDUE_REPLIES = ["Falar com um analista", "Adicionar informação", "Não, obrigado"];
 
@@ -50,17 +56,8 @@ const AFFECTED_REPLIES: Array<[string, Affected]> = [
 ];
 const ASK_AFFECTED = { toolName: "offerReplies", input: { question: AFFECTED_QUESTION, options: ["Só eu", "Minha equipe", "Toda a empresa", "Não sei"] } };
 
-/** What the employee answers when clicking a reply of the offer. Calling an analyst is still the frank answer. */
+/** What the employee answers when clicking a reply of the offer. Calling an analyst is a transfer, read before these. */
 const OFFER_ANSWERS: Record<string, { decision: DecisionRecord; text: string }> = {
-  "falar com um analista": {
-    decision: {
-      understanding: "Quer falar com um analista",
-      action: "Explicar que a transferência ainda não está disponível pelo chat",
-      confidence: 0.9,
-      reason: "A transferência para um analista ainda não está disponível no chat.",
-    },
-    text: "Ainda não consigo chamar um analista por aqui. Se for urgente, ligue no ramal 4000.",
-  },
   "não, obrigado": {
     decision: {
       understanding: "Não quer mais nada sobre o chamado",
@@ -112,6 +109,8 @@ type Intent =
   | { kind: "out_of_scope"; area: OutOfScopeArea; name: string }
   | { kind: "greeting" }
   | { kind: "offer_answer"; answer: (typeof OFFER_ANSWERS)[string] }
+  | { kind: "transfer"; ticketId: string | null; about: string }
+  | { kind: "unsure" }
   | { kind: "ask_what_to_add"; ticketId: string | null }
   | { kind: "follow_up"; ticketId: string }
   | { kind: "draft"; problem: string; affected: Affected }
@@ -144,6 +143,13 @@ function intentOf(question: string, previous: PreviousTurn): Intent {
   }
   const offerAnswer = OFFER_ANSWERS[answer];
   if (offerAnswer) return { kind: "offer_answer", answer: offerAnswer };
+  if (WANTS_ANALYST.test(question)) {
+    // The ticket she named, or the one the agent just showed her.
+    const looked = previous.toolCalls.find((call) => call.toolName === "getTicket")?.input as { ticketId?: string } | undefined;
+    const ticketId = findTicketIds(question)[0] ?? looked?.ticketId ?? null;
+    return { kind: "transfer", ticketId, about: ticketId && previous.said ? previous.said : question };
+  }
+  if (UNSURE.test(question)) return { kind: "unsure" };
   const [ticketId] = findTicketIds(question);
   if (ticketId) return { kind: "ticket", ticketId };
   const area = AREAS.find(({ words }) => words.test(question));
@@ -158,7 +164,7 @@ function intentOf(question: string, previous: PreviousTurn): Intent {
 const userText = (message: LanguageModelV4Prompt[number] | undefined) =>
   message?.role === "user" ? message.content.map((part) => (part.type === "text" ? part.text : "")).join(" ") : "";
 const isEmployeeMessage = (message: LanguageModelV4Prompt[number] | undefined) =>
-  message?.role === "user" && !userText(message).startsWith(SCREEN_NOTE);
+  message?.role === "user" && !userText(message).startsWith(SCREEN_NOTE) && !userText(message).startsWith(CONSOLE_NOTE);
 
 type TurnState = {
   question: string;
@@ -217,6 +223,20 @@ function decide(intent: Intent, question: string): DecisionRecord {
       };
     case "offer_answer":
       return intent.answer.decision;
+    case "transfer":
+      return {
+        understanding: "Quer falar com um analista",
+        action: "Transferir para um analista",
+        confidence: 0.95,
+        reason: "O funcionário pediu para falar com uma pessoa.",
+      };
+    case "unsure":
+      return {
+        understanding: "Um programa que fecha sozinho, num caso que a central de ajuda não cobre",
+        action: "Tentar entender a causa",
+        confidence: 0.41,
+        reason: "Pode ser o arquivo, as macros ou o próprio programa, e nenhum artigo cobre o caso.",
+      };
     case "ask_what_to_add":
       return {
         understanding: `Quer acrescentar uma informação ao ${intent.ticketId ?? "chamado"}`,
@@ -453,6 +473,36 @@ function followUpStep(ticketId: string, question: string, results: Map<string, u
   return { text: result.data.ok ? lineAboveTheCard(result.data, false) : result.data.message };
 }
 
+/** Calls transferToAnalyst, or says to whom it went and until when once it answered. */
+function transferStep(intent: Extract<Intent, { kind: "transfer" | "unsure" }>, question: string, results: Map<string, unknown>): ModelStep {
+  const unsure = intent.kind === "unsure";
+  const ticketId = unsure ? null : intent.ticketId;
+  if (!results.has("transferToAnalyst")) {
+    const summary = unsure
+      ? `Não sei o que fazer com o caso. O que disse: "${question.trim()}".`
+      : ticketId
+        ? `Pediu para falar com um analista sobre o ${ticketId}. O que disse antes: "${intent.about.trim()}".`
+        : `Pediu para falar com um analista. O que disse: "${question.trim()}".`;
+    const input = { reason: unsure ? "agent_unsure" : "employee_request", summary, ...(ticketId ? { ticketId } : {}) };
+    return { toolCalls: [{ toolName: "transferToAnalyst", input }] };
+  }
+  const result = transferToAnalystOutput.safeParse(results.get("transferToAnalyst"));
+  if (!result.success) return { text: TICKETS_DOWN };
+  if (!result.data.ok) {
+    return result.data.reason === "not_with_agent"
+      ? { text: "Um analista já está com a sua conversa e responde por aqui." }
+      : { toolCalls: [{ toolName: "transferToAnalyst", input: { reason: "employee_request", summary: `Pediu para falar com um analista. O que disse: "${question.trim()}".` } }] };
+  }
+  const { levelLabel, waitText, transferReason } = result.data;
+  const wait = `Um analista vai falar com você ${waitText}.`;
+  return {
+    text:
+      transferReason === "agent_unsure"
+        ? `Não tenho segurança sobre a causa disso, então passei sua conversa para o ${levelLabel}. ${wait}`
+        : `Encaminhei para o ${levelLabel}. ${wait}`,
+  };
+}
+
 function nextStep({ prompt }: LanguageModelV4CallOptions): ModelStep {
   const { question, results, drafts, previous } = readTurn(prompt);
   const intent = intentOf(question, previous);
@@ -469,6 +519,9 @@ function nextStep({ prompt }: LanguageModelV4CallOptions): ModelStep {
       return { text: "Oi! Como posso ajudar? Me conte o que está acontecendo." };
     case "offer_answer":
       return { text: intent.answer.text };
+    case "transfer":
+    case "unsure":
+      return transferStep(intent, question, results);
     case "ask_what_to_add":
       return { text: intent.ticketId ? `O que você quer acrescentar ao ${intent.ticketId}?` : "A qual chamado você quer acrescentar uma informação?" };
     case "follow_up":

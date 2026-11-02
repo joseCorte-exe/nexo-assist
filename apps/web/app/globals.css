@@ -30,12 +30,31 @@
   --color-ink-faint: #1b243140;
   --color-radio: #1b243133;
 
+  /* The console (feature 5): the conversation behind the bubbles, the bubbles of the agent and of an analyst, the soft
+     fills of the states, the line of a note and the muted dot of a closed conversation. */
+  --color-console: #eef1f5;
+  --color-agent-bubble: #e6effa;
+  --color-analyst-bubble: #e3f4ea;
+  --color-success-soft: #00bd6c14;
+  --color-warning-soft: #f5a50018;
+  --color-danger-soft: #ee343b12;
+  --color-note-line: #1b243114;
+  --color-ink-dot: #1b243155;
+  --color-day-pill: #ffffffcc;
+
   --font-display: var(--font-newsreader), Georgia, serif;
   /* nexo.pen renders Newsreader at optical size 24 at every size: "Entrar" is 102 px wide, "72%" 62 px. */
   --font-display--font-variation-settings: "opsz" 24;
   --font-ui: var(--font-schibsted), system-ui, sans-serif;
 
   /* Text sizes of nexo.pen with the line height the design gives each one. */
+  /* nexo.pen's "normal" line height is 1.2 × the size, rounded up: 10 → 12, 11 → 14, 12 → 15, 20 → 24. */
+  --text-10: 10px;
+  --text-10--line-height: 12px;
+  --text-11: 11px;
+  --text-11--line-height: 14px;
+  --text-12: 12px;
+  --text-12--line-height: 15px;
   --text-11\.5: 11.5px;
   --text-11\.5--line-height: 14px;
   --text-12\.5: 12.5px;
@@ -52,6 +71,8 @@
   --text-16--line-height: 20px;
   --text-17: 17px;
   --text-17--line-height: 21px;
+  --text-20: 20px;
+  --text-20--line-height: 24px;
   --text-18: 18px;
   --text-18--line-height: 23px;
   --text-24: 24px;
@@ -67,6 +88,7 @@
   --shadow-card: 0 1px 2px #1b24310d, 0 6px 18px #1b24310a;
   --shadow-control: 0 1px 1px #1b24310d;
   --shadow-menu: 0 1px 2px #1b243114, 0 8px 24px #1b24311f;
+  --shadow-bubble: 0 1px 2px #1b243112;
 }
 
 @layer base {

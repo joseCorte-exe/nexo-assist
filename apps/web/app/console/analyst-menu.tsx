@@ -4,8 +4,11 @@ import { useEffect, useId, useRef, useState } from "react";
 import { SignOutButton } from "@/components/sign-out-button";
 import { initials } from "@/lib/format";
 
-/** The analyst's avatar at the bottom of the rail. It opens a small menu with who is signed in and "Sair". */
-export function AnalystMenu({ name, email }: { name: string; email: string }) {
+/**
+ * The analyst's avatar at the bottom of the rail, with the green dot while available. It opens a small menu with who is
+ * signed in and "Sair".
+ */
+export function AnalystMenu({ name, email, available }: { name: string; email: string; available: boolean }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -41,9 +44,12 @@ export function AnalystMenu({ name, email }: { name: string; email: string }) {
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
         onClick={() => setOpen((current) => !current)}
-        className="grid size-9 place-items-center rounded-full bg-primary-soft text-12.5 font-bold text-primary-text transition-[scale] duration-150 ease-out active:scale-[0.96]"
+        className="relative grid size-9 place-items-center rounded-full bg-primary-soft text-12.5 font-bold text-primary-text transition-[scale] duration-150 ease-out active:scale-[0.96]"
       >
         {initials(name)}
+        {available ? (
+          <span aria-hidden className="absolute top-[26px] left-[26px] size-2.5 rounded-full bg-success outline-2 outline-desk" />
+        ) : null}
       </button>
       {open ? (
         <div

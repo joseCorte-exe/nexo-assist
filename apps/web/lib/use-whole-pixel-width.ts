@@ -1,6 +1,6 @@
 "use client";
 
-import { type RefObject, useLayoutEffect } from "react";
+import { type RefObject, useLayoutEffect, useRef } from "react";
 
 /**
  * An element that hugs its text gets a fractional width, and nexo.pen lays it out on whole pixels: the employee
@@ -21,4 +21,14 @@ export function useWholePixelWidth(ref: RefObject<HTMLElement | null>, content: 
     window.addEventListener("resize", snap);
     return () => window.removeEventListener("resize", snap);
   }, [ref, content]);
+}
+
+/**
+ * A ref for an element that hugs its text, rounded up to a whole pixel as nexo.pen lays it out: buttons, pills and chips
+ * that sit against another element, whose fraction of a pixel would push it off the design.
+ */
+export function useWholePixelRef<T extends HTMLElement>(content: string) {
+  const ref = useRef<T>(null);
+  useWholePixelWidth(ref, content);
+  return ref;
 }

@@ -3,7 +3,9 @@ import { createTicketServiceClient, type TicketServiceClient } from "@nexo/share
 import { after } from "next/server";
 import { z } from "zod";
 import { createDb, type Db } from "@/db";
+import { createDirectory, type Directory } from "./directory";
 import { createDraftStore } from "./drafts";
+import { createTransferStore } from "./transfers";
 import { getSessionSecret } from "./session";
 
 /** What the server code needs from the outside. Route handlers get the real one; tests build their own. */
@@ -11,8 +13,20 @@ export type Deps = {
   db: Db;
   ticketService: Pick<
     TicketServiceClient,
-    "findPersonByEmail" | "listAnalysts" | "createTicket" | "addFollowUp" | "reopenTicket" | "listCandidates"
+    | "findPersonByEmail"
+    | "listAnalysts"
+    | "createTicket"
+    | "addFollowUp"
+    | "reopenTicket"
+    | "listCandidates"
+    | "listEmployeeTickets"
+    | "listEmployeesByIds"
+    | "searchEmployees"
+    | "setAvailability"
+    | "assignTicket"
   >;
+  /** The names the console shows, cached for a short while. */
+  directory: Directory;
   agent: NexoAgent;
   /** The agent memory, for the notes of what the employee did outside the agent. */
   memory: Pick<AgentMemory, "saveMessages">;
@@ -57,8 +71,10 @@ export function getDeps(): Deps {
         memory,
         ticketService,
         drafts: createDraftStore(db),
+        transfers: createTransferStore({ db, memory }),
       }),
       memory,
+      directory: createDirectory(ticketService),
       waitUntil: (task) => after(task),
       sessionSecret: getSessionSecret(),
       secureCookies: process.env.NODE_ENV === "production",

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { NexoUIMessage } from "./chat";
-import { decisionOf, isRefusedInput, shownDraft, summarizeTurn, textOf, withToolErrors } from "./chat-parts";
+import { decisionOf, isRefusedInput, replyText, shownDraft, summarizeTurn, textOf, withToolErrors } from "./chat-parts";
 
 const decision = {
   understanding: "Quer saber o horário do service desk",
@@ -136,5 +136,31 @@ describe("isRefusedInput", () => {
     expect(isRefusedInput({ error: true, message: "Para criar, falta title." })).toBe(true);
     expect(isRefusedInput({ ok: false, reason: "unavailable", message: "Fora do ar." })).toBe(false);
     expect(isRefusedInput(undefined)).toBe(false);
+  });
+});
+
+describe("replyText", () => {
+  const offer = (question: string) =>
+    ({ type: "tool-offerReplies", toolCallId: "o1", state: "output-available", input: { question, options: ["Falar com um analista", "Não, obrigado"] }, output: { ok: true } }) as NexoUIMessage["parts"][number];
+  const ticket = {
+    type: "tool-getTicket",
+    toolCallId: "g1",
+    state: "output-available",
+    input: { ticketId: "INC-20311" },
+    output: { ok: true, ticket: { id: "INC-20311", title: "Notebook lento após atualização do Windows" } },
+  } as unknown as NexoUIMessage["parts"][number];
+
+  it("is the text of the reply when it has one", () => {
+    expect(replyText([{ type: "text", text: "Encaminhei para o Suporte N2." }])).toBe("Encaminhei para o Suporte N2.");
+  });
+
+  it("adds the question of an offer the text does not already ask", () => {
+    const question = "Está sem atualização há 6 dias. Quer que eu chame um analista?";
+    expect(replyText([ticket, offer(question)])).toBe("Chamado INC-20311 · Notebook lento após atualização do Windows\nEstá sem atualização há 6 dias. Quer que eu chame um analista?");
+    expect(replyText([{ type: "text", text: question }, offer(question)])).toBe(question);
+  });
+
+  it("names the ticket it showed when there is no text at all", () => {
+    expect(replyText([ticket])).toBe("Chamado INC-20311 · Notebook lento após atualização do Windows");
   });
 });

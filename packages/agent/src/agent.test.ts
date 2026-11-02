@@ -1,8 +1,8 @@
 import { type DecisionRecord, type KbArticle, slaText, type Ticket } from "@nexo/shared";
 import { describe, expect, it } from "vitest";
-import { createNexoAgent, createMemory, saveNote } from "./agent";
+import { CONSOLE_NOTE, createNexoAgent, createMemory, saveNote } from "./agent";
 import { promptText, replyOf, scriptedModel } from "./testing";
-import type { DraftRecord, DraftStore, TicketDesk } from "./tools";
+import type { DraftRecord, DraftStore, TicketDesk, TransferRecord, TransferStore } from "./tools";
 
 const hours: KbArticle = {
   id: "kb-service-desk-hours",
@@ -43,6 +43,16 @@ const ticketService: TicketDesk = {
     return { ok: true, data: null };
   },
   listCandidates: async () => ({ ok: true, data: [] }),
+  transferTicket: async () => ({ ok: true, data: notebook }),
+};
+
+/** The transfers the agent made, as the web would keep them. */
+const savedTransfers: TransferRecord[] = [];
+const transfers: TransferStore = {
+  transfer: async (record) => {
+    savedTransfers.push(record);
+    return { transferred: true, noteId: `note-${savedTransfers.length}` };
+  },
 };
 
 /** The drafts saved by the agent, as the web would keep them. */
@@ -81,7 +91,7 @@ const hoursScript = () => [
 function setup(steps: Parameters<typeof scriptedModel>[0]) {
   const model = scriptedModel(steps);
   const memory = createMemory({ url: ":memory:" });
-  const agent = createNexoAgent({ model, memory, ticketService, drafts });
+  const agent = createNexoAgent({ model, memory, ticketService, drafts, transfers });
   return { model, memory, agent };
 }
 
@@ -118,7 +128,7 @@ describe("streamReply", () => {
       { toolCalls: [{ toolName: "recordDecision", input: { ...decision, understanding: "Pergunta de seguimento" } }] },
       { text: "Sim, de segunda a sexta." },
     ]);
-    const agent = createNexoAgent({ model, memory: createMemory({ url: ":memory:" }), ticketService, drafts });
+    const agent = createNexoAgent({ model, memory: createMemory({ url: ":memory:" }), ticketService, drafts, transfers });
     await replyOf(agent, turn);
     await replyOf(agent, { ...turn, text: "E no sábado?" });
 
@@ -134,7 +144,7 @@ describe("streamReply", () => {
       { toolCalls: [{ toolName: "recordDecision", input: decision }] },
       { text: "Oi!" },
     ]);
-    const agent = createNexoAgent({ model, memory: createMemory({ url: ":memory:" }), ticketService, drafts });
+    const agent = createNexoAgent({ model, memory: createMemory({ url: ":memory:" }), ticketService, drafts, transfers });
     await replyOf(agent, turn);
     await replyOf(agent, { conversationId: "conv-2", employeeId: "emp-bruno", text: "Oi" });
     expect(promptText(model.calls[3]!)).not.toContain("Qual o horário do service desk?");
@@ -316,6 +326,70 @@ describe("streamReply", () => {
   });
 });
 
+describe("the transfer to an analyst", () => {
+  const summary = "Excel fecha sozinho ao abrir a planilha de campanhas com macros; a central de ajuda não cobre o caso.";
+  const unsure: DecisionRecord = {
+    understanding: "Excel fecha ao abrir uma planilha com macros",
+    action: "Responder com o que sei",
+    confidence: 0.41,
+    reason: "Nenhum artigo cobre o caso.",
+  };
+  const handedOver = "Não tenho segurança sobre a causa, então passei sua conversa para o Suporte N1.";
+
+  it("makes the step after a decision below 0.6 transfer, and records it as the doubt of the agent", async () => {
+    savedTransfers.length = 0;
+    const { agent, model } = setup([
+      { toolCalls: [{ toolName: "recordDecision", input: unsure }] },
+      { toolCalls: [{ toolName: "transferToAnalyst", input: { reason: "employee_request", summary } }] },
+      { text: handedOver },
+    ]);
+    await replyOf(agent, turn);
+    expect(model.calls[1]?.toolChoice).toEqual({ type: "tool", toolName: "transferToAnalyst" });
+    expect(savedTransfers.map((transfer) => transfer.reason)).toEqual(["agent_unsure"]);
+  });
+
+  it("lets the model choose when it is sure enough, 0.6 included", async () => {
+    const { agent, model } = setup([{ toolCalls: [{ toolName: "recordDecision", input: { ...unsure, confidence: 0.6 } }] }, { text: "Me conte mais." }]);
+    await replyOf(agent, turn);
+    expect(model.calls[1]?.toolChoice).toEqual({ type: "auto" });
+  });
+
+  it("does not force a turn that already moved on: the decision is the one of this reply", async () => {
+    const { agent, model } = setup([
+      ...hoursScript(),
+      { toolCalls: [{ toolName: "recordDecision", input: decision }] },
+      { text: answer },
+    ]);
+    await replyOf(agent, turn);
+    await replyOf(agent, { ...turn, text: "E no sábado?" });
+    expect(model.calls[4]?.toolChoice).toEqual({ type: "auto" });
+  });
+
+  it("goes on after the transfer so the model says who and until when, then ends with no tool left", async () => {
+    const { agent, model } = setup([
+      { toolCalls: [{ toolName: "recordDecision", input: { ...decision, confidence: 0.9 } }] },
+      { toolCalls: [{ toolName: "transferToAnalyst", input: { reason: "employee_request", summary } }] },
+      { text: handedOver },
+    ]);
+    expect((await replyOf(agent, turn)).text).toBe(handedOver);
+    expect(model.calls).toHaveLength(3);
+    // The model wrote it seeing the wait the code computed.
+    expect(promptText(model.calls[2]!)).toContain('"levelLabel":"Suporte N1"');
+    const toolsOf = (call: number) => (model.calls[call]!.tools ?? []).map((tool) => tool.name);
+    expect(toolsOf(2)).not.toContain("transferToAnalyst");
+    expect(toolsOf(2)).not.toContain("offerReplies");
+  });
+
+  it("ends the reply when the sentence came with the transfer", async () => {
+    const { agent, model } = setup([
+      { toolCalls: [{ toolName: "recordDecision", input: { ...decision, confidence: 0.9 } }] },
+      { text: handedOver, toolCalls: [{ toolName: "transferToAnalyst", input: { reason: "employee_request", summary } }] },
+    ]);
+    await replyOf(agent, turn);
+    expect(model.calls).toHaveLength(2);
+  });
+});
+
 describe("saveNote", () => {
   it("puts what happened on the screen in the conversation, so the model reads it on the next turn", async () => {
     const { agent, model, memory } = setup([...hoursScript(), ...hoursScript()]);
@@ -329,6 +403,18 @@ describe("saveNote", () => {
     });
     await replyOf(agent, { ...turn, text: "Qual o número?" });
     expect(promptText(model.calls[3]!)).toContain("(ação na tela) Confirmei o rascunho D-381. O chamado INC-20320 foi criado.");
+  });
+
+  it("tells the console's notes apart, and copies her own messages as she wrote them", async () => {
+    const { agent, model, memory } = setup([...hoursScript(), ...hoursScript()]);
+    await replyOf(agent, turn);
+    const at = new Date("2026-10-26T13:05:00Z");
+    await saveNote(memory, { id: "note-a", conversationId: "conv-1", employeeId: "emp-ana", text: "Rafael Lima assumiu a conversa.", at, prefix: CONSOLE_NOTE });
+    await saveNote(memory, { id: "msg-b", conversationId: "conv-1", employeeId: "emp-ana", text: "Posso sim, está ligado.", at, prefix: null });
+    await replyOf(agent, { ...turn, text: "Voltei." });
+    const seen = promptText(model.calls[3]!);
+    expect(seen).toContain("(atendimento) Rafael Lima assumiu a conversa.");
+    expect(seen).toContain('"Posso sim, está ligado."');
   });
 
   it("keeps a note once when it is saved again under the same id", async () => {

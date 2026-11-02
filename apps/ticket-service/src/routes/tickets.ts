@@ -4,12 +4,17 @@ import {
   createTicketInput,
   dueAt,
   IDEMPOTENCY_KEY_HEADER,
+  LEVEL_LABEL,
   reopenedDueAt,
   type Ticket,
   type TicketDetail,
+  type TicketStatus,
   type TicketType,
+  ticketAssignInput,
   ticketFollowUpInput,
   ticketId,
+  ticketTransferInput,
+  type UpdateAuthor,
 } from "@nexo/shared";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { type Context, Hono } from "hono";
@@ -121,8 +126,49 @@ export function ticketRoutes(deps: Deps) {
         await addUpdate(tx, { ticketId: ticket.id, text, now });
         return toTicket(row);
       });
+    })
+    // The agent passed the conversation about the ticket to an analyst. The history of the ticket gets it as an update of
+    // the agent, with the level and the summary; the agent is not IT, so the deadline does not move (RN-02).
+    .post("/:id/transfer", async (c) => {
+      const id = ticketId.safeParse(c.req.param("id"));
+      if (!id.success) return c.json(errorBody("invalid_ticket", "Invalid ticket number"), 400);
+      const body = await parseWrite(c, ticketTransferInput);
+      if (!body.ok) return body.response;
+      const { employeeId, level, summary } = body.data;
+      const scope = `POST /tickets/${id.data}/transfer for ${employeeId}`;
+      return idempotent(deps, c, { key: body.key, scope, status: 200 }, async (tx, now) => {
+        const ticket = await ticketOf(tx, id.data, employeeId);
+        await addUpdate(tx, { ticketId: ticket.id, author: "agent", text: `Transferido para o ${LEVEL_LABEL[level]}. ${summary}`, now });
+        return toTicket(ticket);
+      });
+    })
+    // An analyst assumed the conversation about the ticket: one waiting for an analyst, or already in service, is now in
+    // service with them. A ticket IT moved further (in progress, approved, resolved) keeps its state.
+    .post("/:id/assign", async (c) => {
+      const id = ticketId.safeParse(c.req.param("id"));
+      if (!id.success) return c.json(errorBody("invalid_ticket", "Invalid ticket number"), 400);
+      const body = await parseWrite(c, ticketAssignInput);
+      if (!body.ok) return body.response;
+      const { employeeId, analystId } = body.data;
+      const scope = `POST /tickets/${id.data}/assign to ${analystId} for ${employeeId}`;
+      return idempotent(deps, c, { key: body.key, scope, status: 200 }, async (tx) => {
+        const ticket = await ticketOf(tx, id.data, employeeId);
+        const [analyst] = await tx.select({ id: analysts.id }).from(analysts).where(eq(analysts.id, analystId));
+        if (!analyst) throw new Refusal(400, "unknown_analyst", "Analyst not found");
+        if (!ASSIGNABLE.has(ticket.status)) return toTicket(ticket);
+        const [row] = await tx
+          .update(tickets)
+          .set({ status: "assigned", assignedTo: analystId })
+          .where(eq(tickets.id, ticket.id))
+          .returning();
+        if (!row) throw new Error("Update returned no row");
+        return toTicket(row);
+      });
     });
 }
+
+/** The states an assumed conversation puts in service; the others are IT's to move. */
+const ASSIGNABLE = new Set<TicketStatus>(["waiting_for_analyst", "assigned"]);
 
 const REFUSAL_MESSAGE = {
   ticket_resolved: "The ticket is resolved",
@@ -200,8 +246,11 @@ async function ticketOf(tx: Transaction, id: string, employeeId: string) {
   return ticket;
 }
 
-function addUpdate(tx: Transaction, { ticketId: id, text, now }: { ticketId: string; text: string; now: Date }) {
-  return tx.insert(ticketUpdates).values({ id: `upd-${randomUUID()}`, ticketId: id, author: "employee", text, createdAt: now });
+function addUpdate(
+  tx: Transaction,
+  { ticketId: id, author = "employee", text, now }: { ticketId: string; author?: UpdateAuthor; text: string; now: Date },
+) {
+  return tx.insert(ticketUpdates).values({ id: `upd-${randomUUID()}`, ticketId: id, author, text, createdAt: now });
 }
 
 /**

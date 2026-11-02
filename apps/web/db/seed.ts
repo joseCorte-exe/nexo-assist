@@ -1,6 +1,6 @@
-import { dueAt, type NexoUIMessage, type Priority } from "@nexo/shared";
+import { type AnalystLevel, type ChatNote, type ConversationEvent, dueAt, type NexoUIMessage, type Priority, sampleAnalysts } from "@nexo/shared";
 import type { Db } from ".";
-import { conversations, decisions, drafts, messages, usageCounters } from "./schema";
+import { consoleReads, conversations, decisions, drafts, messages, usageCounters } from "./schema";
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
@@ -11,6 +11,9 @@ type SampleMessage = {
   author: "employee" | "agent" | "analyst" | "system";
   text: string;
   ago: number;
+  /** A note of the console: what happened, and the analyst who did it (or, for a transfer, nobody). */
+  event?: ConversationEvent;
+  analystId?: string;
   decision?: { understanding: string; action: string; toolsUsed: string[]; confidence: number; reason: string };
 };
 
@@ -26,6 +29,8 @@ type SampleConversation = {
     ago: number;
     /** Priority whose deadline sets the wait. Without a linked ticket it counts as medium. */
     priority: Priority;
+    /** The confidence of the reply that transferred: "Agent pediu ajuda · confiança 41%". */
+    confidence?: number;
   };
   analystId?: string;
   ticketId?: string;
@@ -62,7 +67,7 @@ const sampleConversations: SampleConversation[] = [
           reason: "Algo parado para uma equipe é prioridade crítica, e caso crítico vai para o N2.",
         },
       },
-      { author: "system", text: "Conversa transferida para o N2.", ago: 35 * MINUTE },
+      { author: "system", text: "Transferida para o Suporte N2.", ago: 35 * MINUTE, event: "transferred" },
     ],
   },
   {
@@ -75,6 +80,7 @@ const sampleConversations: SampleConversation[] = [
       summary: "O Excel fecha sozinho ao abrir a planilha de campanhas com macros. A causa não está clara.",
       ago: 12 * MINUTE,
       priority: "medium",
+      confidence: 0.41,
     },
     messages: [
       { author: "employee", text: "Meu Excel fecha sozinho toda vez que abro a planilha de campanhas, a que tem macros.", ago: 14 * MINUTE },
@@ -90,7 +96,7 @@ const sampleConversations: SampleConversation[] = [
           reason: "Nenhum artigo cobre o caso e pode ser a planilha, as macros ou o Office.",
         },
       },
-      { author: "system", text: "Conversa transferida para o N1.", ago: 12 * MINUTE },
+      { author: "system", text: "Transferida para o Suporte N1.", ago: 12 * MINUTE, event: "transferred" },
     ],
   },
   {
@@ -133,9 +139,9 @@ const sampleConversations: SampleConversation[] = [
           reason: "Pedido do funcionário vai para o N1.",
         },
       },
-      { author: "system", text: "Conversa transferida para o N1.", ago: 2 * HOUR },
-      { author: "system", text: "Rafael Lima assumiu a conversa.", ago: 1 * HOUR + 5 * MINUTE },
-      { author: "analyst", text: "Oi, Fábio. Estou verificando o cliente de VPN da sua máquina.", ago: 1 * HOUR },
+      { author: "system", text: "Transferida para o Suporte N1.", ago: 2 * HOUR, event: "transferred" },
+      { author: "system", text: "Rafael Lima assumiu a conversa.", ago: 1 * HOUR + 5 * MINUTE, event: "assumed", analystId: "analyst-rafael" },
+      { author: "analyst", text: "Oi, Fábio. Estou verificando o cliente de VPN da sua máquina.", ago: 1 * HOUR, analystId: "analyst-rafael" },
     ],
   },
   {
@@ -210,9 +216,10 @@ const sampleConversations: SampleConversation[] = [
           reason: "O artigo já foi seguido sem resolver.",
         },
       },
-      { author: "system", text: "Marcos Oliveira assumiu a conversa.", ago: 2 * DAY + 2 * HOUR },
-      { author: "analyst", text: "Aumentei sua caixa para 100 GB. Pode testar?", ago: 2 * DAY + 1 * HOUR },
+      { author: "system", text: "Marcos Oliveira assumiu a conversa.", ago: 2 * DAY + 2 * HOUR, event: "assumed", analystId: "analyst-marcos" },
+      { author: "analyst", text: "Aumentei sua caixa para 100 GB. Pode testar?", ago: 2 * DAY + 1 * HOUR, analystId: "analyst-marcos" },
       { author: "employee", text: "Funcionou, obrigada.", ago: 2 * DAY + 10 * MINUTE },
+      { author: "system", text: "Marcos Oliveira encerrou o atendimento.", ago: 2 * DAY, event: "closed", analystId: "analyst-marcos" },
     ],
   },
 ];
@@ -267,11 +274,43 @@ const pastConversations: SampleConversation[] = pastCases.map(([employeeId, ques
         },
       },
       byAnalyst
-        ? { author: "analyst", text: "Resolvido por aqui. Qualquer coisa, é só chamar.", ago: openedAgo - 2 * HOUR + 5 * MINUTE }
+        ? { author: "analyst", text: "Resolvido por aqui. Qualquer coisa, é só chamar.", ago: openedAgo - 2 * HOUR + 5 * MINUTE, analystId: "analyst-juliana" }
         : { author: "employee", text: "Deu certo, obrigado!", ago: openedAgo - 6 * MINUTE },
     ],
   };
 });
+
+const analystOf = (id: string) => {
+  const analyst = sampleAnalysts.find((one) => one.id === id);
+  if (!analyst) throw new Error(`No sample analyst ${id}`);
+  return analyst;
+};
+
+/** A note as the moves of the conversation leave it: where a transfer went, and who assumed, released or closed. */
+function sampleNote({ event, analystId }: SampleMessage & { event: ConversationEvent }, level: AnalystLevel | null, at: Date): ChatNote {
+  if (event === "transferred") {
+    if (!level) throw new Error("A sample transfer needs the level of its conversation");
+    return { event, level, at: at.toISOString() };
+  }
+  if (!analystId) throw new Error(`A sample note of ${event} needs its analyst`);
+  const analyst = analystOf(analystId);
+  return event === "assumed"
+    ? { event, level: analyst.level, analystName: analyst.name, at: at.toISOString() }
+    : { event, analystName: analyst.name, at: at.toISOString() };
+}
+
+/**
+ * The parts a note of the console and an analyst message are saved with, as the console saves them: the note says the
+ * level of a transfer, and who assumed, released or closed; the analyst message says who wrote it.
+ */
+function consoleParts(message: SampleMessage, level: AnalystLevel | null, at: Date): NexoUIMessage["parts"] | null {
+  if (message.author === "system" && message.event) return [{ type: "data-note", data: sampleNote({ ...message, event: message.event }, level, at) }];
+  if (message.author === "analyst" && message.analystId) {
+    const { name, level: analystLevel } = analystOf(message.analystId);
+    return [{ type: "data-analyst", data: { name, level: analystLevel } }, { type: "text", text: message.text }];
+  }
+  return null;
+}
 
 /**
  * The parts an agent reply would have streamed: its decision, then its text. The tools of later features are only in
@@ -289,8 +328,15 @@ function agentParts(messageId: string, { text, decision }: SampleMessage): NexoU
 /** Recreates the sample conversations with dates relative to `now`. Keeps the Mastra memory tables untouched. */
 export async function seed(db: Db, now: Date = new Date()) {
   const ago = (ms: number) => new Date(now.getTime() - ms);
+  /** When the analyst attending it took it: the note of the assumption. */
+  const assumedAgo = (conversation: SampleConversation) => {
+    if (conversation.state !== "with_analyst") return null;
+    const note = [...conversation.messages].reverse().find((message) => message.event === "assumed");
+    return note ? ago(note.ago) : null;
+  };
 
   await db.transaction(async (tx) => {
+    await tx.delete(consoleReads);
     await tx.delete(decisions);
     await tx.delete(drafts);
     await tx.delete(messages);
@@ -304,6 +350,10 @@ export async function seed(db: Db, now: Date = new Date()) {
 
       const { transfer } = conversation;
       const transferredAt = transfer ? ago(transfer.ago) : null;
+      // The message of hers the transferring reply answered: the last one she wrote up to the transfer.
+      const asked = transfer
+        ? conversation.messages.filter((message) => message.author === "employee" && message.ago >= transfer.ago).at(-1)
+        : undefined;
 
       await tx.insert(conversations).values({
         id: conversation.id,
@@ -316,8 +366,12 @@ export async function seed(db: Db, now: Date = new Date()) {
         analystId: conversation.analystId ?? null,
         ticketId: conversation.ticketId ?? null,
         messageCount: conversation.messages.filter((message) => message.author === "employee").length,
+        transferConfidence: transfer?.confidence ?? null,
+        transferredAt,
+        needsAnalystSince: asked ? ago(asked.ago) : null,
+        assumedAt: assumedAgo(conversation),
         waitUntil:
-          transfer && transferredAt
+          transfer && transferredAt && conversation.state === "waiting_for_analyst"
             ? dueAt({ priority: transfer.priority, createdAt: transferredAt, lastItResponseAt: null, reopenedAt: null })
             : null,
         createdAt: ago(first.ago),
@@ -331,8 +385,10 @@ export async function seed(db: Db, now: Date = new Date()) {
           id: messageId,
           conversationId: conversation.id,
           author: message.author,
+          authorId: message.analystId ?? null,
+          event: message.event ?? null,
           text: message.text,
-          parts: agentParts(messageId, message),
+          parts: agentParts(messageId, message) ?? consoleParts(message, transfer?.level ?? null, ago(message.ago)),
           createdAt: ago(message.ago),
         });
         if (message.decision) {

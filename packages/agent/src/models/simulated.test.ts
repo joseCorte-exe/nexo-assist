@@ -2,7 +2,7 @@ import { dueAt, type KbArticle, slaText, summarizeTurn, type Ticket, type Ticket
 import { describe, expect, it } from "vitest";
 import { createMemory, createNexoAgent } from "../agent";
 import { replyOf } from "../testing";
-import type { DraftRecord, DraftStore, TicketDesk } from "../tools";
+import type { DraftRecord, DraftStore, TicketDesk, TransferRecord, TransferStore } from "../tools";
 import { simulatedModel } from "./simulated";
 
 const vpn: KbArticle = {
@@ -89,7 +89,17 @@ const helpCenter = (state: "up" | "down" = "up", open: Ticket[] = [notebook, sha
   getTicket: async (id) => (state === "down" ? down : { ok: true, data: details[id] ?? null }),
   listCandidates: async (_employeeId, category) =>
     state === "down" ? down : { ok: true, data: (candidates ?? open).filter((one) => one.category === category) },
+  transferTicket: async () => (state === "down" ? down : { ok: true, data: notebook }),
 });
+
+/** Every transfer the agent made, as the web would keep it. */
+const savedTransfers: TransferRecord[] = [];
+const transfers: TransferStore = {
+  transfer: async (record) => {
+    savedTransfers.push(record);
+    return { transferred: true, noteId: `note-${savedTransfers.length}` };
+  },
+};
 
 /** Every draft the agent saved, as the web would keep it. */
 const savedDrafts: DraftRecord[] = [];
@@ -111,7 +121,7 @@ const drafts: DraftStore = {
 };
 
 const newAgent = (center: TicketDesk) =>
-  createNexoAgent({ model: simulatedModel(), memory: createMemory({ url: ":memory:" }), ticketService: center, drafts, now: () => NOW });
+  createNexoAgent({ model: simulatedModel(), memory: createMemory({ url: ":memory:" }), ticketService: center, drafts, transfers, now: () => NOW });
 
 async function reply(text: string, center = helpCenter(), agent = newAgent(center)) {
   const { text: answer, toolCalls } = await replyOf(agent, { conversationId: "conv-1", employeeId: "emp-ana", text });
@@ -217,10 +227,26 @@ describe("simulatedModel", () => {
     expect(result.text).toBe("O serviço de chamados não respondeu agora. Tente de novo em instantes.");
   });
 
-  it("is frank that it cannot call an analyst through the chat yet", async () => {
-    const result = await reply("Falar com um analista");
-    expect(result.decision.toolsUsed).toEqual(["recordDecision"]);
-    expect(result.text).toBe("Ainda não consigo chamar um analista por aqui. Se for urgente, ligue no ramal 4000.");
+  it("transfers to an analyst when asked, and says to whom and until when", async () => {
+    savedTransfers.length = 0;
+    const result = await reply("Quero falar com um analista.");
+    expect(result.decision.toolsUsed).toEqual(["recordDecision", "transferToAnalyst"]);
+    expect(result.decision.record).toMatchObject({ action: "Transferir para um analista", confidence: 0.95 });
+    expect(result.toolCalls.at(-1)?.args).toMatchObject({ reason: "employee_request" });
+    // Medium, without a ticket: 3 business days from Monday 10:00.
+    expect(result.text).toBe("Encaminhei para o Suporte N1. Um analista vai falar com você até 29 out, 10:00.");
+    expect(savedTransfers).toHaveLength(1);
+  });
+
+  it("does not know what to do with a case the help center does not cover, so the code makes it transfer", async () => {
+    savedTransfers.length = 0;
+    const result = await reply("Meu Excel fecha sozinho quando abro a planilha de campanhas com macros.");
+    expect(result.decision.record?.confidence).toBeLessThan(0.6);
+    expect(result.decision.toolsUsed).toEqual(["recordDecision", "transferToAnalyst"]);
+    expect(savedTransfers.map((transfer) => transfer.reason)).toEqual(["agent_unsure"]);
+    expect(result.text).toBe(
+      "Não tenho segurança sobre a causa disso, então passei sua conversa para o Suporte N1. Um analista vai falar com você até 29 out, 10:00.",
+    );
   });
 
 
@@ -239,6 +265,26 @@ function conversation(center = helpCenter()) {
 const AFFECTED = ["Só eu", "Minha equipe", "Toda a empresa", "Não sei"];
 const argsOf = (result: Awaited<ReturnType<typeof reply>>, toolName: string) =>
   result.toolCalls.filter((call) => call.toolName === toolName).map((call) => call.args);
+
+describe("simulatedModel transferring (feature 5)", () => {
+  it("takes the overdue ticket it just showed to N2 when she clicks to talk to an analyst", async () => {
+    savedTransfers.length = 0;
+    const say = conversation();
+    await say("INC-20311 · Notebook lento após atualização do Windows");
+    const result = await say("Falar com um analista");
+    expect(argsOf(result, "transferToAnalyst")).toEqual([
+      {
+        reason: "employee_request",
+        ticketId: "INC-20311",
+        summary: "Pediu para falar com um analista sobre o INC-20311. O que disse antes: \"INC-20311 · Notebook lento após atualização do Windows\".",
+      },
+    ]);
+    expect(savedTransfers.map(({ level, reason, ticketId }) => ({ level, reason, ticketId }))).toEqual([
+      { level: "N2", reason: "overdue", ticketId: "INC-20311" },
+    ]);
+    expect(result.text).toBe("Encaminhei para o Suporte N2. Um analista vai falar com você até 29 out, 10:00.");
+  });
+});
 
 describe("simulatedModel opening and following up tickets (feature 4)", () => {
   it("takes a problem to a ticket: looks for open tickets and the help center, then asks who is affected", async () => {

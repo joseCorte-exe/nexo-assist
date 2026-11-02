@@ -23,7 +23,9 @@ import { createDb } from "@/db";
 import { migrateDb } from "@/db/migrate";
 import { seed } from "@/db/seed";
 import type { Deps } from "./deps";
+import { createDirectory } from "./directory";
 import { createDraftStore } from "./drafts";
+import { createTransferStore } from "./transfers";
 import { createSession, SESSION_COOKIE, type SessionPerson, signSession } from "./session";
 
 // Test helpers: a real in-memory conversations DB and an in-memory ticket-service with the sample people.
@@ -90,6 +92,8 @@ export type FakeTicketService = TicketServiceClient & {
   writes: ServiceWrite[];
   /** Takes the writes down, or brings them back. */
   setWritesDown: (down: boolean) => void;
+  /** Takes the whole service down, or brings it back. */
+  setDown: (down: boolean) => void;
 };
 
 const notFound = () => Response.json({ error: { code: "ticket_not_found", message: "Ticket not found" } }, { status: 404 });
@@ -130,6 +134,14 @@ export function fakeTicketService({
       return write(method, pathname, body);
     }
     if (pathname === "/analysts") return Response.json(analysts);
+    if (pathname === "/employees" && searchParams.has("ids")) {
+      const wanted = new Set(searchParams.get("ids")!.split(","));
+      return Response.json(employees.filter((employee) => wanted.has(employee.id)));
+    }
+    if (pathname === "/employees" && searchParams.has("q")) {
+      const text = searchParams.get("q")!.toLowerCase();
+      return Response.json(employees.filter((employee) => employee.name.toLowerCase().includes(text)));
+    }
     // The help center only knows the VPN article here; its ranking is tested in the ticket-service.
     if (pathname === "/kb/search") return Response.json(/vpn|809/i.test(searchParams.get("q") ?? "") ? [vpnArticle] : []);
     const candidates = pathname.match(/^\/employees\/([^/]+)\/tickets\/candidates$/);
@@ -157,8 +169,23 @@ export function fakeTicketService({
     return Response.json(employees.filter((employee) => employee.email === searchParams.get("email")));
   };
 
-  /** The three writes, with the rules the service checks; their idempotency is tested in the service. */
+  /** The writes, with the rules the service checks; their idempotency is tested in the service. */
   function write(method: string, path: string, body: unknown) {
+    const analyst = path.match(/^\/analysts\/([^/]+)$/);
+    if (method === "PATCH" && analyst) {
+      const found = analysts.find((one) => one.id === analyst[1]);
+      if (!found) return Response.json({ error: { code: "analyst_not_found", message: "Analyst not found" } }, { status: 404 });
+      Object.assign(found, body as { available: boolean });
+      return Response.json(found);
+    }
+    const mark = path.match(/^\/tickets\/([^/]+)\/(transfer|assign)$/);
+    if (mark) {
+      const { employeeId, analystId } = body as { employeeId: string; analystId?: string };
+      const ticket = tickets.find((one) => one.id === mark[1] && one.openedBy === employeeId);
+      if (!ticket) return notFound();
+      if (mark[2] === "transfer" || !["waiting_for_analyst", "assigned"].includes(ticket.status)) return Response.json(ticket);
+      return Response.json({ ...ticket, status: "assigned", assignedTo: analystId });
+    }
     if (method === "POST" && path === "/tickets") {
       const input = createTicketInput.parse(body);
       const created: Ticket = {
@@ -197,6 +224,9 @@ export function fakeTicketService({
     setWritesDown: (value: boolean) => {
       writesDown = value;
     },
+    setDown: (value: boolean) => {
+      down = value;
+    },
   });
 }
 
@@ -207,10 +237,21 @@ export function fakeTicketService({
 export function testAgent(
   model: AgentModel = simulatedModel(),
   ticketService = fakeTicketService(),
-  { db, memory = createMemory({ url: ":memory:" }) }: { db?: Deps["db"]; memory?: AgentMemory } = {},
+  {
+    db,
+    memory = createMemory({ url: ":memory:" }),
+    now = () => NOW,
+  }: { db?: Deps["db"]; memory?: AgentMemory; now?: () => Date } = {},
 ): NexoAgent {
-  const drafts = createDraftStore(db ?? createDb(":memory:"));
-  return createNexoAgent({ model, memory, ticketService, drafts, now: () => NOW });
+  const store = db ?? createDb(":memory:");
+  return createNexoAgent({
+    model,
+    memory,
+    ticketService,
+    drafts: createDraftStore(store),
+    transfers: createTransferStore({ db: store, memory }),
+    now,
+  });
 }
 
 export type TestDeps = Deps & {
@@ -243,10 +284,12 @@ export async function testDeps({ model, ...overrides }: TestOptions = {}): Promi
       return agentMemory.saveMessages(args);
     },
   };
-  return {
+  // The agent reads the clock of the deps, so a test that moves it moves the tools too.
+  const deps: TestDeps = {
     db,
-    agent: testAgent(model, ticketService, { db, memory: agentMemory }),
+    agent: testAgent(model, ticketService, { db, memory: agentMemory, now: () => deps.now() }),
     memory,
+    directory: createDirectory(ticketService, { now: () => deps.now() }),
     waitUntil: (task) => pending.push(task),
     sessionSecret: SECRET,
     secureCookies: false,
@@ -258,6 +301,7 @@ export async function testDeps({ model, ...overrides }: TestOptions = {}): Promi
       await Promise.all(pending);
     },
   };
+  return deps;
 }
 
 /** The chunks of an AI SDK UI message stream (server-sent events), in order. */
@@ -282,4 +326,24 @@ export function request(path: string, init: { method?: string; body?: unknown; c
     headers,
     body: init.body === undefined ? undefined : typeof init.body === "string" ? init.body : JSON.stringify(init.body),
   });
+}
+
+/** Counts the round trips to the database while the work runs: each query, batch or transaction is one. */
+export async function roundTrips(deps: TestDeps, work: () => Promise<unknown>) {
+  const client = deps.db.$client;
+  let count = 0;
+  const originals = { execute: client.execute, batch: client.batch, transaction: client.transaction };
+  for (const name of ["execute", "batch", "transaction"] as const) {
+    const original = originals[name] as (...args: unknown[]) => Promise<unknown>;
+    (client as unknown as Record<string, unknown>)[name] = (...args: unknown[]) => {
+      count++;
+      return original.apply(client, args);
+    };
+  }
+  try {
+    await work();
+  } finally {
+    Object.assign(client, originals);
+  }
+  return count;
 }

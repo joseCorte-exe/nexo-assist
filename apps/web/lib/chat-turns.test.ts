@@ -1,6 +1,6 @@
 import type { DraftView, NexoUIMessage, TicketCard, TicketSummary } from "@nexo/shared";
 import { describe, expect, it } from "vitest";
-import { type AgentTurn, currentDraft, lastDraftId, liveTurns, messageCount, ticketChoiceText, type Turn } from "./chat-turns";
+import { type AgentTurn, currentDraft, lastDraftId, liveTurns, messageCount, ticketChoiceText, type Turn, withSaved } from "./chat-turns";
 
 const decision = {
   understanding: "Quer saber o horário do service desk",
@@ -441,5 +441,91 @@ describe("lastDraftId", () => {
       agent([tool("draftTicket", toolCallId, vpnDraftInput, { ok: true, draft: { ...draft, id }, dueText: "hoje" })]);
     expect(lastDraftId([user("u1", "a"), reply("draft-1", "c1"), user("u2", "b"), reply("draft-2", "c2")])).toBe("draft-2");
     expect(lastDraftId([user("u1", "a")])).toBeNull();
+  });
+});
+
+describe("liveTurns, with an analyst (feature 5)", () => {
+  const at = "2026-10-26T13:05:00.000Z";
+  const notes = {
+    transferred: { event: "transferred", level: "N2", at },
+    assumed: { event: "assumed", level: "N2", analystName: "Rafael Lima", at },
+    released: { event: "released", analystName: "Rafael Lima", at },
+    closed: { event: "closed", analystName: "Rafael Lima", at },
+  } as const;
+  const note = (id: string, event: keyof typeof notes): NexoUIMessage => ({ id, role: "system", parts: [{ type: "data-note", data: notes[event] }] });
+  const fromRafael = (id: string, text: string): NexoUIMessage => ({
+    id,
+    role: "assistant",
+    parts: [{ type: "data-analyst", data: { name: "Rafael Lima", level: "N2" } }, { type: "text", text }],
+  });
+
+  it("draws a note of the console between the messages", () => {
+    const turns = liveTurns([user("u1", "Falar com um analista"), note("n1", "transferred")], "ready");
+    expect(turns.at(-1)).toEqual({
+      kind: "note",
+      id: "n1",
+      note: { event: "transferred", level: "N2", at: "2026-10-26T13:05:00.000Z" },
+    });
+  });
+
+  it("draws the analyst's messages in a row as one turn, under one sign", () => {
+    const turns = liveTurns([note("n1", "assumed"), fromRafael("r1", "Oi, Ana!"), fromRafael("r2", "Pode deixar ligado?"), user("u1", "Posso.")], "ready", {
+      paused: true,
+    });
+    expect(turns).toEqual([
+      expect.objectContaining({ kind: "note", id: "n1" }),
+      {
+        kind: "analyst",
+        id: "r1",
+        name: "Rafael Lima",
+        level: "N2",
+        messages: [
+          { id: "r1", text: "Oi, Ana!" },
+          { id: "r2", text: "Pode deixar ligado?" },
+        ],
+      },
+      { kind: "employee", id: "u1", text: "Posso.", unsent: false },
+    ]);
+  });
+
+  it("does not show the agent thinking under her message while an analyst has the conversation", () => {
+    expect(liveTurns([user("u1", "Alguma novidade?")], "submitted", { paused: true })).toEqual([
+      { kind: "employee", id: "u1", text: "Alguma novidade?", unsent: false },
+    ]);
+  });
+
+  it("leaves out the empty answer a paused conversation streams back: only its counter", () => {
+    const counter: NexoUIMessage = {
+      id: "a9",
+      role: "assistant",
+      parts: [
+        { type: "data-conversation", data: { id: "conv-1", state: "with_analyst", messageCount: 4, targetLevel: "N2", waitUntil: null, analyst: null } },
+      ],
+    };
+    expect(liveTurns([user("u1", "Oi"), counter], "ready", { paused: true })).toEqual([{ kind: "employee", id: "u1", text: "Oi", unsent: false }]);
+  });
+});
+
+describe("withSaved", () => {
+  const saved = [user("u1", "Oi"), user("u2", "Alguma novidade?")];
+
+  it("takes what the server has when the chat is idle", () => {
+    expect(withSaved([user("u1", "Oi")], saved, "ready")).toBe(saved);
+  });
+
+  it("keeps a message that did not reach the server after a failure, so it can be sent again", () => {
+    const unsent = user("u3", "Posso sim, está ligado.");
+    expect(withSaved([...saved, unsent], saved, "error")).toEqual([...saved, unsent]);
+  });
+
+  it("keeps the chat as it is while a message is on its way", () => {
+    const current = [user("u1", "Oi")];
+    expect(withSaved(current, saved, "submitted")).toBe(current);
+    expect(withSaved(current, saved, "streaming")).toBe(current);
+  });
+
+  it("does not redraw when nothing changed", () => {
+    const current = [user("u1", "Oi"), user("u2", "Alguma novidade?")];
+    expect(withSaved(current, [user("u1", "Oi"), user("u2", "Alguma novidade?")], "ready")).toBe(current);
   });
 });
