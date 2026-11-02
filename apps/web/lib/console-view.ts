@@ -7,7 +7,7 @@ import {
   type TagTone,
   wallClock,
 } from "@nexo/shared";
-import { firstName, formatDay } from "./format";
+import { dayLabel, firstName, formatDay } from "./format";
 
 // What the console draws, read from the contracts once: the screen only lays it out.
 
@@ -109,13 +109,6 @@ export type HistoryItem =
   | { kind: "day"; key: string; label: string }
   | { kind: "message"; key: string; message: ConsoleMessage; grouped: boolean };
 
-/** "Hoje", "Ontem" or "20 out": the pill that opens each day, in the console and in the chat. */
-export function dayLabel(iso: string, now: Date) {
-  const days = localDay(now) - localDay(new Date(iso));
-  if (days === 0) return "Hoje";
-  if (days === 1) return "Ontem";
-  return formatDay(iso).replace(/^0/, "");
-}
 
 /**
  * The history as the console lays it out: a pill when the day changes, and her messages in a row grouped, the second

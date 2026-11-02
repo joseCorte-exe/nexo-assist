@@ -268,11 +268,14 @@ export function Chat({
   );
 }
 
-/** The pill that opens a day, as the console draws it, when the conversation spans more than one. */
+/**
+ * The pill that opens a day, when the conversation spans more than one: the console's, in shape and type. The console
+ * draws it white on its gray desk; the chat is white, so it takes the desk gray, as the muted pills of the app.
+ */
 function DayPill({ label }: { label: string }) {
   return (
     <div className="flex justify-center">
-      <span className="rounded-full bg-day-pill px-2.5 py-1 text-12 font-medium text-ink-3">{label}</span>
+      <span className="rounded-full bg-desk px-2.5 py-1 text-12 font-medium text-ink-3">{label}</span>
     </div>
   );
 }

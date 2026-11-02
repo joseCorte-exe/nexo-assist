@@ -30,7 +30,8 @@ export function SystemNote({ event, text, className = "" }: { event: NoteIcon | 
       <span aria-hidden className="h-px min-w-4 flex-1 bg-note-line" />
       <span aria-hidden className="flex items-center gap-1.5 text-center text-12 font-medium text-balance text-ink-3">
         {Icon ? <Icon className="size-[13px] shrink-0" /> : null}
-        {text}
+        {/* A line that wraps keeps each "·" at the end of its line, never opening the next one. */}
+        {text.replaceAll(" · ", "\u00A0· ")}
       </span>
       <span aria-hidden className="h-px min-w-4 flex-1 bg-note-line" />
     </div>

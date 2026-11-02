@@ -13,7 +13,7 @@ import {
 } from "@nexo/shared";
 import type { ChatStatus } from "ai";
 import { type Step, stepsOf } from "./agent-actions";
-import { dayLabel } from "./console-view";
+import { dayLabel } from "./format";
 
 // What the chat draws. Saved messages and the ones arriving in the stream are the same UI messages, read here once.
 
