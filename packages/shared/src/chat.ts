@@ -242,40 +242,50 @@ export const nexoToolSchemas = {
   transferToAnalyst: { inputSchema: transferToAnalystInput, outputSchema: transferToAnalystOutput },
 };
 
-/** First part of every chat stream: the conversation the message went to, with the new counter. */
-export const conversationPart = z.object({
-  id: z.string(),
-  state: conversationState,
-  messageCount: z.number().int().nonnegative(),
-});
-export type ConversationPart = z.infer<typeof conversationPart>;
-
-/** A note of the console in the chat: "Transferida para Suporte N2 · 10:05", "Rafael Lima assumiu". */
-export const chatNote = z.object({
-  event: conversationEvent,
-  level: analystLevel.nullable(),
-  analystName: z.string().nullable(),
-  at: z.iso.datetime(),
-});
-export type ChatNote = z.infer<typeof chatNote>;
-
 /** Who wrote an analyst message in the chat, and the name she reads above it. */
 export const analystPart = z.object({ name: z.string(), level: analystLevel });
 export type AnalystPart = z.infer<typeof analystPart>;
 
-/** The conversation as the chat loads it: who it waits for, until when, and who attends it. */
-export const conversationView = conversationPart.extend({
+/**
+ * First part of every chat stream, and the conversation as the chat loads it: where the message went, the counter, who
+ * it waits for, until when, and who attends it.
+ */
+export const conversationView = z.object({
+  id: z.string(),
+  state: conversationState,
+  messageCount: z.number().int().nonnegative(),
   targetLevel: analystLevel.nullable(),
   waitUntil: z.iso.datetime().nullable(),
   analyst: analystPart.nullable(),
 });
 export type ConversationView = z.infer<typeof conversationView>;
 
+// What each note of a transfer or of the console says: who it goes to, and who did it. Each event has its own shape, so
+// a note never lacks what its sentence needs.
+const transferredNote = z.object({ event: z.literal("transferred"), level: analystLevel });
+const assumedNote = z.object({ event: z.literal("assumed"), level: analystLevel, analystName: z.string() });
+const releasedNote = z.object({ event: z.literal("released"), analystName: z.string() });
+const closedNote = z.object({ event: z.literal("closed"), analystName: z.string() });
+
+/** A note, ready to be written: "Rafael Lima assumiu · agent pausado". */
+export const noteView = z.discriminatedUnion("event", [transferredNote, assumedNote, releasedNote, closedNote]);
+export type NoteView = z.infer<typeof noteView>;
+
+/** A note in the chat, with its time: "Transferida para Suporte N2 · 10:05". */
+const at = { at: z.iso.datetime() };
+export const chatNote = z.discriminatedUnion("event", [
+  transferredNote.extend(at),
+  assumedNote.extend(at),
+  releasedNote.extend(at),
+  closedNote.extend(at),
+]);
+export type ChatNote = z.infer<typeof chatNote>;
+
 // POST /api/conversation/presence: the chat is open, and whether she is writing. It answers the state of the conversation,
 // so a chat that does not poll still learns an analyst took it.
 export const presenceInput = z.object({ typing: z.boolean() });
 export type PresenceInput = z.infer<typeof presenceInput>;
-export type PresenceResponse = { conversation: Pick<ConversationPart, "id" | "state"> | null };
+export type PresenceResponse = { conversation: Pick<ConversationView, "id" | "state"> | null };
 
 /** The tools of the agent as the stream carries them, typed by the schemas above. */
 export type NexoTools = {
@@ -286,10 +296,10 @@ export type NexoTools = {
 };
 
 /**
- * A message of the chat: text, the parts of each tool and the data-conversation part. An agent reply is saved
+ * A message of the chat: text, the parts of each tool and the data-conversation, data-note and data-analyst parts. An agent reply is saved
  * with these same parts, so the screen draws a reply the same way while it streams and after a reload.
  */
-export type NexoUIMessage = UIMessage<never, { conversation: ConversationPart; note: ChatNote; analyst: AnalystPart }, NexoTools>;
+export type NexoUIMessage = UIMessage<never, { conversation: ConversationView; note: ChatNote; analyst: AnalystPart }, NexoTools>;
 
 /**
  * GET /api/conversation: the active conversation, or none, with its messages in order and its drafts as they are now.

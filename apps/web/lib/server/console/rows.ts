@@ -12,8 +12,8 @@ export const ONLINE_MS = 45_000;
 /**
  * Her messages this analyst has not read. Only a conversation that needs an analyst has any: waiting for one, or this
  * one's. They count from the later of two moments: when this analyst last read it, and when it started needing an
- * analyst this time (the last answer before the transfer, so what she wrote that led to it counts; or the moment this
- * analyst assumed it). A read from an earlier transfer of the same conversation does not hide the new one.
+ * analyst this time (the last answer before the message of hers that led to the transfer, so what she wrote counts; or
+ * the moment this analyst assumed it). A read from an earlier transfer of the same conversation does not hide the new one.
  */
 const unread = (analystId: string) => sql<number>`case
   when ${conversations.state} = 'waiting_for_analyst' or (${conversations.state} = 'with_analyst' and ${conversations.analystId} = ${analystId})
@@ -21,7 +21,9 @@ const unread = (analystId: string) => sql<number>`case
     coalesce(${consoleReads.readAt}, 0),
     case when ${conversations.state} = 'with_analyst' then coalesce(${conversations.assumedAt}, 0)
     else coalesce((select max(a.created_at) from ${messages} a
-          where a.conversation_id = ${conversations.id} and a.author in ('agent', 'analyst') and a.created_at < coalesce(${conversations.transferredAt}, 0)), 0)
+          where a.conversation_id = ${conversations.id} and a.author in ('agent', 'analyst') and a.created_at < (
+            select max(l.created_at) from ${messages} l
+            where l.conversation_id = ${conversations.id} and l.author = 'employee' and l.created_at <= coalesce(${conversations.transferredAt}, 0))), 0)
     end))
   else 0 end`;
 

@@ -14,24 +14,24 @@ import {
 } from "@nexo/shared";
 import { DefaultChatTransport } from "ai";
 import { CircleAlert } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SystemNote } from "@/components/system-note";
 import { THINKING_LABEL } from "@/lib/agent-actions";
 import { currentDraft, lastDraftId, liveTurns, messageCount, type Turn, withSaved } from "@/lib/chat-turns";
 import { firstName } from "@/lib/format";
+import { useNow } from "@/lib/use-now";
+import { usePinnedScroll } from "@/lib/use-pinned-scroll";
 import type { Shortcut } from "@/lib/shortcut";
 import { useWholePixelWidth } from "@/lib/use-whole-pixel-width";
 import { AgentReply } from "./agent-reply";
 import { AnalystMessage } from "./analyst-message";
 import { useChatStatus } from "./chat-status";
 import { Composer } from "./composer";
+import { ConsoleAnnouncer, useTitleBadge } from "./console-updates";
 import { DraftCard } from "./draft-card";
 import { EmptyChat } from "./empty-chat";
 import { useConversationSync } from "./use-conversation-sync";
 import { WaitingRow } from "./waiting-row";
-
-/** Closer than this to the bottom, new parts keep the view pinned; farther up, she is reading and is left alone. */
-const PIN_DISTANCE_PX = 80;
 
 /**
  * The route only takes the new message, with its id: the conversation lives on the server and in the agent memory,
@@ -114,13 +114,12 @@ export function Chat({
     onFinish: ({ message, isError }) => {
       if (isError) return;
       setFailures(0);
-      // The first part says where the message went: a new conversation, or one an analyst has now.
+      // The first part says where the message went: a new conversation, or one an analyst has now. A transfer in this
+      // reply moved it after that part: the conversation is read again, with the note it left.
       const part = message.parts.find((one) => one.type === "data-conversation");
-      const transferred = message.parts.some((one) => one.type === "tool-transferToAnalyst");
       const known = conversationRef.current;
-      if (part?.type === "data-conversation" && (part.data.id !== known?.id || part.data.state !== known?.state)) {
-        setConversation({ ...part.data, targetLevel: null, waitUntil: null, analyst: null });
-      }
+      if (part?.type === "data-conversation" && (part.data.id !== known?.id || part.data.state !== known?.state)) setConversation(part.data);
+      const transferred = message.parts.some((one) => one.type === "tool-transferToAnalyst" && one.state === "output-available" && one.output.ok);
       if (transferred || (part?.type === "data-conversation" && part.data.state !== "with_agent")) void sync.refresh();
     },
   });
@@ -193,23 +192,11 @@ export function Chat({
     inputRef.current?.focus();
   }
 
-  const scroller = useRef<HTMLDivElement>(null);
-  const pinned = useRef(true);
-  useLayoutEffect(() => {
-    const element = scroller.current;
-    if (element && pinned.current) element.scrollTop = element.scrollHeight;
-  });
+  const scroller = usePinnedScroll<HTMLDivElement>();
 
   return (
     <main className="flex min-h-0 flex-1 flex-col">
-      <div
-        ref={scroller}
-        onScroll={(event) => {
-          const element = event.currentTarget;
-          pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < PIN_DISTANCE_PX;
-        }}
-        className="flex min-h-0 flex-1 flex-col overflow-y-auto"
-      >
+      <div ref={scroller.ref} onScroll={scroller.onScroll} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         {turns.length === 0 ? (
           <EmptyChat name={employeeName} onPick={send} />
         ) : (
@@ -314,96 +301,3 @@ function Announcer({ turn }: { turn: Turn | undefined }) {
 }
 
 const byId = (drafts: DraftView[]) => Object.fromEntries(drafts.map((draft) => [draft.id, draft]));
-
-/** The clock of the waiting row: it ticks every 30 s, so a wait that runs out says so without a reload. */
-function useNow() {
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 30_000);
-    return () => clearInterval(timer);
-  }, []);
-  return now;
-}
-
-/** What happened with an analyst, as a screen reader says it. */
-function spoken(turn: Turn): string | null {
-  if (turn.kind === "analyst") return turn.messages.map((message) => `${turn.name}: ${message.text}`).join(" ");
-  if (turn.kind !== "note") return null;
-  const who = turn.note.analystName ?? "Um analista";
-  switch (turn.note.event) {
-    case "assumed":
-      return turn.note.level ? `${who}, do Suporte ${turn.note.level}, entrou na conversa.` : `${who} entrou na conversa.`;
-    case "released":
-      return `${who} devolveu a conversa ao Nexo.`;
-    case "closed":
-      return `${who} encerrou o atendimento. Sua próxima mensagem começa uma nova conversa.`;
-    default:
-      return null;
-  }
-}
-
-/** The ids of what an analyst did, message by message. */
-const consoleIds = (turns: readonly Turn[]) =>
-  turns.flatMap((turn) => (turn.kind === "analyst" ? turn.messages.map((message) => message.id) : turn.kind === "note" ? [turn.id] : []));
-
-/**
- * Says, once, what arrives from the console after the chat loaded: an analyst joined, wrote, handed back or closed. Never
- * what was there on load, and never twice for the same message, however often the chat reads the conversation.
- */
-function ConsoleAnnouncer({ turns }: { turns: readonly Turn[] }) {
-  const [message, setMessage] = useState("");
-  const seen = useRef<Set<string> | null>(null);
-  const key = consoleIds(turns).join(",");
-  useEffect(() => {
-    const ids = consoleIds(turns);
-    if (!seen.current) {
-      seen.current = new Set(ids);
-      return;
-    }
-    const known = seen.current;
-    const said = turns
-      .flatMap((turn) => {
-        if (turn.kind === "analyst") {
-          const fresh = turn.messages.filter((one) => !known.has(one.id));
-          return fresh.length > 0 ? [spoken({ ...turn, messages: fresh })] : [];
-        }
-        return turn.kind === "note" && !known.has(turn.id) ? [spoken(turn)] : [];
-      })
-      .filter(Boolean);
-    for (const id of ids) known.add(id);
-    if (said.length > 0) setMessage(said.join(" "));
-    // Only when something from the console arrives, not on every streamed word.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
-  return (
-    <p role="status" className="sr-only">
-      {message}
-    </p>
-  );
-}
-
-/**
- * While the tab is hidden, its title counts what the analyst did meanwhile ("(2) Atendimento"), as mail and chat apps
- * do: the wait can be hours, and she should not have to keep watching. Back on the tab, the count goes.
- */
-function useTitleBadge(turns: readonly Turn[]) {
-  const baseline = useRef<number | null>(null);
-  const original = useRef<string | null>(null);
-  const count = consoleIds(turns).length;
-  useEffect(() => {
-    const reset = () => {
-      if (document.visibilityState !== "visible") return;
-      baseline.current = null;
-      if (original.current) document.title = original.current;
-    };
-    document.addEventListener("visibilitychange", reset);
-    return () => document.removeEventListener("visibilitychange", reset);
-  }, []);
-  useEffect(() => {
-    if (document.visibilityState === "visible") return;
-    original.current ??= document.title;
-    baseline.current ??= count;
-    const fresh = count - baseline.current;
-    if (fresh > 0) document.title = `(${fresh}) ${original.current}`;
-  }, [count]);
-}

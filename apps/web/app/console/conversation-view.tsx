@@ -25,11 +25,9 @@ import {
 import { SystemNote } from "@/components/system-note";
 import { avatarTone, conversationMeta, type HistoryItem, headerMode, historyItems, takeoverBar } from "@/lib/console-view";
 import { firstName, formatConfidence, initials } from "@/lib/format";
+import { usePinnedScroll } from "@/lib/use-pinned-scroll";
 import { useWholePixelRef } from "@/lib/use-whole-pixel-width";
 import type { ConsoleState, PendingMessage } from "./use-console";
-
-/** Closer than this to the bottom, new messages keep the view pinned; farther up, the analyst is reading. */
-const PIN_DISTANCE_PX = 80;
 
 /** The pill of the header in each tone: the soft fill and the text of nexo.pen. */
 const PILL = {
@@ -281,23 +279,10 @@ function History({
 }) {
   const { conversation, messages, drafts } = detail;
   const items = historyItems(messages, now);
-  const scroller = useRef<HTMLDivElement>(null);
-  const pinned = useRef(true);
-  const count = messages.length + pending.length;
-  useLayoutEffect(() => {
-    const element = scroller.current;
-    if (element && pinned.current) element.scrollTop = element.scrollHeight;
-  }, [count, conversation.id]);
+  const scroller = usePinnedScroll<HTMLDivElement>([messages.length + pending.length, conversation.id]);
   const draftsById = new Map(drafts.map((draft) => [draft.id, draft]));
   return (
-    <div
-      ref={scroller}
-      onScroll={(event) => {
-        const element = event.currentTarget;
-        pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < PIN_DISTANCE_PX;
-      }}
-      className="flex min-h-0 flex-1 flex-col overflow-y-auto"
-    >
+    <div ref={scroller.ref} onScroll={scroller.onScroll} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <div className="mt-auto flex flex-col px-10 pt-5 pb-4 max-md:px-4">
         {items.map((item) => (
           <HistoryEntry key={item.key} item={item} employeeName={conversation.employee.name} summary={conversation.transferSummary} draftsById={draftsById} />

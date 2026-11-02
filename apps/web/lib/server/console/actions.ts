@@ -1,36 +1,20 @@
-import { randomUUID } from "node:crypto";
 import { CONSOLE_NOTE, saveNote } from "@nexo/agent";
-import {
-  type Analyst,
-  type AnalystPart,
-  analystMessageInput,
-  type ChatNote,
-  type ConsoleDetail,
-  type ConsoleMessage,
-  type ConversationEvent,
-  LEVEL_LABEL,
-  type NexoUIMessage,
-} from "@nexo/shared";
-import { and, eq, inArray, or, type SQL, sql } from "drizzle-orm";
+import { type Analyst, type AnalystPart, analystMessageInput, type ConsoleDetail, type ConsoleMessage, LEVEL_LABEL, type NexoUIMessage } from "@nexo/shared";
+import { eq, sql } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { consoleReads, conversations, messages } from "@/db/schema";
+import { applyMove, type Move, type MoveResult, moves } from "../conversation-moves";
 import type { Deps } from "../deps";
 import { jsonError, readAnalystSession, readBody, serviceUnavailable } from "../http";
-import type { Session } from "../session";
-import { noteIfMoved } from "../transfers";
+import { toConsoleMessage } from "../messages";
 import { conversationNotFound, loadDetail } from "./detail";
 
-// What an analyst does to a conversation in the console (ARQUITETURA.md, sections 6 and 7). Each move is one conditional
-// update with its note in the same batch: the note is only written if the update changed the row, so two clicks, two
-// tabs or two analysts never leave two notes, and a move that lost the race is answered from the state that won. The
-// note then goes to the agent memory, so the agent knows what happened when the conversation comes back to it.
-
-type Row = typeof conversations.$inferSelect;
-type Who = { session: Session; analyst: Analyst };
+// What an analyst does to a conversation in the console (ARQUITETURA.md, sections 6 and 7): assume, release and close
+// are moves of the conversation (conversation-moves.ts), each answered with the conversation as it is after it; a
+// message is written only while the analyst attends it.
 
 const notAssumed = () => jsonError(409, "not_assumed", "Assuma o atendimento antes.");
 const closed = () => jsonError(409, "conversation_closed", "Esta conversa foi encerrada.");
-const takenBy = (name: string) => jsonError(409, "assumed_by_other", `${name} já está atendendo esta conversa.`);
 
 /** The analyst signed in, with their level, or the response to answer. */
 async function analystOf(request: NextRequest, deps: Deps) {
@@ -39,155 +23,66 @@ async function analystOf(request: NextRequest, deps: Deps) {
   const analysts = await deps.directory.analysts();
   const analyst = analysts?.get(session.session.id);
   if (!analysts || !analyst) return { ok: false as const, response: serviceUnavailable() };
-  return { ok: true as const, who: { session: session.session, analyst }, analysts };
+  return { ok: true as const, analyst, analysts };
 }
 
-async function rowOf(deps: Deps, id: string): Promise<Row | null> {
-  const [row] = await deps.db.select().from(conversations).where(eq(conversations.id, id)).limit(1);
-  return row ?? null;
+/** Why a move did not happen, in the words of the console. */
+function refusal(result: Extract<MoveResult, { ok: false }>, analysts: Map<string, Analyst>) {
+  switch (result.refused) {
+    case "not_found":
+      return conversationNotFound();
+    case "closed":
+      return closed();
+    case "not_assumed":
+    case "not_with_agent":
+      return notAssumed();
+    case "taken": {
+      const name = analysts.get(result.row.analystId ?? "")?.name ?? "Outro analista";
+      return jsonError(409, "assumed_by_other", `${name} já está atendendo esta conversa.`);
+    }
+    case "busy":
+      return jsonError(409, "conversation_busy", "A conversa acabou de mudar. Tente de novo.");
+  }
 }
 
-/** The name of whoever attends the conversation, for the refusal that says it. */
-async function attendantName(deps: Deps, row: Row) {
-  const analysts = await deps.directory.analysts();
-  return analysts?.get(row.analystId ?? "")?.name ?? "Outro analista";
-}
-
-type Move = {
-  event: Exclude<ConversationEvent, "transferred">;
-  set: Partial<Row>;
-  /** The states the conversation may move from. */
-  from: SQL;
-  /** What the note says in the conversation, and what the agent reads. */
-  text: string;
-  memory: string;
-};
+type Moved = { row: typeof conversations.$inferSelect; noteId: string; analyst: Analyst };
 
 /**
- * Moves the conversation and notes it, in one batch; then copies the note to the memory. Answers the conversation as the
- * move left it (not as it was read before: the agent may have transferred it in between) and the id of the note, the
- * key of what the ticket-service does about it.
+ * A move of the console as a route: the analyst signed in moves the conversation and gets it back as it is now, whether
+ * it moved or already was so. What the move leaves outside the conversations database runs after it, once.
  */
-async function move(deps: Deps, row: Row, { analyst }: Who, { event, set, from, text, memory }: Move) {
-  const at = deps.now();
-  const noteId = `note-${row.id}-${event}-${randomUUID()}`;
-  const note: ChatNote = {
-    event,
-    // The level says who the employee talks to now; releasing or closing hands it to nobody.
-    level: event === "assumed" ? analyst.level : null,
-    analystName: analyst.name,
-    at: at.toISOString(),
+function consoleMove(build: (analyst: Analyst) => Move, after?: (deps: Deps, moved: Moved) => Promise<void>) {
+  return async (request: NextRequest, deps: Deps, id: string): Promise<Response> => {
+    const auth = await analystOf(request, deps);
+    if (!auth.ok) return auth.response;
+    const { analyst, analysts } = auth;
+    const result = await applyMove(deps, id, build(analyst), deps.now());
+    if (!result.ok) return refusal(result, analysts);
+    if (result.noteId && after) await after(deps, { row: result.row, noteId: result.noteId, analyst });
+    const loaded = await loadDetail(deps, id, analyst.id, analysts);
+    return loaded.ok ? NextResponse.json<ConsoleDetail>(loaded.detail) : loaded.response;
   };
-  const [[moved]] = await deps.db.batch([
-    deps.db
-      .update(conversations)
-      .set(set)
-      .where(and(eq(conversations.id, row.id), from))
-      .returning(),
-    noteIfMoved(deps.db, { noteId, conversationId: row.id, authorId: analyst.id, text, note }),
-  ]);
-  if (!moved) return { moved: false as const };
-  try {
-    await saveNote(deps.memory, { id: noteId, conversationId: row.id, employeeId: row.employeeId, text: memory, at, prefix: CONSOLE_NOTE });
-  } catch (error) {
-    // The move and its note are saved: a memory that did not take the note only costs the agent context.
-    console.error("note not copied to the agent memory", { conversationId: row.id, event, error: (error as Error).name });
-  }
-  return { moved: true as const, noteId, row: moved };
-}
-
-async function answerDetail(deps: Deps, row: Row, who: Who, analysts: Map<string, Analyst>) {
-  const loaded = await loadDetail(deps, row.id, who.analyst.id, analysts);
-  return loaded.ok ? NextResponse.json<ConsoleDetail>(loaded.detail) : loaded.response;
 }
 
 /**
- * POST /api/console/conversations/:id/assume. Any analyst takes a conversation with the agent or waiting, whatever its
- * level (ARQUITETURA.md, section 2): the agent pauses, and the linked ticket is in service with them. One another
- * analyst attends is not taken.
+ * The ticket the agent linked is in service with whoever assumed: the row is the one the move left, so a ticket the agent
+ * linked while the analyst was assuming counts. The note is the key, so a retry assigns it once.
  */
-export async function assumeHandler(request: NextRequest, deps: Deps, id: string): Promise<Response> {
-  const auth = await analystOf(request, deps);
-  if (!auth.ok) return auth.response;
-  const { who, analysts } = auth;
-  const row = await rowOf(deps, id);
-  if (!row) return conversationNotFound();
-  if (row.state === "closed") return closed();
-  if (row.state === "with_analyst") {
-    return row.analystId === who.analyst.id ? answerDetail(deps, row, who, analysts) : takenBy(await attendantName(deps, row));
-  }
-  const { name, level } = who.analyst;
-  const result = await move(deps, row, who, {
-    event: "assumed",
-    set: { state: "with_analyst", analystId: who.analyst.id, assumedAt: deps.now() },
-    from: inArray(conversations.state, ["with_agent", "waiting_for_analyst"]),
-    text: `${name} assumiu a conversa.`,
-    memory: `${name}, analista do ${LEVEL_LABEL[level]}, assumiu a conversa. O agent está pausado até a conversa voltar para ele.`,
-  });
-  // Somebody moved it meanwhile: answer from the state that won.
-  if (!result.moved) return assumeHandler(request, deps, id);
-  const { ticketId, employeeId } = result.row;
-  if (ticketId) {
-    const assigned = await deps.ticketService.assignTicket(ticketId, { employeeId, analystId: who.analyst.id }, result.noteId);
-    // The conversation is theirs either way; the ticket only misses the "Em atendimento".
-    if (!assigned.ok) console.error("ticket not assigned", { ticketId, error: assigned.error.code });
-  }
-  return answerDetail(deps, row, who, analysts);
+async function assignTicket(deps: Deps, { row, noteId, analyst }: Moved) {
+  if (!row.ticketId) return;
+  const assigned = await deps.ticketService.assignTicket(row.ticketId, { employeeId: row.employeeId, analystId: analyst.id }, noteId);
+  // The conversation is theirs either way; the ticket only misses the "Em atendimento".
+  if (!assigned.ok) console.error("ticket not assigned", { ticketId: row.ticketId, error: assigned.error.code });
 }
 
-/**
- * POST /api/console/conversations/:id/release. Hands a conversation back to the agent: one waiting for an analyst, or one
- * this analyst attends. Released already, it answers the same.
- */
-export async function releaseHandler(request: NextRequest, deps: Deps, id: string): Promise<Response> {
-  const auth = await analystOf(request, deps);
-  if (!auth.ok) return auth.response;
-  const { who, analysts } = auth;
-  const row = await rowOf(deps, id);
-  if (!row) return conversationNotFound();
-  if (row.state === "closed") return closed();
-  if (row.state === "with_agent") return answerDetail(deps, row, who, analysts);
-  if (row.state === "with_analyst" && row.analystId !== who.analyst.id) return takenBy(await attendantName(deps, row));
-  const { name } = who.analyst;
-  const result = await move(deps, row, who, {
-    event: "released",
-    set: { state: "with_agent", analystId: null, assumedAt: null, waitUntil: null },
-    from: or(
-      eq(conversations.state, "waiting_for_analyst"),
-      and(eq(conversations.state, "with_analyst"), eq(conversations.analystId, who.analyst.id)),
-    )!,
-    text: `${name} devolveu a conversa para o agent.`,
-    memory: `${name} devolveu a conversa para o agent.`,
-  });
-  if (!result.moved) return releaseHandler(request, deps, id);
-  return answerDetail(deps, row, who, analysts);
-}
+/** POST /api/console/conversations/:id/assume. The agent pauses, and the linked ticket is in service with them. */
+export const assumeHandler = consoleMove(moves.assume, assignTicket);
 
-/**
- * POST /api/console/conversations/:id/close. Ends a conversation this analyst attends, as closed by the analyst. The
- * ticket does not change (ARQUITETURA.md, section 6). Closed by them already, it answers the same.
- */
-export async function closeHandler(request: NextRequest, deps: Deps, id: string): Promise<Response> {
-  const auth = await analystOf(request, deps);
-  if (!auth.ok) return auth.response;
-  const { who, analysts } = auth;
-  const row = await rowOf(deps, id);
-  if (!row) return conversationNotFound();
-  if (row.state === "closed") {
-    return row.outcome === "closed_by_analyst" && row.analystId === who.analyst.id ? answerDetail(deps, row, who, analysts) : closed();
-  }
-  if (row.state !== "with_analyst" || row.analystId !== who.analyst.id) return notAssumed();
-  const { name } = who.analyst;
-  const result = await move(deps, row, who, {
-    event: "closed",
-    set: { state: "closed", outcome: "closed_by_analyst", closedAt: deps.now() },
-    from: and(eq(conversations.state, "with_analyst"), eq(conversations.analystId, who.analyst.id))!,
-    text: `${name} encerrou o atendimento.`,
-    memory: `${name} encerrou o atendimento.`,
-  });
-  if (!result.moved) return closeHandler(request, deps, id);
-  return answerDetail(deps, row, who, analysts);
-}
+/** POST /api/console/conversations/:id/release. Back to the agent, which answers her again. */
+export const releaseHandler = consoleMove(moves.release);
+
+/** POST /api/console/conversations/:id/close. Closed by the analyst; the ticket does not change (ARQUITETURA.md, section 6). */
+export const closeHandler = consoleMove(moves.close);
 
 /**
  * POST /api/console/conversations/:id/messages. A message of the analyst in a conversation they attend, under the id the
@@ -197,10 +92,10 @@ export async function closeHandler(request: NextRequest, deps: Deps, id: string)
 export async function messageHandler(request: NextRequest, deps: Deps, id: string): Promise<Response> {
   const auth = await analystOf(request, deps);
   if (!auth.ok) return auth.response;
-  const { analyst } = auth.who;
+  const { analyst } = auth;
   const body = await readBody(request, analystMessageInput);
   if (!body.ok) return body.response;
-  const row = await rowOf(deps, id);
+  const [row] = await deps.db.select().from(conversations).where(eq(conversations.id, id)).limit(1);
   if (!row) return conversationNotFound();
 
   const { id: messageId, text } = body.data;
@@ -227,17 +122,7 @@ export async function messageHandler(request: NextRequest, deps: Deps, id: strin
   } catch (error) {
     console.error("analyst message not copied to the agent memory", { conversationId: id, error: (error as Error).name });
   }
-  const message: ConsoleMessage = {
-    id: saved.id,
-    author: "analyst",
-    text: saved.text,
-    at: saved.createdAt.toISOString(),
-    analyst: { id: analyst.id, ...sign },
-    decision: null,
-    note: null,
-    seen: (row.employeeSeenAt?.getTime() ?? 0) >= saved.createdAt.getTime(),
-    draftId: null,
-  };
+  const message = toConsoleMessage(saved, { decision: null, seenAt: row.employeeSeenAt?.getTime() ?? 0 });
   return NextResponse.json<ConsoleMessage>(message, { status: 201 });
 }
 

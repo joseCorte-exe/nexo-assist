@@ -1,4 +1,4 @@
-import { type AnalystLevel, type ConversationEvent, dueAt, type NexoUIMessage, type Priority, sampleAnalysts } from "@nexo/shared";
+import { type AnalystLevel, type ChatNote, type ConversationEvent, dueAt, type NexoUIMessage, type Priority, sampleAnalysts } from "@nexo/shared";
 import type { Db } from ".";
 import { consoleReads, conversations, decisions, drafts, messages, usageCounters } from "./schema";
 
@@ -286,16 +286,25 @@ const analystOf = (id: string) => {
   return analyst;
 };
 
+/** A note as the moves of the conversation leave it: where a transfer went, and who assumed, released or closed. */
+function sampleNote({ event, analystId }: SampleMessage & { event: ConversationEvent }, level: AnalystLevel | null, at: Date): ChatNote {
+  if (event === "transferred") {
+    if (!level) throw new Error("A sample transfer needs the level of its conversation");
+    return { event, level, at: at.toISOString() };
+  }
+  if (!analystId) throw new Error(`A sample note of ${event} needs its analyst`);
+  const analyst = analystOf(analystId);
+  return event === "assumed"
+    ? { event, level: analyst.level, analystName: analyst.name, at: at.toISOString() }
+    : { event, analystName: analyst.name, at: at.toISOString() };
+}
+
 /**
  * The parts a note of the console and an analyst message are saved with, as the console saves them: the note says the
  * level of a transfer, and who assumed, released or closed; the analyst message says who wrote it.
  */
 function consoleParts(message: SampleMessage, level: AnalystLevel | null, at: Date): NexoUIMessage["parts"] | null {
-  if (message.author === "system" && message.event) {
-    const analyst = message.analystId ? analystOf(message.analystId) : null;
-    const noteLevel = message.event === "transferred" ? level : message.event === "assumed" ? (analyst?.level ?? null) : null;
-    return [{ type: "data-note", data: { event: message.event, level: noteLevel, analystName: analyst?.name ?? null, at: at.toISOString() } }];
-  }
+  if (message.author === "system" && message.event) return [{ type: "data-note", data: sampleNote({ ...message, event: message.event }, level, at) }];
   if (message.author === "analyst" && message.analystId) {
     const { name, level: analystLevel } = analystOf(message.analystId);
     return [{ type: "data-analyst", data: { name, level: analystLevel } }, { type: "text", text: message.text }];

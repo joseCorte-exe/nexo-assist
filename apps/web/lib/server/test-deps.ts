@@ -249,7 +249,7 @@ export function testAgent(
     memory,
     ticketService,
     drafts: createDraftStore(store),
-    transfers: createTransferStore(store),
+    transfers: createTransferStore({ db: store, memory }),
     now,
   });
 }

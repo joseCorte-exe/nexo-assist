@@ -1,11 +1,9 @@
 import { z } from "zod";
-import { storedDecision } from "./chat";
+import { type NoteView, noteView, storedDecision } from "./chat";
 import { draftView } from "./drafts";
 import {
   analystLevel,
-  type AnalystLevel,
   category,
-  conversationEvent,
   conversationOutcome,
   type ConversationOutcome,
   conversationState,
@@ -80,14 +78,6 @@ export const consoleListResponse = z.object({
   waiting: z.number().int(),
 });
 export type ConsoleListResponse = z.infer<typeof consoleListResponse>;
-
-/** A system note, ready to be written: "Rafael Lima assumiu · agent pausado". */
-export const noteView = z.object({
-  event: conversationEvent,
-  level: analystLevel.nullable(),
-  analystName: z.string().nullable(),
-});
-export type NoteView = z.infer<typeof noteView>;
 
 export const consoleMessage = z.object({
   id: z.string(),
@@ -224,17 +214,16 @@ export function listTime(iso: string, now: Date): string {
 }
 
 /** The note between the messages, without its time: "Transferida para Suporte N2". */
-export function noteLabel({ event, level, analystName }: NoteView): string {
-  const who = analystName ?? "Um analista";
-  switch (event) {
+export function noteLabel(note: NoteView): string {
+  switch (note.event) {
     case "transferred":
-      return level ? `Transferida para ${LEVEL_LABEL[level as AnalystLevel]}` : "Transferida para um analista";
+      return `Transferida para ${LEVEL_LABEL[note.level]}`;
     case "assumed":
-      return `${who} assumiu · agent pausado`;
+      return `${note.analystName} assumiu · agent pausado`;
     case "released":
-      return `${who} devolveu ao agent`;
+      return `${note.analystName} devolveu ao agent`;
     case "closed":
-      return `${who} encerrou o atendimento`;
+      return `${note.analystName} encerrou o atendimento`;
   }
 }
 
@@ -249,12 +238,11 @@ export function ticketLine({ id, status, resolvedAt }: { id: string; status: Tic
  * the conversation joins it: the words differ from the console's where they would be ours, not hers.
  */
 export function employeeNoteLabel(note: NoteView): string {
-  const who = note.analystName ?? "Um analista";
   switch (note.event) {
     case "assumed":
-      return `${who} entrou na conversa`;
+      return `${note.analystName} entrou na conversa`;
     case "released":
-      return `${who} devolveu a conversa ao Nexo`;
+      return `${note.analystName} devolveu a conversa ao Nexo`;
     default:
       return noteLabel(note);
   }

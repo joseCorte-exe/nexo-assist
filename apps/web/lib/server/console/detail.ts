@@ -1,10 +1,11 @@
-import { type Analyst, analystPart, chatNote, type ConsoleDetail, type ConsoleMessage, replyText, shownDraft } from "@nexo/shared";
+import type { Analyst, ConsoleDetail } from "@nexo/shared";
 import { asc, eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { conversations, decisions, messages } from "@/db/schema";
 import type { Deps } from "../deps";
 import { draftsOf, toDraftView } from "../drafts";
 import { jsonError, readAnalystSession, serviceUnavailable } from "../http";
+import { toConsoleMessage } from "../messages";
 import { conversationRows, toConsoleConversation } from "./rows";
 
 export const conversationNotFound = () => jsonError(404, "conversation_not_found", "Conversa não encontrada.");
@@ -34,32 +35,7 @@ export async function loadDetail(deps: Deps, conversationId: string, analystId: 
       ...toConsoleConversation(row, { employee: employees.get(row.conversation.employeeId), analysts, now: deps.now() }),
       transferSummary: row.conversation.transferSummary,
     },
-    messages: history.map(({ message, decision }): ConsoleMessage => {
-      const dataOf = (type: string) => (message.parts?.find((part) => part.type === type) as { data?: unknown } | undefined)?.data;
-      const sign = message.author === "analyst" ? analystPart.safeParse(dataOf("data-analyst")) : null;
-      const note = message.author === "system" && message.event ? chatNote.safeParse(dataOf("data-note")) : null;
-      return {
-        id: message.id,
-        author: message.author,
-        // Replies saved before their text column said the offer and the card are read from their parts.
-        text: message.author === "agent" && message.parts ? replyText(message.parts) || message.text : message.text,
-        at: message.createdAt.toISOString(),
-        analyst: sign?.success && message.authorId ? { id: message.authorId, ...sign.data } : null,
-        decision:
-          decision && message.author === "agent"
-            ? {
-                record:
-                  decision.understanding && decision.action && decision.confidence !== null && decision.reason
-                    ? { understanding: decision.understanding, action: decision.action, confidence: decision.confidence, reason: decision.reason }
-                    : null,
-                toolsUsed: decision.toolsUsed,
-              }
-            : null,
-        note: note?.success ? { event: note.data.event, level: note.data.level, analystName: note.data.analystName } : null,
-        seen: (message.author === "agent" || message.author === "analyst") && seenAt >= message.createdAt.getTime(),
-        draftId: message.author === "agent" ? (message.parts?.flatMap((part) => shownDraft(part)?.id ?? []).at(-1) ?? null) : null,
-      };
-    }),
+    messages: history.map(({ message, decision }) => toConsoleMessage(message, { decision, seenAt })),
     drafts: draftRows.map(toDraftView),
   };
   return { ok: true as const, detail };

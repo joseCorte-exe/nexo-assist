@@ -1,7 +1,7 @@
 import { RequestContext } from "@mastra/core/request-context";
 import { dueAt, type Ticket, type TicketDetail, type TicketServiceResult } from "@nexo/shared";
 import { describe, expect, it, vi } from "vitest";
-import { createTools, type TicketDesk, type TransferRecord, type TransferStore } from "./tools";
+import { createTools, newReplyTurn, type TicketDesk, type TransferRecord, type TransferStore } from "./tools";
 
 // The transfer to an analyst (feature 5): the model says why and writes the summary; the level and the wait come from
 // the code, from the ticket of the employee, and the conversation only moves if it is still with the agent.
@@ -72,14 +72,17 @@ function setup({ reads = "up", marks = "up", stillWithAgent = true } = {}) {
 
 const summary = "Notebook lento há 6 dias desde a atualização; o INC-20311 venceu e a Ana pediu um analista.";
 
-/** As the route runs a turn; forced is what the agent sets when the decision came below 0.6. */
-function run(tool: ReturnType<typeof setup>["transferToAnalyst"], input: unknown, { forced = false, employeeId = "emp-ana" } = {}) {
-  const context = new RequestContext<unknown>([
+/** The context of one reply, as the agent builds it: the confidence is what its decision recorded. */
+function replyContext({ confidence = null as number | null, employeeId = "emp-ana" } = {}) {
+  return new RequestContext<unknown>([
     ["employeeId", employeeId],
     ["conversationId", "conv-ana"],
+    ["turn", { ...newReplyTurn(), confidence }],
   ]);
-  if (forced) context.set("forcedTransfer", true);
-  return tool.execute!(input as never, { requestContext: context } as never);
+}
+
+function run(tool: ReturnType<typeof setup>["transferToAnalyst"], input: unknown, options: Parameters<typeof replyContext>[0] = {}) {
+  return tool.execute!(input as never, { requestContext: replyContext(options) } as never);
 }
 
 describe("transferToAnalyst", () => {
@@ -104,6 +107,7 @@ describe("transferToAnalyst", () => {
         summary,
         ticketId: "INC-20311",
         waitUntil: new Date("2026-10-29T13:05:00.000Z"),
+        confidence: null,
         at: NOW,
       },
     ]);
@@ -131,11 +135,17 @@ describe("transferToAnalyst", () => {
     expect(marked).toEqual([]);
   });
 
-  it("records the doubt of the agent when the code forced the transfer, whatever the model said", async () => {
+  it("records the doubt of the agent when its decision came below 0.6, whatever the model said", async () => {
     const { transferToAnalyst, transfers } = setup();
-    const result = await run(transferToAnalyst, { reason: "employee_request", summary }, { forced: true });
+    const result = await run(transferToAnalyst, { reason: "employee_request", summary }, { confidence: 0.41 });
     expect(result).toMatchObject({ ok: true, transferReason: "agent_unsure" });
-    expect(transfers[0]?.reason).toBe("agent_unsure");
+    expect(transfers[0]).toMatchObject({ reason: "agent_unsure", confidence: 0.41 });
+  });
+
+  it("keeps how sure the decision was with a transfer she asked for, for the console", async () => {
+    const { transferToAnalyst, transfers } = setup();
+    await run(transferToAnalyst, { reason: "employee_request", summary }, { confidence: 0.9 });
+    expect(transfers[0]).toMatchObject({ reason: "employee_request", confidence: 0.9 });
   });
 
   it("refuses a ticket that is not the employee's, without transferring", async () => {
@@ -164,10 +174,7 @@ describe("transferToAnalyst", () => {
 
   it("transfers once when the model asks twice in the same reply, and answers both the same", async () => {
     const { transferToAnalyst, transfers, marked } = setup();
-    const context = new RequestContext<unknown>([
-      ["employeeId", "emp-ana"],
-      ["conversationId", "conv-ana"],
-    ]);
+    const context = replyContext();
     const input = { reason: "employee_request", summary, ticketId: "INC-20311" };
     const [first, second] = await Promise.all([
       transferToAnalyst.execute!(input as never, { requestContext: context } as never),
@@ -181,10 +188,7 @@ describe("transferToAnalyst", () => {
 
   it("lets the model fix a refused call in the same reply: only a transfer that happened is kept", async () => {
     const { transferToAnalyst, transfers } = setup();
-    const context = new RequestContext<unknown>([
-      ["employeeId", "emp-ana"],
-      ["conversationId", "conv-ana"],
-    ]);
+    const context = replyContext();
     const call = (input: unknown) => transferToAnalyst.execute!(input as never, { requestContext: context } as never);
     expect(await call({ reason: "employee_request", summary, ticketId: "INC-20319" })).toMatchObject({ ok: false, reason: "ticket_not_found" });
     expect(await call({ reason: "employee_request", summary })).toMatchObject({ ok: true });

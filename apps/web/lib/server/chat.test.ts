@@ -60,7 +60,7 @@ async function anaConversation(deps: TestDeps) {
 
 async function messagesOf(deps: TestDeps, conversationId: string) {
   return deps.db
-    .select({ id: messages.id, author: messages.author, text: messages.text, parts: messages.parts, decision: decisions })
+    .select({ id: messages.id, author: messages.author, text: messages.text, parts: messages.parts, createdAt: messages.createdAt, decision: decisions })
     .from(messages)
     .leftJoin(decisions, eq(decisions.messageId, messages.id))
     .where(eq(messages.conversationId, conversationId))
@@ -91,7 +91,7 @@ describe("POST /api/chat", () => {
     const conversation = await anaConversation(deps);
     expect(conversation).toMatchObject({ state: "with_agent", messageCount: 1, createdAt: NOW });
     const [first] = await messagesOf(deps, conversation!.id);
-    expect(first).toEqual({ id: "msg-ana-1", author: "employee", text: "Minha VPN dá erro 809", parts: null, decision: null });
+    expect(first).toEqual({ id: "msg-ana-1", author: "employee", text: "Minha VPN dá erro 809", parts: null, createdAt: NOW, decision: null });
   });
 
   it("starts the stream with the conversation and its counter", async () => {
@@ -100,7 +100,7 @@ describe("POST /api/chat", () => {
     const conversation = await anaConversation(deps);
     expect(chunks[0]).toEqual({
       type: "data-conversation",
-      data: { id: conversation!.id, state: "with_agent", messageCount: 1 },
+      data: { id: conversation!.id, state: "with_agent", messageCount: 1, targetLevel: null, waitUntil: null, analyst: null },
     });
   });
 
@@ -135,7 +135,9 @@ describe("POST /api/chat", () => {
     expect(parts.map((part) => part.type)).toEqual(["tool-recordDecision", "tool-searchArticles", "text"]);
     expect(parts[1]).toMatchObject({ state: "output-available", output: { ok: true, articles: [vpnArticle] } });
     expect(parts[2]).toMatchObject({ text: answer });
-    expect(conversation?.firstResponseAt).toEqual(REPLY_AT);
+    // The reply goes right after her message; the first response is when it was saved.
+    expect(reply?.createdAt).toEqual(REPLY_AT);
+    expect(conversation?.firstResponseAt).toEqual(NOW);
   });
 
   it("saves a search the help center did not answer as failed, as the screen showed it", async () => {
@@ -180,7 +182,7 @@ describe("POST /api/chat", () => {
 
     const conversation = await anaConversation(deps);
     expect(chunks[0]).toMatchObject({ data: { id: conversation!.id, messageCount: 2 } });
-    expect(conversation).toMatchObject({ messageCount: 2, firstResponseAt: REPLY_AT });
+    expect(conversation).toMatchObject({ messageCount: 2, firstResponseAt: NOW });
     expect((await messagesOf(deps, conversation!.id)).map(({ author }) => author)).toEqual([
       "employee",
       "agent",
@@ -210,7 +212,11 @@ describe("POST /api/chat", () => {
     // Only the conversation, with the new counter: nobody answers until the analyst does.
     const chunks = await readStream(response);
     expect(chunks.map((chunk) => chunk.type)).toEqual(["start", "data-conversation", "finish"]);
-    expect(chunks[1]).toEqual({ type: "data-conversation", data: { id: "conv-carla", state: "waiting_for_analyst", messageCount: 2 } });
+    // The whole conversation as the chat shows it: who she waits for, and until when.
+    expect(chunks[1]).toEqual({
+      type: "data-conversation",
+      data: { id: "conv-carla", state: "waiting_for_analyst", messageCount: 2, targetLevel: "N1", waitUntil: "2026-10-29T12:48:00.000Z", analyst: null },
+    });
     expect(model.calls).toHaveLength(0);
     const saved = await messagesOf(deps, "conv-carla");
     expect(saved.at(-1)).toMatchObject({ id: "msg-carla-9", author: "employee", text: "Alguma novidade?" });
@@ -464,14 +470,15 @@ describe("POST /api/chat under concurrent messages", () => {
     await migrateDb(db);
     await seed(db, NOW);
     const ticketService = fakeTicketService();
+    const memory = createMemory({ url });
     const deps = await testDeps({
       db,
       agent: createNexoAgent({
         model: simulatedModel({ delayMs: 35 }),
-        memory: createMemory({ url }),
+        memory,
         ticketService,
         drafts: createDraftStore(db),
-        transfers: createTransferStore(db),
+        transfers: createTransferStore({ db, memory }),
       }),
     });
     const employees = [

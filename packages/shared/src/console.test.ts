@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { chatNote } from "./chat";
 import {
   analystMessageInput,
   availabilityInput,
@@ -103,10 +104,10 @@ describe("listTime", () => {
 
 describe("noteLabel", () => {
   it("writes each note as the design does, without the time", () => {
-    expect(noteLabel({ event: "transferred", level: "N2", analystName: null })).toBe("Transferida para Suporte N2");
-    expect(noteLabel({ event: "assumed", level: null, analystName: "Rafael Lima" })).toBe("Rafael Lima assumiu · agent pausado");
-    expect(noteLabel({ event: "released", level: null, analystName: "Rafael Lima" })).toBe("Rafael Lima devolveu ao agent");
-    expect(noteLabel({ event: "closed", level: null, analystName: "Rafael Lima" })).toBe("Rafael Lima encerrou o atendimento");
+    expect(noteLabel({ event: "transferred", level: "N2" })).toBe("Transferida para Suporte N2");
+    expect(noteLabel({ event: "assumed", level: "N2", analystName: "Rafael Lima" })).toBe("Rafael Lima assumiu · agent pausado");
+    expect(noteLabel({ event: "released", analystName: "Rafael Lima" })).toBe("Rafael Lima devolveu ao agent");
+    expect(noteLabel({ event: "closed", analystName: "Rafael Lima" })).toBe("Rafael Lima encerrou o atendimento");
   });
 });
 
@@ -138,12 +139,25 @@ describe("contracts of the console", () => {
   });
 });
 
+describe("chatNote", () => {
+  const at = "2026-10-26T13:05:00.000Z";
+
+  it("reads each note with what its sentence needs, the notes saved with empty fields included", () => {
+    expect(chatNote.parse({ event: "transferred", level: "N2", analystName: null, at })).toEqual({ event: "transferred", level: "N2", at });
+    expect(chatNote.parse({ event: "released", level: null, analystName: "Rafael Lima", at })).toEqual({ event: "released", analystName: "Rafael Lima", at });
+  });
+
+  it("refuses a note without who or where to", () => {
+    expect(chatNote.safeParse({ event: "transferred", level: null, at }).success).toBe(false);
+    expect(chatNote.safeParse({ event: "assumed", level: "N2", analystName: null, at }).success).toBe(false);
+  });
+});
+
 describe("employeeNoteLabel", () => {
   it("tells her the notes in her words: the Nexo, not the agent", () => {
-    expect(employeeNoteLabel({ event: "transferred", level: "N2", analystName: null })).toBe("Transferida para Suporte N2");
+    expect(employeeNoteLabel({ event: "transferred", level: "N2" })).toBe("Transferida para Suporte N2");
     expect(employeeNoteLabel({ event: "assumed", level: "N2", analystName: "Rafael Lima" })).toBe("Rafael Lima entrou na conversa");
-    expect(employeeNoteLabel({ event: "released", level: null, analystName: "Rafael Lima" })).toBe("Rafael Lima devolveu a conversa ao Nexo");
-    expect(employeeNoteLabel({ event: "closed", level: null, analystName: "Rafael Lima" })).toBe("Rafael Lima encerrou o atendimento");
-    expect(employeeNoteLabel({ event: "assumed", level: null, analystName: null })).toBe("Um analista entrou na conversa");
+    expect(employeeNoteLabel({ event: "released", analystName: "Rafael Lima" })).toBe("Rafael Lima devolveu a conversa ao Nexo");
+    expect(employeeNoteLabel({ event: "closed", analystName: "Rafael Lima" })).toBe("Rafael Lima encerrou o atendimento");
   });
 });

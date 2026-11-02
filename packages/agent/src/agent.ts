@@ -5,7 +5,7 @@ import { LibSQLStore } from "@mastra/libsql";
 import { Memory } from "@mastra/memory";
 import { nexoToolSchemas } from "@nexo/shared";
 import { instructions, workingMemoryTemplate } from "./instructions";
-import { createTools, type DraftStore, FORCED_TRANSFER, OFFER_TOOLS, type TicketDesk, type TransferStore } from "./tools";
+import { createTools, type DraftStore, MIN_CONFIDENCE, newReplyTurn, OFFER_TOOLS, type TicketDesk, type TransferStore } from "./tools";
 
 // Explicit limits, so one reply never runs away with time or cost (ARQUITETURA.md, section 9).
 const MAX_STEPS = 5;
@@ -119,9 +119,6 @@ const WORKING_MEMORY_TOOL = "updateWorkingMemory";
 /** Every tool but the offers, for the steps after a draft was shown. */
 const AFTER_DRAFT_TOOLS = [...Object.keys(nexoToolSchemas).filter((tool) => !OFFER_TOOLS.has(tool)), WORKING_MEMORY_TOOL];
 
-/** Below this, the agent does not know what to do and an analyst takes the case (ARQUITETURA.md, section 2). */
-const MIN_CONFIDENCE = 0.6;
-
 /** Tools that close a reply once the model wrote its sentence about them: the screen draws the rest. */
 const CLOSING_TOOLS = new Set(["draftTicket", "transferToAnalyst"]);
 
@@ -160,10 +157,12 @@ function recordedConfidence(step: Step | undefined): number | null {
 /** One reply of the agent: the Mastra stream, which the route turns into the chat stream and saves at the end. */
 export function streamReply(agent: NexoAgent, { conversationId, employeeId, text }: Turn) {
   // Whose tickets the tools read: the employee of the session, never a value the model writes. A draft and a transfer
-  // belong to the conversation of the turn.
+  // belong to the conversation of the turn; a transfer also reads the decision of this reply.
+  const turn = newReplyTurn();
   const requestContext = new RequestContext<unknown>([
     ["employeeId", employeeId],
     ["conversationId", conversationId],
+    ["turn", turn],
   ]);
   return agent.stream(text, {
     memory: { thread: conversationId, resource: employeeId },
@@ -179,10 +178,9 @@ export function streamReply(agent: NexoAgent, { conversationId, employeeId, text
     prepareStep: ({ stepNumber, steps }) => {
       if (stepNumber === 0) return { toolChoice: { type: "tool", toolName: "recordDecision" } };
       if (ran(steps, "transferToAnalyst")) return { activeTools: [WORKING_MEMORY_TOOL] };
-      const confidence = stepNumber === 1 ? recordedConfidence(steps[0]) : null;
-      if (confidence !== null && confidence < MIN_CONFIDENCE) {
-        requestContext.set(FORCED_TRANSFER, true);
-        return { toolChoice: { type: "tool", toolName: "transferToAnalyst" } };
+      if (stepNumber === 1) {
+        turn.confidence = recordedConfidence(steps[0]);
+        if (turn.confidence !== null && turn.confidence < MIN_CONFIDENCE) return { toolChoice: { type: "tool", toolName: "transferToAnalyst" } };
       }
       return ran(steps, "draftTicket") ? { activeTools: AFTER_DRAFT_TOOLS } : undefined;
     },

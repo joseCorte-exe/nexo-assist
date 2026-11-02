@@ -260,13 +260,14 @@ describe("assume, release and close", () => {
     deps.db.batch = (async (queries: Parameters<typeof batch>[0]) => {
       if (!raced) {
         raced = true;
-        await createTransferStore(deps.db).transfer({
+        await createTransferStore(deps).transfer({
           conversationId: conversation!.id,
           level: "N2",
           reason: "overdue",
           summary: "Notebook lento e o INC-20311 vencido.",
           ticketId: "INC-20311",
           waitUntil: LATER,
+          confidence: null,
           at: NOW,
         });
       }
@@ -309,8 +310,9 @@ describe("assume, release and close", () => {
     const { status, body } = await act(deps, releaseHandler, conversation.id);
     expect(status).toBe(200);
     expect(body.conversation).toMatchObject({ state: "with_agent", analyst: null, waitUntil: null });
-    expect(body.messages.at(-1)?.note).toEqual({ event: "released", level: null, analystName: "Rafael Lima" });
+    expect(body.messages.at(-1)?.note).toEqual({ event: "released", analystName: "Rafael Lima" });
     expect(deps.notes.at(-1)).toBe("(atendimento) Rafael Lima devolveu a conversa para o agent.");
+    deps.now = () => after(60_000);
     await anaSays(deps, "Qual o horário do service desk?");
     const loaded = await loadConversation(deps, ana.id);
     expect(loaded.messages.at(-1)?.role).toBe("assistant");
@@ -330,7 +332,7 @@ describe("assume, release and close", () => {
     const { status, body } = await act(deps, closeHandler, "conv-fabio");
     expect(status).toBe(200);
     expect(body.conversation).toMatchObject({ state: "closed", outcome: "closed_by_analyst", analyst: { id: "analyst-rafael" } });
-    expect(body.messages.at(-1)?.note).toEqual({ event: "closed", level: null, analystName: "Rafael Lima" });
+    expect(body.messages.at(-1)?.note).toEqual({ event: "closed", analystName: "Rafael Lima" });
     expect(deps.ticketService.writes).toHaveLength(writesBefore);
   });
 

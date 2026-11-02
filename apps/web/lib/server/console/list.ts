@@ -1,4 +1,4 @@
-import { type ConsoleFilter, type ConsoleListQuery, type ConsoleListResponse, consoleListQuery } from "@nexo/shared";
+import { type AnalystLevel, type ConsoleFilter, type ConsoleListQuery, type ConsoleListResponse, consoleListQuery } from "@nexo/shared";
 import { and, desc, eq, inArray, ne, or, type SQL, sql } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { conversations } from "@/db/schema";
@@ -66,10 +66,10 @@ export async function loadList(deps: Deps, analystId: string, query: ConsoleList
   };
 }
 
-function filterCondition(filter: ConsoleFilter, { analystId, level }: { analystId: string; level: string }): SQL | undefined {
+function filterCondition(filter: ConsoleFilter, { analystId, level }: { analystId: string; level: AnalystLevel }): SQL | undefined {
   switch (filter) {
     case "for_you":
-      return and(eq(conversations.state, "waiting_for_analyst"), eq(conversations.targetLevel, level as "N1" | "N2"));
+      return and(eq(conversations.state, "waiting_for_analyst"), eq(conversations.targetLevel, level));
     case "with_agent":
       return eq(conversations.state, "with_agent");
     case "mine":

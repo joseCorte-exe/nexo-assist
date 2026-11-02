@@ -79,7 +79,7 @@ describe("loadConversation", () => {
     const loaded = await loadConversation(deps, "emp-carla");
     expect(loaded.messages.map(({ role }) => role)).toEqual(["user", "assistant", "system"]);
     expect(loaded.messages[2]?.parts).toEqual([
-      { type: "data-note", data: { event: "transferred", level: "N1", analystName: null, at: "2026-10-26T12:48:00.000Z" } },
+      { type: "data-note", data: { event: "transferred", level: "N1", at: "2026-10-26T12:48:00.000Z" } },
     ]);
   });
 

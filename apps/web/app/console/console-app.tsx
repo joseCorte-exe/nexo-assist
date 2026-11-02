@@ -1,25 +1,15 @@
 "use client";
 
 import type { ConsoleDetail, ConsoleFilter, ConsoleListResponse } from "@nexo/shared";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { MessageCircleIcon } from "@/components/console-icons";
 import { NexoMark } from "@/components/nexo-mark";
+import { useNow } from "@/lib/use-now";
 import { AnalystMenu } from "./analyst-menu";
 import { ConversationList } from "./conversation-list";
 import { ConversationView } from "./conversation-view";
 import { TicketsPanel } from "./tickets-panel";
 import { useConsole } from "./use-console";
-
-/** The clock of the times and waits on screen: it ticks every 30 s, so "agora" and "contato em 25 min" move on their own. */
-function useNow(initial: string) {
-  const [now, setNow] = useState(() => new Date(initial));
-  useEffect(() => {
-    setNow(new Date());
-    const timer = setInterval(() => setNow(new Date()), 30_000);
-    return () => clearInterval(timer);
-  }, []);
-  return now;
-}
 
 const WIDE = "(min-width: 1280px)";
 const subscribeWide = (onChange: () => void) => {

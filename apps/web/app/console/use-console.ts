@@ -14,7 +14,8 @@ import {
 } from "@nexo/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { callApi } from "@/lib/api-client";
-import { createPoller, latestOnly } from "@/lib/poller";
+import { latestOnly } from "@/lib/poller";
+import { usePolling } from "@/lib/use-polling";
 
 /** The console reads the list and the open conversation every 3 s, as the chat does (ARQUITETURA.md, section 4). */
 const POLL_MS = 3_000;
@@ -22,27 +23,6 @@ const POLL_MS = 3_000;
 const PANEL_POLL_MS = 30_000;
 /** The search waits for a short pause in the typing. */
 const SEARCH_DEBOUNCE_MS = 250;
-
-/**
- * Runs the task every interval, never two at once, while the tab is visible. A tab that comes back runs it at once: what
- * was missed meanwhile shows up without a wait.
- */
-function usePolling(task: () => Promise<void>, intervalMs: number, key: unknown) {
-  const latest = useRef(task);
-  latest.current = task;
-  useEffect(() => {
-    const poller = createPoller({ task: () => latest.current(), intervalMs, visible: () => document.visibilityState === "visible" });
-    const onVisible = () => {
-      if (document.visibilityState === "visible") poller.runNow();
-    };
-    poller.start();
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      poller.stop();
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [intervalMs, key]);
-}
 
 /** A message the analyst sent that the server did not take yet, or refused. */
 export type PendingMessage = { id: string; text: string; failed: boolean };
@@ -125,13 +105,13 @@ export function useConsole(initial: Initial) {
     const timer = setTimeout(() => void loadList(), search ? SEARCH_DEBOUNCE_MS : 0);
     return () => clearTimeout(timer);
   }, [loadList, search]);
-  usePolling(loadList, POLL_MS, listKey);
-  usePolling(loadDetail, POLL_MS, selectedId);
+  usePolling(loadList, { intervalMs: POLL_MS, key: listKey });
+  usePolling(loadDetail, { intervalMs: POLL_MS, key: selectedId });
   useEffect(() => {
     setPanel((current) => (current?.employee.id === employeeId ? current : null));
     void loadPanel();
   }, [loadPanel, employeeId]);
-  usePolling(loadPanel, PANEL_POLL_MS, employeeId);
+  usePolling(loadPanel, { intervalMs: PANEL_POLL_MS, key: employeeId });
 
   // What she wrote is read once the conversation is open in front of the analyst.
   const unread = list?.conversations.find((conversation) => conversation.id === selectedId)?.unread ?? 0;

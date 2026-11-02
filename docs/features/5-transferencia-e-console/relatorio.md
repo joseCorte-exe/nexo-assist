@@ -20,21 +20,22 @@ O plano está em [plano.md](plano.md). Este arquivo junta o que foi pedido, a pr
 |---|---|
 | Crítico ou vencido vai para o N2 (crítico vem antes); pedido do funcionário e dúvida do agent, para o N1. Sem chamado, a prioridade sai do impacto que o modelo leu (RN-01) e, sem ele, é Média | `routeTransfer`, `packages/shared/src/transfer.ts` |
 | A espera é o prazo da prioridade contado da transferência | `routeTransfer` |
-| Confiança abaixo de 0,6 obriga o passo seguinte a transferir, com o motivo "dúvida do agent" fixado pelo código | `prepareStep`, `packages/agent/src/agent.ts` |
+| Confiança abaixo de 0,6 obriga o passo seguinte a transferir, com o motivo "dúvida do agent" fixado pelo código; a confiança vai junto com a transferência, numa gravação só | `prepareStep` e `transferToAnalyst`, em `packages/agent/src` |
 | Uma transferência por resposta: pedida duas vezes no mesmo passo, a segunda recebe a resposta da primeira; uma chamada recusada (chamado que não é dela) pode ser corrigida | `transferToAnalyst` |
 | Com a conversa pausada, a mensagem dela é gravada, contada e copiada para a memória; o LLM não é chamado | `POST /api/chat` |
+| Quem pode transferir, assumir, devolver e encerrar, e de onde: cada regra escrita uma vez, testada sem banco; o `UPDATE` só confere que a linha não mudou desde a leitura, e quem perde a corrida decide de novo sobre a linha que ganhou | `apps/web/lib/server/conversation-moves.ts` |
 | Assumir pausa o agent e põe o chamado ligado em atendimento; o chamado lido é o que o `UPDATE` deixou, mesmo que o agent tenha transferido no meio | `assumeHandler` |
 | Não lidas: as mensagens dela depois do mais recente entre a última leitura daquele analista e o momento em que a conversa passou a precisar de um analista desta vez | `lib/server/console/rows.ts` |
-| A nota da transferência vai para depois da resposta que a anunciou, só se a conversa ainda espera | `noteAfterReply` |
+| A resposta do agent fica logo depois da mensagem que ela respondeu; o que o turno fez (a nota da transferência) vem depois dela | `saveReply` e a nota em `conversation-moves.ts` |
 
 ## Testes
 
 | Suíte | Antes | Depois |
 |---|---|---|
-| Unidade e integração (Vitest) | 484 | 635 |
+| Unidade e integração (Vitest) | 484 | 651 |
 | Navegador (Playwright) | 42 | 52 |
 
-Todas passam, e os tipos fecham nos quatro pacotes. Por pacote: shared 193, ticket-service 89, agent 101, web 252.
+Todas passam, e os tipos fecham nos quatro pacotes. Por pacote: shared 195, ticket-service 89, agent 102, web 265.
 
 O arquivo [transfer-and-console.spec.ts](../../../apps/web/e2e/transfer-and-console.spec.ts) roda as histórias com dois navegadores, como duas pessoas: Ana pede um analista sobre o chamado vencido; Rafael a acha em "Para você", abre o histórico e os chamados dela, assume; os dois conversam sem o agent; ele devolve, o agent volta a responder; ele assume de novo e encerra; o Disponível liga e desliga e sobrevive a um recarregamento; um funcionário não entra no console; e, num celular, a conversa abre sobre a lista e os chamados só quando pedidos.
 
@@ -52,6 +53,8 @@ Uma revisão de código separada achou seis defeitos. Cada um ganhou um teste qu
 | A volta da aba podia abrir uma segunda leitura periódica, e outra a cada troca de aba | um agendador que nunca roda duas vezes ao mesmo tempo (`createPoller`) |
 | Uma leitura antiga podia desenhar por cima do resultado de assumir ou de uma mensagem enviada | só vale a resposta mais nova (`latestOnly`) |
 | Depois de uma segunda transferência, quem leu a primeira via as não lidas desde então | conta do mais recente entre a leitura e o novo começo |
+
+Uma segunda revisão, de estrutura, reprovou o PR e foi atendida antes do merge. As regras de cada movimento da conversa estavam escritas duas vezes, uma em JS e outra no SQL, em três handlers e na transferência; agora ficam em `conversation-moves.ts`. A transferência era gravada em duas fases, com a nota redatada depois; agora vai numa gravação só. As notas viraram um tipo por evento, sem campos vazios. A leitura das mensagens ficou num lugar só, `messages.ts`. O chat recebe a conversa inteira no stream. E os hooks repetidos entre o chat e o console (relógio, leitura periódica e rolagem) ficaram em `lib/`.
 
 ## Fidelidade ao design
 

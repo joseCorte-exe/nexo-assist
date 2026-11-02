@@ -71,7 +71,7 @@ export function getDeps(): Deps {
         memory,
         ticketService,
         drafts: createDraftStore(db),
-        transfers: createTransferStore(db),
+        transfers: createTransferStore({ db, memory }),
       }),
       memory,
       directory: createDirectory(ticketService),

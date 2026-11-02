@@ -2,7 +2,8 @@
 
 import type { ConversationResponse, ConversationState, PresenceResponse } from "@nexo/shared";
 import { useCallback, useEffect, useRef } from "react";
-import { createPoller, latestOnly } from "@/lib/poller";
+import { latestOnly } from "@/lib/poller";
+import { usePolling } from "@/lib/use-polling";
 
 /** While an analyst has the conversation, the chat reads it every 3 s (ARQUITETURA.md, section 4). */
 const POLL_MS = 3_000;
@@ -62,25 +63,7 @@ export function useConversationSync({
     [refresh],
   );
 
-  const paused = state !== null && pausedStates.has(state);
-  useEffect(() => {
-    if (!paused) return;
-    const poller = createPoller({
-      task: refresh,
-      intervalMs: POLL_MS,
-      hiddenIntervalMs: HIDDEN_POLL_MS,
-      visible: () => document.visibilityState === "visible",
-    });
-    const onVisible = () => {
-      if (document.visibilityState === "visible") poller.runNow();
-    };
-    poller.start();
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      poller.stop();
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [paused, refresh]);
+  usePolling(refresh, { intervalMs: POLL_MS, hiddenIntervalMs: HIDDEN_POLL_MS, enabled: state !== null && pausedStates.has(state) });
 
   useEffect(() => {
     const beat = () => {

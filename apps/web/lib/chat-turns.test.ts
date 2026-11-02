@@ -445,11 +445,14 @@ describe("lastDraftId", () => {
 });
 
 describe("liveTurns, with an analyst (feature 5)", () => {
-  const note = (id: string, event: "transferred" | "assumed" | "released" | "closed", analystName: string | null = "Rafael Lima"): NexoUIMessage => ({
-    id,
-    role: "system",
-    parts: [{ type: "data-note", data: { event, level: event === "transferred" ? "N2" : null, analystName, at: "2026-10-26T13:05:00.000Z" } }],
-  });
+  const at = "2026-10-26T13:05:00.000Z";
+  const notes = {
+    transferred: { event: "transferred", level: "N2", at },
+    assumed: { event: "assumed", level: "N2", analystName: "Rafael Lima", at },
+    released: { event: "released", analystName: "Rafael Lima", at },
+    closed: { event: "closed", analystName: "Rafael Lima", at },
+  } as const;
+  const note = (id: string, event: keyof typeof notes): NexoUIMessage => ({ id, role: "system", parts: [{ type: "data-note", data: notes[event] }] });
   const fromRafael = (id: string, text: string): NexoUIMessage => ({
     id,
     role: "assistant",
@@ -457,11 +460,11 @@ describe("liveTurns, with an analyst (feature 5)", () => {
   });
 
   it("draws a note of the console between the messages", () => {
-    const turns = liveTurns([user("u1", "Falar com um analista"), note("n1", "transferred", null)], "ready");
+    const turns = liveTurns([user("u1", "Falar com um analista"), note("n1", "transferred")], "ready");
     expect(turns.at(-1)).toEqual({
       kind: "note",
       id: "n1",
-      note: { event: "transferred", level: "N2", analystName: null, at: "2026-10-26T13:05:00.000Z" },
+      note: { event: "transferred", level: "N2", at: "2026-10-26T13:05:00.000Z" },
     });
   });
 
@@ -495,7 +498,9 @@ describe("liveTurns, with an analyst (feature 5)", () => {
     const counter: NexoUIMessage = {
       id: "a9",
       role: "assistant",
-      parts: [{ type: "data-conversation", data: { id: "conv-1", state: "with_analyst", messageCount: 4 } }],
+      parts: [
+        { type: "data-conversation", data: { id: "conv-1", state: "with_analyst", messageCount: 4, targetLevel: "N2", waitUntil: null, analyst: null } },
+      ],
     };
     expect(liveTurns([user("u1", "Oi"), counter], "ready", { paused: true })).toEqual([{ kind: "employee", id: "u1", text: "Oi", unsent: false }]);
   });
