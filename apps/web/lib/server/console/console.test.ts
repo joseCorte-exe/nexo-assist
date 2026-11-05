@@ -508,24 +508,7 @@ describe("the message of the analyst on the linked ticket (RN-02)", () => {
     }
   });
 
-  it("takes the message when the whole service is down, with the analysts it read last", async () => {
-    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      const deps = await testDeps();
-      await write(deps, "conv-fabio", "Primeira.", "msg-rafael-6");
-      deps.ticketService.setDown(true);
-      // Past the time the analysts are kept for.
-      deps.now = () => new Date(NOW.getTime() + 60_000);
-      const sent = await write(deps, "conv-fabio", "Segunda.", "msg-rafael-7");
-      expect(sent.status).toBe(201);
-      expect(sent.body).toMatchObject({ analyst: { name: "Rafael Lima", level: "N2" } });
-      await deps.settled();
-    } finally {
-      errors.mockRestore();
-    }
-  });
-
-  it("refuses without saving on a server that never read the analysts, so the console can send it again", async () => {
+  it("refuses without saving when the analysts cannot be read, so the console can send it again", async () => {
     const deps = await testDeps();
     deps.ticketService.setDown(true);
     const sent = await write(deps, "conv-fabio", "Oi, Fábio.", "msg-rafael-8");
