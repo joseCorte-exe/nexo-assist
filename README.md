@@ -78,6 +78,7 @@ O modelo decide o que o funcionário quer, classifica a categoria, identifica im
 | `draftTicket` | Monta o rascunho para criar, complementar ou reabrir |
 | `transferToAnalyst` | Passa a conversa para um analista, com o resumo do caso |
 | `redirectOutOfScope` | Indica o canal de RH, financeiro ou facilities |
+| `markResolved` | Registra que o funcionário confirmou que o problema foi resolvido. A conversa encerra depois que a resposta é salva |
 
 Estas regras ficam no código:
 
@@ -90,8 +91,11 @@ Estas regras ficam no código:
 | Só dá para reabrir até 7 dias depois da resolução | `packages/shared/src/ticket-change.ts` |
 | O id do funcionário vem da sessão, nunca do modelo, e o ticket-service recusa chamado de outra pessoa | `packages/agent/src/agent.ts`, `apps/ticket-service/src/routes/tickets.ts` |
 | Caso crítico ou chamado vencido vai para o N2. Pedido do funcionário ou dúvida do agent vai para o N1 | `packages/shared/src/transfer.ts` |
+| Um rascunho novo que sai crítico transfere a conversa para o N2 na mesma gravação da resposta. O chamado confirmado depois fica ligado à conversa | `apps/web/lib/server/transfers.ts`, `apps/web/lib/server/conversation-moves.ts`, `apps/web/lib/server/drafts.ts` |
 | Confiança abaixo de 0,6 obriga a transferência no passo seguinte | `packages/agent/src/agent.ts` |
 | Com a conversa com um analista ou esperando um, a mensagem é gravada e o modelo não é chamado | `apps/web/lib/server/chat.ts` |
+| A resposta do analista no console reinicia o prazo do chamado ligado à conversa, exceto se ele já estiver resolvido | `apps/web/lib/server/console/actions.ts`, `apps/ticket-service/src/routes/tickets.ts` |
+| Cada mensagem que chama o modelo conta num teto por IP e num teto global por dia. Acima do teto, a mensagem fica gravada e o modelo não é chamado | `apps/web/lib/server/usage.ts` |
 | O limite de 30 mensagens não passa pelo modelo. Com algo pendente, a conversa vai para um analista; sem nada pendente, ela encerra; se um analista já está com ela ou ela já espera um, nada muda. O limite conta as mensagens do funcionário por conversa: é essa a "sessão" do PRD | `apps/web/lib/server/limit.ts`, `apps/web/lib/server/chat.ts`, `packages/shared/src/continuity.ts` |
 
 ### Como ver o que ele fez
@@ -100,9 +104,9 @@ Acima de cada resposta aparece a linha de ações ("consultou seus chamados", "c
 
 ## Como garanti a qualidade das decisões
 
-Os 718 testes de unidade e de integração cobrem as regras do código: prioridade, prazo, reabertura, privacidade, idempotência, quedas do serviço e as ferramentas do agent. Como essas regras não dependem do modelo, os testes dão o mesmo resultado a cada execução.
+Os 833 testes de unidade e de integração cobrem as regras do código: prioridade, prazo, reabertura, privacidade, idempotência, quedas do serviço e as ferramentas do agent. Como essas regras não dependem do modelo, os testes dão o mesmo resultado a cada execução.
 
-Os 56 testes em Playwright rodam as histórias do PRD de ponta a ponta com o modelo simulado: login, consulta, rascunho, confirmação, analista assumindo, limite e volta em outro dia.
+Os 60 testes em Playwright rodam as histórias do PRD de ponta a ponta com o modelo simulado: login, consulta, rascunho, confirmação, analista assumindo, limite e volta em outro dia.
 
 O que depende do modelo foi testado com o Haiku 5.5 de verdade. Cada feature a partir da 3 rodou seus caminhos, em geral três vezes cada, e o resultado está no relatório dela. Exemplos:
 
@@ -112,6 +116,9 @@ O que depende do modelo foi testado com o Haiku 5.5 de verdade. Cada feature a p
 | Abrir e complementar um chamado (9 rodadas) | Classificou certo nas 9 |
 | Pedido de analista | N1, 3 de 3 |
 | Chamado vencido | N2, 3 de 3 |
+| Caso crítico ("o sistema de ponto caiu para toda a empresa") | N2 na primeira resposta, 4 de 4. Sem a regra no código, 0 de 4 |
+| "Resolveu, obrigado" | Encerrou como resolvida, 3 de 3 |
+| "Obrigado" com rascunho esperando ou nada pendente | A conversa continuou aberta, 3 de 3 em cada caso |
 | "O Excel fecha sozinho com macros" | N1 por dúvida do agent em 2 de 3. Na terceira, ele perguntou de onde veio a planilha |
 | Volta depois de três dias | Nas 3, consultou os chamados de novo antes de responder |
 
@@ -130,7 +137,7 @@ Medido com preço de US$ 0,10 por milhão de tokens de entrada, US$ 0,01 de leit
 | Complementar um chamado | 3 a 4 s | cerca de US$ 0,002 |
 | Transferir para um analista | 4 a 5 s | US$ 0,0008 a 0,0015 por resposta |
 
-As instruções e as ferramentas somam 3,5 mil tokens e ficam em cache por cerca de 5 minutos, lidos a um décimo do preço. Os relatórios não separam as respostas com e sem cache. Numa resposta sem cache, esses tokens custam cerca de US$ 0,0003 a mais do que a leitura do cache, fora a escrita nele. Cada resposta tem limite de 5 passos, 800 tokens de saída por passo e 45 segundos.
+As instruções e as ferramentas ficam em cache por cerca de 5 minutos e são lidas a um décimo do preço. Os relatórios não separam as respostas com e sem cache, e uma resposta sem cache custa mais. Cada resposta tem limite de 5 passos, 800 tokens de saída por passo e 45 segundos.
 
 ## Principais trade-offs
 
@@ -147,9 +154,11 @@ As instruções e as ferramentas somam 3,5 mil tokens e ficam em cache por cerca
 ## Limitações conhecidas
 
 - Numa queda do ticket-service com a lista de analistas ainda válida no cache do web, a mensagem do analista fica gravada, mas o prazo e a linha do histórico do chamado não são registrados. O prazo só recomeça na próxima mensagem que passar.
-- Nenhum fluxo grava o desfecho `resolved_by_agent`, só o seed. O número de resolvidos sem fila na tela de login vem dos dados de exemplo.
 - Os testes com o modelo real foram rodados à mão. Não existe um comando que os repita.
-- O limite por IP e o limite global por dia ainda não estão ligados. A tabela `usage_counters` existe, mas nada a usa.
+- "Tentar de novo" depois de uma resposta que falhou não conta nos tetos de uso, até 3 chamadas por mensagem. O custo de um dia ruim pode passar da conta feita só com primeiras tentativas.
+- O teto por IP pode ser contornado por quem troca de endereço, como no IPv6. O teto global por dia continua segurando o custo.
+- Só um chamado novo crítico transfere sozinho. Um chamado crítico já existente segue pela consulta. Se o funcionário nunca confirmar o rascunho, o caso fica com o analista sem chamado aberto.
+- Um "obrigado" solto não encerra a conversa, então quem sai sem confirmar não entra no número de resolvidos sem fila.
 
 ## Deploy
 
@@ -160,6 +169,5 @@ Link publicado: a preencher.
 ## O que faria com mais tempo
 
 - Transformar as rodadas com o modelo real em um comando, com cada caso ligado a uma história ou regra do PRD, para repetir a cada mudança nas instruções.
-- Registrar a confirmação do funcionário de que o problema foi resolvido, para o número de resolvidos sem fila ficar exato.
 - Trocar a busca periódica por uma conexão aberta no chat e no console.
 - Testar um modelo feito só para decisões para dar a nota de confiança, deixando o Haiku com a conversa.
