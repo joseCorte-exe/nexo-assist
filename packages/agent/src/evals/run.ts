@@ -53,6 +53,7 @@ async function play(evalCase: EvalCase, model: AgentModel, onCost: (cost: number
     ticketService: world.desk,
     drafts: world.drafts,
     transfers: world.transfers,
+    resolutions: world.resolutions,
     now: () => NOW,
   });
   const replies: Reply[] = [];

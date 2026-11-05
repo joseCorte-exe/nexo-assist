@@ -1,3 +1,4 @@
+import { routeTransfer } from "@nexo/shared";
 import { expect } from "vitest";
 import type { CaseRun, EvalCase, Reply, ToolRun } from "./run";
 
@@ -25,6 +26,8 @@ function readBy(reply: Reply | undefined) {
   return [reply?.text ?? "", ...questions].join("\n");
 }
 
+const VPN_QUESTION = "Minha VPN está dando erro 809. Uso Windows 10, o que eu faço?";
+
 /** The one message each reopening case sends, so that the days since it was resolved are all that differ. */
 const SAP_AGAIN = "A senha do SAP bloqueou de novo, é o mesmo problema do INC-20150. Só eu estou afetada e não tenho compromisso hoje que dependa disso.";
 
@@ -32,7 +35,7 @@ export const cases: EvalCase[] = [
   {
     name: "Dúvida resolvida pela central, sem abrir chamado",
     rule: "Funcionário 1",
-    messages: ["Minha VPN está dando erro 809. Uso Windows 10, o que eu faço?"],
+    messages: [VPN_QUESTION],
     check: (run) => {
       const [reply] = run.replies;
       const found = runsOf(reply, "searchArticles").flatMap((tool) => (tool.result as { articles?: Array<{ id: string }> }).articles ?? []);
@@ -108,8 +111,19 @@ export const cases: EvalCase[] = [
     employeeId: "emp-bruno",
     messages: ["O sistema de pedidos caiu para toda a equipe comercial, ninguém consegue trabalhar."],
     check: (run) => {
-      expect(run.world.savedTransfers, "um caso crítico devia ser transferido").toHaveLength(1);
-      expect(run.world.savedTransfers[0]).toMatchObject({ level: "N2", reason: "critical" });
+      // A new critical case goes by its draft: the route transfers it when the reply is saved, by the level read here.
+      expect(ran(run.replies[0], "transferToAnalyst"), "o caso crítico novo vai pelo rascunho, sem chamar a transferência").toBe(false);
+      expect(run.world.savedDrafts, "devia montar o rascunho já na primeira resposta").toHaveLength(1);
+      const [draft] = run.world.savedDrafts;
+      expect(draft, "o rascunho devia sair crítico").toMatchObject({ operation: "create", priority: "critical" });
+      const route = routeTransfer({
+        requested: "employee_request",
+        ticket: { priority: draft!.priority, status: "waiting_for_analyst", dueAt: draft!.dueAt.toISOString() },
+        classification: null,
+        at: draft!.createdAt,
+      });
+      expect(route).toMatchObject({ level: "N2", reason: "critical" });
+      expect(run.replies[0]?.text.trim(), "devia dizer para quem encaminhou").not.toBe("");
     },
   },
   {
@@ -191,6 +205,32 @@ export const cases: EvalCase[] = [
         run.world.savedDrafts.some((draft) => draft.ticketId === "INC-20311") ||
         readBy(reply).includes("INC-20311");
       expect(pointedAt, "devia levar ela ao INC-20311, que é o mesmo problema").toBe(true);
+    },
+  },
+  {
+    name: "Ela diz que resolveu e a conversa encerra",
+    rule: "Resolução sem fila; Funcionário 1",
+    messages: [VPN_QUESTION, "Resolveu, obrigado!"],
+    check: (run) => {
+      const [first, second] = run.replies;
+      expect(ran(first, "markResolved"), "antes de ela dizer, não devia encerrar").toBe(false);
+      const [resolved] = runsOf(second, "markResolved");
+      expect(resolved, "devia encerrar como resolvida").toBeDefined();
+      expect((resolved?.result as { ok?: boolean }).ok, "o código devia aceitar").toBe(true);
+      expect(second?.text.trim(), "devia escrever a frase de encerramento").not.toBe("");
+      expectNoDraft(run);
+      expectNoTransfer(run);
+    },
+  },
+  {
+    name: "Só um obrigado não encerra a conversa",
+    rule: "Resolução sem fila; condução da conversa",
+    messages: [VPN_QUESTION, "Obrigado"],
+    check: (run) => {
+      expect(run.replies.flatMap((reply) => runsOf(reply, "markResolved")), "só agradecer não encerra").toEqual([]);
+      expect(run.replies[1]?.text.trim(), "devia responder numa frase").not.toBe("");
+      expectNoDraft(run);
+      expectNoTransfer(run);
     },
   },
   {

@@ -12,7 +12,7 @@ import {
 } from "@nexo/shared";
 // The ranking the help center runs, not a stand-in: what the model finds decides what it answers.
 import { rankArticles, type SearchableArticle } from "../../../../apps/ticket-service/src/kb-search";
-import type { DraftRecord, DraftStore, TicketDesk, TransferRecord, TransferStore } from "../tools";
+import type { DraftRecord, DraftStore, ResolutionStore, TicketDesk, TransferRecord, TransferStore } from "../tools";
 
 // What each eval case runs against: the sample data of the ticket-service (apps/ticket-service/src/seed.ts) at a fixed
 // moment, in memory, recording what the tools did. The agent and its tools are the real ones.
@@ -351,7 +351,15 @@ export function createWorld({ resolved = [] }: { resolved?: TicketChange[] } = {
     },
   };
 
-  return { desk, drafts, transfers: transferStore, tickets, askedFor, savedDrafts, savedTransfers: transfers, markedTickets };
+  const resolutions: ResolutionStore = {
+    // As the conversations database answers: an analyst has it, or a draft still waits for her. No case confirms a draft.
+    check: async () => {
+      if (transfers.length > 0) return "not_with_agent";
+      return savedDrafts.length > 0 ? "draft_pending" : null;
+    },
+  };
+
+  return { desk, drafts, transfers: transferStore, resolutions, tickets, askedFor, savedDrafts, savedTransfers: transfers, markedTickets };
 }
 
 export type World = ReturnType<typeof createWorld>;
