@@ -9,7 +9,10 @@ const EMPLOYEES_TTL_MS = 5 * 60_000;
 type Cached<T> = { value: T; until: number };
 
 export type Directory = {
-  /** Every analyst, by id. The availability changes, so this lives shorter than the employees. */
+  /**
+   * Every analyst, by id. The availability changes, so this lives shorter than the employees. In an outage the last ones
+   * read still answer: a message of the console only needs the name and the level. Null with none read yet.
+   */
   analysts: () => Promise<Map<string, Analyst> | null>;
   /** The employees with these ids, by id; null when the ticket-service did not answer. */
   employees: (ids: readonly string[]) => Promise<Map<string, Employee> | null>;
@@ -29,7 +32,7 @@ export function createDirectory(
       const at = now().getTime();
       if (analysts && analysts.until > at) return analysts.value;
       const result = await ticketService.listAnalysts();
-      if (!result.ok) return null;
+      if (!result.ok) return analysts?.value ?? null;
       analysts = { value: new Map(result.data.map((analyst) => [analyst.id, analyst])), until: at + ANALYSTS_TTL_MS };
       return analysts.value;
     },
