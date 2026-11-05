@@ -1,8 +1,7 @@
 import type { AgentMemory, TransferStore } from "@nexo/agent";
 import { criticalDraft, decisionOf, fitSummary, type NexoUIMessage, routeTransfer } from "@nexo/shared";
 import type { Db } from "@/db";
-import { applyMove, moves } from "./conversation-moves";
-import type { Deps } from "./deps";
+import { applyMove, moves, type TransferFields } from "./conversation-moves";
 
 /**
  * The transfers of the agent, in the conversations database (ARQUITETURA.md, section 6): the transfer move, while the
@@ -19,19 +18,16 @@ export function createTransferStore(deps: { db: Db; memory: Pick<AgentMemory, "s
 }
 
 /**
- * A new ticket RN-01 read as critical goes to an analyst (PRD, Anexo A), and the code does it, as it closes a solved
- * conversation: right after the reply that drafted it is saved, so a reply that failed moves nothing. The description
- * is the summary, since it was written for the analyst not to ask again. The card stays: she can still confirm it.
+ * A new ticket RN-01 read as critical goes to an analyst (PRD, Anexo A), and the code does it: what the transfer sets, for
+ * the batch that saves the reply announcing it, so a failure leaves neither and the retry does both. The description is
+ * the summary, since it was written for the analyst not to ask again. The card stays: she can still confirm it.
  */
-export async function transferIfCritical(
-  deps: Pick<Deps, "db" | "memory" | "now">,
-  { conversationId, turnStartedAt, reply }: { conversationId: string; turnStartedAt: Date; reply: NexoUIMessage },
-) {
+export function criticalTransfer(reply: NexoUIMessage, turnStartedAt: Date): TransferFields | null {
   const draft = criticalDraft(reply.parts);
-  if (!draft) return;
+  if (!draft) return null;
   // The draft is what the ticket will be. Counted from it, the wait is the one the reply told her.
   const route = routeTransfer({ requested: "employee_request", ticket: { ...draft, status: "waiting_for_analyst" }, classification: null, at: new Date(draft.createdAt) });
-  const transfer = moves.transfer({
+  return {
     level: route.level,
     reason: route.reason,
     summary: fitSummary(`${draft.title}. ${draft.description}`),
@@ -39,8 +35,5 @@ export async function transferIfCritical(
     waitUntil: route.waitUntil,
     confidence: decisionOf(reply.parts)?.confidence ?? null,
     turnStartedAt,
-  });
-  const result = await applyMove(deps, conversationId, transfer, deps.now());
-  // An analyst assumed it meanwhile, so someone already has the case.
-  if (!result.ok && result.refused !== "not_with_agent") console.error("critical case not transferred", { conversationId, reason: result.refused });
+  };
 }

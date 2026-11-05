@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { scriptedModel } from "@nexo/agent/testing";
 import { MAX_TRANSFER_SUMMARY } from "@nexo/shared";
-import { and, asc, eq, ne } from "drizzle-orm";
+import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { describe, expect, it, vi } from "vitest";
 import { conversations, decisions, drafts, messages } from "@/db/schema";
 import { chat } from "./chat";
@@ -167,7 +167,7 @@ describe("a critical case (Anexo A)", () => {
   };
   const anaCookie = () => sessionCookieFor({ role: "employee", ...ana });
   /** A new message of hers, with the id the chat gives it. */
-  const post = async (text: string) => request("/api/chat", { method: "POST", body: { id: `msg-${randomUUID()}`, text }, cookie: await anaCookie() });
+  const post = async (text: string, id = `msg-${randomUUID()}`) => request("/api/chat", { method: "POST", body: { id, text }, cookie: await anaCookie() });
   const messagesOf = (deps: TestDeps, conversationId: string) =>
     deps.db.select().from(messages).where(eq(messages.conversationId, conversationId)).orderBy(asc(messages.createdAt));
   const pontoDraft = {
@@ -274,6 +274,35 @@ describe("a critical case (Anexo A)", () => {
     expect((await deps.db.select({ status: drafts.status }).from(drafts)).map(({ status }) => status)).toEqual(["cancelled"]);
   });
 
+  it("saves the reply and the transfer as one fact: neither when either fails, and both on the retry", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const deps = await testDeps({ model: scriptedModel([...draftThenLine(), ...draftThenLine()]) });
+    // The real database refuses the note of the transfer, the last statement of the batch.
+    await deps.db.run(sql`create trigger no_note before insert on messages when new.author = 'system' begin select raise(abort, 'database down'); end`);
+    const text = "O sistema de ponto caiu para toda a empresa";
+
+    await expect(readStream(await chat(await post(text, "msg-ana-1"), deps))).rejects.toThrow("The agent reply was not saved");
+    await Promise.allSettled([deps.settled()]);
+
+    const failed = await conversationRow(deps);
+    expect(failed).toMatchObject({ state: "with_agent", transferReason: null, firstResponseAt: null });
+    // No reply says "Encaminhei" without the transfer, and no card is left without a reply.
+    expect((await messagesOf(deps, failed!.id)).map(({ author }) => author)).toEqual(["employee"]);
+    expect((await deps.db.select({ status: drafts.status }).from(drafts)).map(({ status }) => status)).toEqual(["cancelled"]);
+
+    await deps.db.run(sql`drop trigger no_note`);
+    const again = await chat(await post(text, "msg-ana-1"), deps);
+    expect(again.status).toBe(200);
+    await readStream(again);
+    await deps.settled();
+
+    const row = await conversationRow(deps);
+    expect(row).toMatchObject({ state: "waiting_for_analyst", targetLevel: "N2", transferReason: "critical" });
+    expect((await messagesOf(deps, row!.id)).map(({ author }) => author)).toEqual(["employee", "agent", "system"]);
+    expect((await deps.db.select({ status: drafts.status }).from(drafts)).map(({ status }) => status).sort()).toEqual(["cancelled", "pending"]);
+    log.mockRestore();
+  });
+
   it("leaves it with the analyst who assumed it during the reply, without a log", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const deps = await testDeps({ model: scriptedModel(draftThenLine()) });
@@ -285,7 +314,10 @@ describe("a critical case (Anexo A)", () => {
     await readStream(await chat(await post("O sistema de ponto caiu para toda a empresa"), deps));
     await deps.settled();
 
-    expect(await conversationRow(deps)).toMatchObject({ state: "with_analyst", analystId: rafael.id, transferReason: null });
+    const row = await conversationRow(deps);
+    expect(row).toMatchObject({ state: "with_analyst", analystId: rafael.id, transferReason: null });
+    // The reply is saved as any other, and no note says it was transferred.
+    expect((await messagesOf(deps, row!.id)).map(({ author }) => author)).toEqual(["employee", "agent"]);
     expect(log).not.toHaveBeenCalled();
     log.mockRestore();
   });

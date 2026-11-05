@@ -19,12 +19,13 @@ import type { NextRequest } from "next/server";
 import type { Db } from "@/db";
 import { conversations, decisions, drafts, messages } from "@/db/schema";
 import { activeConversationOf, toConversationView, viewColumns } from "./conversation";
+import { transferInBatch } from "./conversation-moves";
 import type { Deps } from "./deps";
 import { jsonError, readBody, readEmployeeSession } from "./http";
 import { applyLimit } from "./limit";
 import { replyPlace } from "./messages";
 import { closeIfResolved } from "./resolutions";
-import { transferIfCritical } from "./transfers";
+import { criticalTransfer } from "./transfers";
 import { claimModelCall, clientIp, releaseModelCall } from "./usage";
 
 const AGENT_FAILED = "O Nexo não conseguiu responder. Tente de novo.";
@@ -138,7 +139,8 @@ async function startTurn(deps: Pick<Deps, "db" | "directory">, { employeeId, id,
 /**
  * Saves the agent reply with the parts it streamed, its decision, and marks the first response of the conversation, in
  * one batch. The reply goes right after the message it answers, so whatever it did meanwhile (the note of a transfer)
- * comes after it, as nexo.pen draws them.
+ * comes after it, as nexo.pen draws them. A reply that drafted a critical case also transfers it in that batch: it says
+ * so, so either both happened or "Tentar de novo" asks for both.
  */
 async function saveReply(
   db: Db,
@@ -148,6 +150,7 @@ async function saveReply(
   // the agent refused is saved as the error it was, so the reply still matches the schemas when it is read back.
   const parts = withToolErrors(reply.parts.filter((part) => part.type !== "data-conversation"));
   const { record, toolsUsed } = summarizeTurn(parts);
+  const critical = criticalTransfer(reply, startedAt);
   await db.batch([
     // The text column is the reply as a person reads it outside the chat: the console and the list show it.
     db.insert(messages).values({ id: reply.id, conversationId, author: "agent", text: replyText(parts), parts, createdAt: replyPlace(startedAt) }),
@@ -156,6 +159,7 @@ async function saveReply(
       .update(conversations)
       .set({ firstResponseAt: sql`coalesce(${conversations.firstResponseAt}, ${now.getTime()})` })
       .where(eq(conversations.id, conversationId)),
+    ...(critical ? transferInBatch(db, conversationId, critical, now) : []),
   ]);
 }
 
@@ -297,7 +301,6 @@ export async function chat(request: NextRequest, deps: Deps) {
         throw new Error("The agent reply was not saved");
       });
       await closeIfResolved(deps, { conversationId: conversation.id, turnStartedAt: startedAt, reply: responseMessage });
-      await transferIfCritical(deps, { conversationId: conversation.id, turnStartedAt: startedAt, reply: responseMessage });
       // The message that reached the limit is answered; the limit applies right after (ARQUITETURA.md, section 1).
       if (reachedLimit(conversation.messageCount)) await applyLimit(deps, conversation.id);
     },
