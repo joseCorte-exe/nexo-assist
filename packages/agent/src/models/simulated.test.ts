@@ -242,6 +242,27 @@ describe("simulatedModel", () => {
     expect(savedTransfers).toHaveLength(1);
   });
 
+  it("ends the conversation when she says it was solved, with one sentence", async () => {
+    resolutionAnswer = { resolved: true };
+    const result = await reply("resolveu, obrigado");
+    expect(result.decision.toolsUsed).toEqual(["recordDecision", "markResolved"]);
+    expect(result.text).toBe("Que bom que resolveu. Se precisar de mais alguma coisa, é só escrever.");
+  });
+
+  it("says what is missing when the code refuses to end it", async () => {
+    resolutionAnswer = { resolved: false, reason: "draft_pending" };
+    expect((await reply("deu certo, valeu")).text).toBe("Antes de encerrar, confirme ou cancele o rascunho no card.");
+    resolutionAnswer = { resolved: false, reason: "not_with_agent" };
+    expect((await reply("funcionou!")).text).toBe("Um analista já está com a sua conversa e responde por aqui.");
+    resolutionAnswer = { resolved: true };
+  });
+
+  it("does not end it when she says it was not solved, or only thanks", async () => {
+    for (const text of ["não resolveu", "Não funcionou, continua igual", "obrigado"]) {
+      expect((await reply(text)).decision.toolsUsed).not.toContain("markResolved");
+    }
+  });
+
   it("does not know what to do with a case the help center does not cover, so the code makes it transfer", async () => {
     savedTransfers.length = 0;
     const result = await reply("Meu Excel fecha sozinho quando abro a planilha de campanhas com macros.");
