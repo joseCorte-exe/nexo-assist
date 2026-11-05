@@ -18,7 +18,7 @@ Esta ordem foi conferida contra o código, lendo. Ainda não foi percorrida num 
 
 `POST /admin/reseed` não basta para isso: ele só recria o banco do ticket-service. O web não tem rota parecida, então as conversas continuam como estavam, ligadas a chamados que voltaram atrás. Por exemplo, a Ana continua esperando um analista por um chamado que agora parece nunca ter sido transferido.
 
-As chamadas de admin do ticket-service pedem os dois cabeçalhos, `x-service-secret` com o `TICKET_SERVICE_SECRET` e `x-admin-key` com o `ADMIN_KEY`:
+As chamadas de admin do ticket-service pedem os dois cabeçalhos, `x-service-secret` com o `TICKET_SERVICE_SECRET` e `x-admin-key` com o `ADMIN_KEY`. O `curl` abaixo supõe essas variáveis e `TICKET_SERVICE_URL` exportadas no terminal:
 
 ```bash
 curl -X POST "$TICKET_SERVICE_URL/admin/outage?seconds=8" \
@@ -106,7 +106,7 @@ Faça logo depois do R8.7: a mensagem seguinte depende dele.
 | # | Passo | Resultado esperado |
 |---|---|---|
 | R4.1 | Escreva "Meu notebook está lento desde a atualização do Windows. Quero abrir um chamado." | Não monta um chamado novo. Leva ao INC-20311, com o card ou o rascunho "Complemento · INC-20311". Se vier o rascunho, clique em Cancelar |
-| R4.2 | Escreva "A senha do SAP bloqueou de novo." (R8.9) | Rascunho "Reabertura · INC-20150" (resolvido há 4 dias), com o prazo contado de agora: a reabertura conta como nova abertura. Clique em Confirmar: "INC-20150 reaberto." e o status volta para Aguardando analista |
+| R4.2 | Escreva "A senha do SAP bloqueou de novo." (R8.9) | Rascunho "Reabertura · INC-20150" (resolvido há 4 dias), com o prazo contado de agora: a reabertura conta como nova abertura. Clique em Confirmar: "INC-20150 reaberto." Como Rafael, abra a conversa da Ana em "Todas": o painel "Chamados de Ana" mostra "INC-20150 · Aguardando analista" |
 | R4.3 | Escreva "O Outlook do celular parou de sincronizar de novo." | O INC-19877 foi resolvido há 12 dias: não pode ser reaberto, e o caminho é um chamado novo. Se ele chegar ao rascunho de um chamado novo, clique em Cancelar |
 
 ### Privacidade e escopo (Anexo A)
@@ -128,14 +128,14 @@ Faça logo depois do R8.7: a mensagem seguinte depende dele.
 |---|---|---|
 | F4.1 | Como Bruno, escreva "Meu notebook não conecta na VPN desde ontem. Aparece o erro 809." | Consulta a central e os chamados. Pergunta o que falta, como a versão do Windows |
 | F4.1b | Responda "É Windows 11." | O artigo não vale para o caso. Pergunta "Quem está sendo afetado?" com "Só eu", "Minha equipe", "Toda a empresa" e "Não sei" |
-| F4.2 | Clique em "Só eu" e, se ele perguntar, diga que há uma reunião hoje mais tarde que depende disso (R1.1, R3.1) | Card do rascunho com título, descrição, tipo INC, categoria Rede e VPN, prioridade Alta com o prazo e "Somente você". Estado "Aguardando confirmação". A frase acima diz por que é Alta |
+| F4.2 | Clique em "Só eu" e, se ele perguntar, diga que há uma reunião hoje mais tarde que depende disso (R3.1) | Card do rascunho com título, descrição, categoria Rede e VPN, prioridade Alta com o prazo e "Somente você". Estado "Aguardando confirmação". A frase acima diz por que é Alta |
 | R3.2 | Como Rafael, abra a conversa do Bruno em "Todas" e veja o painel "Chamados de Bruno" | O chamado ainda não existe |
 | F4.3 | Como Bruno, clique em Editar. Mude o título e abra a categoria para ver as opções, sem trocar a categoria, e salve (R2.2) | Os campos abrem dentro do card. A categoria tem Acesso, Rede e VPN, Hardware, Software, E-mail e Outros. Não há campo de prioridade. O card mostra o título novo |
-| F4.4 | Clique em Confirmar (R3.3) | "Chamado INC-xxxxx criado." e o número novo. Recarregue: continua igual, com um chamado só |
-| A1.1 | Como Rafael, recarregue a conversa do Bruno | O chamado está no painel, com tipo, categoria e prioridade da conversa |
+| F4.4 | Clique em Confirmar (R1.1, R3.3) | "Chamado INC-xxxxx criado.": o tipo aparece no número, INC por ser algo que não funciona. O card do rascunho não mostra o tipo. Recarregue: continua igual, com um chamado só |
+| A1.1 | Como Rafael, recarregue a conversa do Bruno | O chamado está no painel. Ao abri-lo, o número mostra o tipo, e a categoria e a prioridade são as da conversa |
 | A1.2 | Leia a descrição do chamado | Conta o que acontece, desde quando, o sistema, o que já foi tentado e o impacto, com as palavras dele |
 
-Trocar a categoria no card faz o código checar duplicidade de novo. Para Software, isso encontraria o REQ-10450 dele e recusaria a confirmação. O comportamento está certo, mas não é o que este passo confere.
+Trocar a categoria no card faz o código checar duplicidade de novo. Para Software, ele encontraria o REQ-10450 do Bruno e recusaria a edição com um 409. O comportamento está certo, mas não é o que este passo confere.
 
 ### Tipos, categorias e a tabela de prioridade (Anexo A)
 
@@ -143,19 +143,21 @@ Um rascunho por linha, em mensagens que já dizem o que ele precisa. Clique em C
 
 A categoria Outros só aparece aqui como opção no card (R2.2): qual caso cai nela depende do que o modelo julga, e o Anexo A não dá um exemplo.
 
-| # | O que escrever | Tipo | Categoria | Prioridade | Prazo |
-|---|---|---|---|---|---|
-| R2.a | "Minha senha do Jira bloqueou e não consigo entrar. Só comigo, sem compromisso hoje." | INC | Acesso | Alta | 4 horas úteis |
-| R8.2 | "Meu monitor não liga e não consigo trabalhar. Só comigo, sem compromisso hoje." | INC | Hardware | Alta | 4 horas úteis |
-| R8.3 | "O Excel trava às vezes. Consigo usar pelo navegador, mas hoje mais tarde tenho uma apresentação que depende dele. Só comigo." | INC | Software | Alta | 4 horas úteis |
-| R8.4 | "A caixa compartilhada de e-mail da minha equipe está lenta, mas dá para usar pelo navegador. Sem compromisso hoje." | INC | E-mail | Média | 3 dias úteis |
-| R8.5 | "Quero uma licença do Visio, sem pressa. É só para mim." (R1.2) | REQ | Software | Baixa | 5 dias úteis |
+| # | O que escrever | Categoria | Prioridade | Prazo |
+|---|---|---|---|---|
+| R2.a | "Minha senha do Jira bloqueou e não consigo entrar. Só comigo, sem compromisso hoje." | Acesso | Alta | 4 horas úteis |
+| R8.2 | "Meu monitor não liga e não consigo trabalhar. Só comigo, sem compromisso hoje." | Hardware | Alta | 4 horas úteis |
+| R8.3 | "O Excel trava às vezes. Consigo usar pelo navegador, mas hoje mais tarde tenho uma apresentação que depende dele. Só comigo." | Software | Alta | 4 horas úteis |
+| R8.4 | "A caixa compartilhada de e-mail da minha equipe está lenta, mas dá para usar pelo navegador. Sem compromisso hoje." | E-mail | Média | 3 dias úteis |
+| R8.5 | "Quero uma licença do Visio, sem pressa. É só para mim." | Software | Baixa | 5 dias úteis |
+
+A coluna Prazo traz a duração da regra. O card mostra "resposta até" com um horário, que deve bater com essa duração contada de agora, em horas úteis. O tipo só aparece no número do chamado criado, no R3.4.
 
 A linha de Rede e VPN é o F4.2, e a linha Crítica é o R8.1, na parte 6, porque ela transfere a conversa.
 
 | # | Passo | Resultado esperado |
 |---|---|---|
-| R3.4 | Com o rascunho do R8.5 na tela, force a queda com o `curl` do começo e clique em Confirmar logo em seguida. Depois de uns 10 segundos, clique em Confirmar de novo | Primeiro, "O serviço de chamados não respondeu. Tente de novo; o chamado não será duplicado." e o rascunho continua lá. Na nova tentativa, cria um chamado só. Sem as chaves de admin, pule este passo |
+| R3.4 | Com o rascunho do R8.5 na tela, force a queda com o `curl` do começo e clique em Confirmar logo em seguida. Depois de uns 10 segundos, clique em "Tentar de novo". Sem as chaves de admin, só clique em Confirmar, sem a queda (R1.2) | Com a queda, primeiro aparece "O serviço de chamados não respondeu. Tente de novo; o chamado não será duplicado." e o rascunho continua lá. Nos dois caminhos, termina em "Chamado REQ-xxxxx criado.", um chamado só: o tipo aparece no número, REQ por ser um pedido |
 
 ## Parte 4: o console antes das novas transferências
 
@@ -189,7 +191,7 @@ Volte a janela do analista para o Rafael: saia e entre de novo.
 | A3.3 | Troquem mensagens | Cada um vê a do outro em até 3 s. O agent não responde. Esta mensagem do Rafael recomeça o prazo do INC-20311 |
 | A3.6 | No painel, clique em "Ver todos os chamados de Ana" | Abre a lista completa, só dela |
 | A3.4 | Clique em "Devolver ao agent" e, como Ana, escreva "Qual o horário do service desk?" | No console, "Rafael Lima devolveu ao agent". O agent volta a responder a Ana |
-| R8.10 | Como Ana, escreva "Como está o INC-20311?" | Não está mais vencido: a resposta do analista recomeça o prazo. O card mostra o que ele escreveu como a última resposta da TI |
+| R8.10 | Como Ana, escreva "Como está o INC-20311?" | O card diz que está no prazo: a resposta do analista recomeça o prazo. A resposta do Nexo cita o que o Rafael escreveu |
 | A3.5 | Como Ana, escreva "Quero falar com um analista." Como Rafael, abra a conversa em "Todas", assuma e clique em "Encerrar atendimento" | "Rafael Lima encerrou o atendimento" nas duas telas. A linha mostra "Encerrada por você". O chamado agora está no prazo, então ela vai para o N1, e por isso está em "Todas" e não em "Para você" |
 
 ## Parte 6: crítico e dúvida do agent
@@ -238,7 +240,7 @@ Só no local, porque muda a configuração. O `.env` define quantas mensagens po
 | Analista 1: chamado bem aberto | A1.1 e A1.2 |
 | Analista 2: conversas que precisam de mim | A2.1 a A2.5 |
 | Analista 3: assumir, devolver, encerrar | A3.1 a A3.6 |
-| Tipos de chamado | INC no F4.2; REQ no R8.5 |
+| Tipos de chamado | INC no F4.4; REQ no R3.4 |
 | Categorias | F4.2, R2.a, R8.2 a R8.5; as seis opções no F4.3 |
 | Abertura: campos e confirmação | F4.2, R3.2, F4.4, R3.4 |
 | Sem duplicidade e 7 dias | R4.1 a R4.3 |
