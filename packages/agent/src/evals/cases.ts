@@ -3,7 +3,8 @@ import { expect } from "vitest";
 import type { CaseRun, EvalCase, Reply, ToolRun } from "./run";
 
 // The cases of ARQUITETURA.md, section 10, each tied to a story of the PRD or a rule of Annex A. They assert on what the
-// code can check: which tools ran, the level of the transfer, the draft and the decision. Never on the wording.
+// code can check: which tools ran, the level of the transfer, the draft and the decision. The text of a reply is only read
+// for whether there is one, and in three cases: that it asks ("?"), that it names the ticket, and that it leaks nothing.
 
 const runsOf = (reply: Reply | undefined, name: string): ToolRun[] => reply?.tools.filter((tool) => tool.name === name) ?? [];
 const ran = (reply: Reply | undefined, name: string) => runsOf(reply, name).length > 0;
@@ -133,7 +134,7 @@ export const cases: EvalCase[] = [
     check: (run) => {
       expect(run.world.savedTransfers, "devia transferir").toHaveLength(1);
       const [transfer] = run.world.savedTransfers;
-      expect(transfer).toMatchObject({ level: "N2", reason: "overdue", ticketId: "INC-20311" });
+      expect(transfer, "devia ir para o N2 por estar vencido, ligada ao chamado").toMatchObject({ level: "N2", reason: "overdue", ticketId: "INC-20311" });
       expect(transfer?.summary.trim(), "a transferência leva um resumo do caso").not.toBe("");
       expect(run.world.markedTickets, "a transferência fica marcada no chamado").toEqual(["INC-20311"]);
       expectNoDraft(run);

@@ -14,8 +14,8 @@ export default defineConfig({
     include: ["src/evals/**/*.eval.ts"],
     // One run after the other: the medians are of a run alone, and the machine is shared.
     fileParallelism: false,
-    // Three runs of a case with up to three turns, each of them limited to 45 s.
-    testTimeout: 10 * 60 * 1000,
+    // The worst case takes 13.5 min: 3 runs of up to 2 messages, 45 s each, every run tried up to 3 times.
+    testTimeout: 15 * 60 * 1000,
     // The progress of each run appears as it happens.
     disableConsoleIntercept: true,
   },

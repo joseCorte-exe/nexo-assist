@@ -17,9 +17,10 @@ const decision = { understanding: "Entendi o pedido", action: "Seguir a regra", 
 const decide = { toolCalls: [{ toolName: "recordDecision", input: decision }] };
 
 describe("costOf", () => {
-  it("charges what came from the cache at the cache price, and the rest as input", () => {
-    // 1 million in, 400 thousand of them from the cache, and 100 thousand out.
-    expect(costOf({ inputTokens: 1_000_000, cachedInputTokens: 400_000, outputTokens: 100_000 })).toBeCloseTo(0.06 + 0.004 + 0.05);
+  it("charges reading and writing the cache at their prices, and the rest as input", () => {
+    // 1 million in: 400 thousand read from the cache, 200 thousand written to it, 400 thousand plain. 100 thousand out.
+    const usage = { inputTokens: 1_000_000, cachedInputTokens: 400_000, cacheCreationInputTokens: 200_000, outputTokens: 100_000 };
+    expect(costOf(usage)).toBeCloseTo(0.04 + 0.004 + 0.025 + 0.05);
   });
 });
 
@@ -66,13 +67,16 @@ describe("the checks of the cases", () => {
 
   it("fail when the transfer leaves the ticket out, which sends it to the wrong level", async () => {
     const model = scriptedModel([decide, lookup, { text: "Está vencido." }, decide, transfer(), { text: "Encaminhei." }]);
-    expect((await runOnce(overdue, model)).passed).toBe(false);
+    const run = await runOnce(overdue, model);
+    expect(run.passed).toBe(false);
+    expect(run.failure).toContain("devia ir para o N2 por estar vencido");
   });
 
   it("fail when a reply does not start with its decision", async () => {
     const model = scriptedModel([lookup, { text: "Está vencido." }, decide, transfer("INC-20311"), { text: "Encaminhei." }]);
     const run = await runOnce(overdue, model);
     expect(run.passed).toBe(false);
+    expect(run.failure).toContain("A resposta 1 não começou com recordDecision: getTicket");
   });
 
   it("do not pass a duplicate that never mentions the ticket it duplicates", async () => {

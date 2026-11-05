@@ -2,18 +2,16 @@ import type { CaseResult, Reply, RunResult } from "./run";
 
 // Cost, medians and the table of `pnpm eval`, written to docs/evals/resultado.md.
 
-/** Prices of Claude Haiku 5.5, per million tokens (docs/features/5-transferencia-e-console/relatorio.md). */
-export const PRICE_PER_MILLION = { input: 0.1, cacheRead: 0.01, output: 0.5 };
+/** Prices of Claude Haiku 5.5, per million tokens (docs/features/5-transferencia-e-console/relatorio.md; writing to the cache is 1.25 times the input). */
+export const PRICE_PER_MILLION = { input: 0.1, cacheRead: 0.01, cacheWrite: 0.125, output: 0.5 };
 
-export type TokenUsage = { inputTokens?: number; cachedInputTokens?: number; outputTokens?: number };
+export type TokenUsage = { inputTokens?: number; cachedInputTokens?: number; cacheCreationInputTokens?: number; outputTokens?: number };
 
-/**
- * What a reply cost. The input Mastra reports already counts what came from the cache. The report has no price for
- * writing to the cache, so what is written counts as plain input.
- */
-export function costOf({ inputTokens = 0, cachedInputTokens = 0, outputTokens = 0 }: TokenUsage): number {
-  const { input, cacheRead, output } = PRICE_PER_MILLION;
-  return ((inputTokens - cachedInputTokens) * input + cachedInputTokens * cacheRead + outputTokens * output) / 1_000_000;
+/** What a reply cost. The input Mastra reports already counts what was read from the cache and what was written to it. */
+export function costOf({ inputTokens = 0, cachedInputTokens = 0, cacheCreationInputTokens = 0, outputTokens = 0 }: TokenUsage): number {
+  const { input, cacheRead, cacheWrite, output } = PRICE_PER_MILLION;
+  const plainInput = inputTokens - cachedInputTokens - cacheCreationInputTokens;
+  return (plainInput * input + cachedInputTokens * cacheRead + cacheCreationInputTokens * cacheWrite + outputTokens * output) / 1_000_000;
 }
 
 export function median(values: number[]): number {
@@ -71,7 +69,7 @@ export function renderReport(results: CaseResult[], { model, at }: { model: stri
     "",
     `Rodado em ${at.toISOString().slice(0, 10)}, com \`${model}\`. Cada caso roda ${results[0]?.runs.length ?? 0} vezes, e só passa se todas passarem. Os dados são os do seed, em memória, com o relógio parado numa segunda às 10:05. O tempo e o custo são da rodada inteira do caso, com todas as mensagens dela. Os casos rodam em sequência, então quase todas as chamadas leem as instruções do cache.`,
     "",
-    `Preço por milhão de tokens: entrada US$ ${brazilian(PRICE_PER_MILLION.input, 2)}, leitura de cache US$ ${brazilian(PRICE_PER_MILLION.cacheRead, 2)}, saída US$ ${brazilian(PRICE_PER_MILLION.output, 2)}. A escrita no cache conta como entrada, porque o relatório da feature 5 não traz o preço dela.`,
+    `Preço por milhão de tokens: entrada US$ ${brazilian(PRICE_PER_MILLION.input, 2)}, leitura de cache US$ ${brazilian(PRICE_PER_MILLION.cacheRead, 2)}, escrita no cache US$ ${brazilian(PRICE_PER_MILLION.cacheWrite, 3)}, saída US$ ${brazilian(PRICE_PER_MILLION.output, 2)}.`,
     "",
     "| Caso | História ou regra | Passou | Tempo (mediana) | Custo (mediana) |",
     "|---|---|---|---|---|",

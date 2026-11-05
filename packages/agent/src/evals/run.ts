@@ -27,7 +27,7 @@ export type EvalCase = {
   resolved?: TicketChange[];
   /** What the employee writes, one message per reply. */
   messages: string[];
-  /** Throws when the agent did not do what the rule says. Reads what the code can check, never the wording. */
+  /** Throws when the agent did not do what the rule says. Reads what the code can check, and of the text only what cases.ts says. */
   check: (run: CaseRun) => void;
 };
 
