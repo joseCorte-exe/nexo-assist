@@ -297,7 +297,7 @@ describe("POST /api/chat", () => {
     expect(model.calls).toHaveLength(3);
   });
 
-  it("refuses the id of a message of another conversation, without answering or counting", async () => {
+  it("refuses the id of a message of another conversation, without answering, counting or opening one", async () => {
     // Bruno's first message in the sample data.
     const model = scriptedModel(vpnScript());
     const deps = await testDeps({ agent: testAgent(model) });
@@ -306,7 +306,7 @@ describe("POST /api/chat", () => {
     expect(response.status).toBe(409);
     expect((await response.json()).error.code).toBe("message_conflict");
     expect(model.calls).toHaveLength(0);
-    expect((await anaConversation(deps))?.messageCount).toBe(0);
+    expect(await anaConversation(deps)).toBeUndefined();
   });
 
   it("ends the stream with a short error and saves nothing of the agent when the model fails", async () => {
@@ -599,6 +599,68 @@ describe("POST /api/chat at the limit of 30 messages (feature 6)", () => {
     await deps.settled();
     const [row] = await deps.db.select().from(conversations).where(eq(conversations.id, "conv-ana"));
     expect(row).toMatchObject({ state: "closed", outcome: "limit_reached", messageCount: 30 });
+  });
+
+  it("says the reply that closed the conversation was already answered when its response was lost, opening no other", async () => {
+    const model = scriptedModel(plain());
+    const deps = await testDeps({ agent: testAgent(model) });
+    await conversationAt(deps, { count: 29, lastReply: [{ type: "text", text: "Pronto." }] });
+    const message = { id: "msg-ana-30", text: "Valeu, era isso" };
+    await readStream(await chat(await post(message), deps));
+    await deps.settled();
+    const calls = model.calls.length;
+
+    const again = await chat(await post(message), deps);
+
+    expect(again.status).toBe(409);
+    expect((await again.json()).error.code).toBe("already_answered");
+    expect(model.calls).toHaveLength(calls);
+    expect(await anaConversation(deps)).toBeUndefined();
+    // What the chat reads then, and a reload: how the conversation ended, with her message and the reply.
+    const { conversation, messages: shown } = await loadConversation(deps, ana.id);
+    expect(conversation).toMatchObject({ id: "conv-ana", state: "closed" });
+    expect(shown.map(({ id }) => id)).toContain(message.id);
+  });
+
+  it("says the same after she started another conversation, which the message does not touch", async () => {
+    const deps = await testDeps({ agent: testAgent(scriptedModel([...plain(), ...plain()])) });
+    await conversationAt(deps, { count: 29, lastReply: [{ type: "text", text: "Pronto." }] });
+    const message = { id: "msg-ana-30", text: "Valeu, era isso" };
+    await readStream(await chat(await post(message), deps));
+    await deps.settled();
+    deps.now = () => new Date(NOW.getTime() + 60_000);
+    await readStream(await chat(await say("Outra coisa: a impressora"), deps));
+    await deps.settled();
+
+    const again = await chat(await post(message), deps);
+
+    expect((await again.json()).error.code).toBe("already_answered");
+    expect(await anaConversation(deps)).toMatchObject({ messageCount: 1 });
+  });
+
+  it("sends the chat to the conversation an analyst closed with her message still unanswered, so it never loops on it", async () => {
+    const deps = await testDeps({ agent: testAgent(scriptedModel([])) });
+    await conversationAt(deps, { count: 3, lastReply: [{ type: "text", text: "Pronto." }], state: "with_analyst" });
+    const message = { id: "msg-ana-4", text: "Mais uma coisa" };
+    await readStream(await chat(await post(message), deps));
+    await deps.db.update(conversations).set({ state: "closed", outcome: "closed_by_analyst" }).where(eq(conversations.id, "conv-ana"));
+
+    const again = await chat(await post(message), deps);
+
+    expect((await again.json()).error.code).toBe("already_answered");
+    expect(await anaConversation(deps)).toBeUndefined();
+  });
+
+  it("refuses another text under the id of a message of a conversation that ended, opening no other", async () => {
+    const deps = await testDeps({ agent: testAgent(scriptedModel(plain())) });
+    await conversationAt(deps, { count: 29, lastReply: [{ type: "text", text: "Pronto." }] });
+    await readStream(await chat(await post({ id: "msg-ana-30", text: "Valeu, era isso" }), deps));
+    await deps.settled();
+
+    const response = await chat(await post({ id: "msg-ana-30", text: "Outra coisa" }), deps);
+
+    expect((await response.json()).error.code).toBe("message_conflict");
+    expect(await anaConversation(deps)).toBeUndefined();
   });
 
   it("notes the limit once when she reaches it while an analyst has her, and keeps her writing to the analyst", async () => {
