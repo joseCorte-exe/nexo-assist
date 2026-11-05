@@ -231,6 +231,17 @@ export const transferToAnalystOutput = z.discriminatedUnion("ok", [
 ]);
 export type TransferToAnalystOutput = z.infer<typeof transferToAnalystOutput>;
 
+// She said the problem was solved: the model decides that from her words; whether the conversation may end comes from the
+// code (the store), which reads the state and the drafts.
+
+export const markResolvedInput = z.object({});
+export type MarkResolvedInput = z.infer<typeof markResolvedInput>;
+export const markResolvedOutput = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true) }),
+  z.object({ ok: z.literal(false), reason: z.enum(["not_with_agent", "draft_pending"]), message: z.string() }),
+]);
+export type MarkResolvedOutput = z.infer<typeof markResolvedOutput>;
+
 /** The schemas of each tool: for the agent that runs them, and to check saved messages when they are read back. */
 export const nexoToolSchemas = {
   recordDecision: { inputSchema: decisionRecord, outputSchema: recordDecisionOutput },
@@ -242,6 +253,7 @@ export const nexoToolSchemas = {
   offerReplies: { inputSchema: offerRepliesInput, outputSchema: offerRepliesOutput },
   draftTicket: { inputSchema: draftTicketInput, outputSchema: draftTicketOutput },
   transferToAnalyst: { inputSchema: transferToAnalystInput, outputSchema: transferToAnalystOutput },
+  markResolved: { inputSchema: markResolvedInput, outputSchema: markResolvedOutput },
 };
 
 /** Who wrote an analyst message in the chat, and the name she reads above it. */
@@ -273,6 +285,7 @@ const transferredNote = z.object({ event: z.literal("transferred"), level: analy
 const assumedNote = z.object({ event: z.literal("assumed"), level: analystLevel, analystName: z.string() });
 const releasedNote = z.object({ event: z.literal("released"), analystName: z.string() });
 const closedNote = z.object({ event: z.literal("closed"), analystName: z.string() });
+const resolvedNote = z.object({ event: z.literal("resolved") });
 /**
  * The limit of messages, and what it did: closed the conversation, transferred it to a level, or left it with the analyst
  * who has it (by name, unless the directory was down), or with the level it waits for.
@@ -288,7 +301,7 @@ const limitNote = z.object({
 });
 
 /** A note, ready to be written: "Rafael Lima assumiu · agent pausado". */
-export const noteView = z.discriminatedUnion("event", [transferredNote, assumedNote, releasedNote, closedNote, limitNote]);
+export const noteView = z.discriminatedUnion("event", [transferredNote, assumedNote, releasedNote, closedNote, resolvedNote, limitNote]);
 export type NoteView = z.infer<typeof noteView>;
 
 /** A note in the chat, with its time: "Transferida para Suporte N2 · 10:05". */
@@ -298,6 +311,7 @@ export const chatNote = z.discriminatedUnion("event", [
   assumedNote.extend(at),
   releasedNote.extend(at),
   closedNote.extend(at),
+  resolvedNote.extend(at),
   limitNote.extend(at),
 ]);
 export type ChatNote = z.infer<typeof chatNote>;
@@ -322,9 +336,10 @@ export type MessageMeta = z.infer<typeof messageMeta>;
 
 /**
  * A message of the chat: text, the parts of each tool and the data-conversation, data-note and data-analyst parts. An agent reply is saved
- * with these same parts, so the screen draws a reply the same way while it streams and after a reload.
+ * with these same parts, so the screen draws a reply the same way while it streams and after a reload. data-unavailable
+ * only streams: the model was not called because the demo reached a ceiling of the day, so there is no reply to save.
  */
-export type NexoUIMessage = UIMessage<MessageMeta, { conversation: ConversationView; note: ChatNote; analyst: AnalystPart }, NexoTools>;
+export type NexoUIMessage = UIMessage<MessageMeta, { conversation: ConversationView; note: ChatNote; analyst: AnalystPart; unavailable: null }, NexoTools>;
 
 /**
  * GET /api/conversation: the conversation by id; without one, her active one, or the last that ended, or none. With its

@@ -5,8 +5,10 @@ import { z } from "zod";
 import { createDb, type Db } from "@/db";
 import { createDirectory, type Directory } from "./directory";
 import { createDraftStore } from "./drafts";
+import { createResolutionStore } from "./resolutions";
 import { createTransferStore } from "./transfers";
 import { getSessionSecret } from "./session";
+import type { UsageLimits } from "./usage";
 
 /** What the server code needs from the outside. Route handlers get the real one; tests build their own. */
 export type Deps = {
@@ -24,6 +26,7 @@ export type Deps = {
     | "searchEmployees"
     | "setAvailability"
     | "assignTicket"
+    | "answerTicket"
     | "getTicket"
     | "transferTicket"
   >;
@@ -37,15 +40,21 @@ export type Deps = {
   sessionSecret: string;
   secureCookies: boolean;
   now: () => Date;
+  usageLimits: UsageLimits;
 };
 
-const env = z.object({
+const positiveInt = z.coerce.number().int().positive();
+
+export const env = z.object({
   CONVERSATIONS_DB_URL: z.string().min(1).default("file:conversations.db"),
   CONVERSATIONS_DB_AUTH_TOKEN: z.string().optional(),
   TICKET_SERVICE_URL: z.url(),
   TICKET_SERVICE_SECRET: z.string().min(1),
   /** "simulated" swaps the LLM for fixed rules: the end-to-end tests, or running without an API key. */
   NEXO_AGENT_MODEL: z.enum(["claude", "simulated"]).default("claude"),
+  /** Messages that may call the model per São Paulo day. A value left empty fails here: it would read as a ceiling of 0. */
+  USAGE_LIMIT_PER_IP_PER_DAY: positiveInt.default(300),
+  USAGE_LIMIT_GLOBAL_PER_DAY: positiveInt.default(1000),
 });
 
 // The simulated reply arrives word by word, a little slower than a person reads, like the real model.
@@ -74,6 +83,7 @@ export function getDeps(): Deps {
         ticketService,
         drafts: createDraftStore(db),
         transfers: createTransferStore({ db, memory }),
+        resolutions: createResolutionStore(db),
       }),
       memory,
       directory: createDirectory(ticketService),
@@ -81,6 +91,7 @@ export function getDeps(): Deps {
       sessionSecret: getSessionSecret(),
       secureCookies: process.env.NODE_ENV === "production",
       now: () => new Date(),
+      usageLimits: { perIp: config.USAGE_LIMIT_PER_IP_PER_DAY, global: config.USAGE_LIMIT_GLOBAL_PER_DAY },
     };
   }
   return deps;

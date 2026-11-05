@@ -1,10 +1,12 @@
 import {
   type Analyst,
   createTicketServiceClient,
+  dueAt,
   type Employee,
   IDEMPOTENCY_KEY_HEADER,
   SERVICE_SECRET_HEADER,
   type Ticket,
+  type TicketDetail,
 } from "@nexo/shared";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -15,18 +17,22 @@ import { analysts, tickets, ticketUpdates } from "../db/schema";
 import { seed } from "../seed";
 
 // What the console of feature 5 needs from the ticket-service: the names of the people in the list and in the search,
-// the availability of the analyst, and the two marks a transfer leaves on a ticket: transferred, then assumed.
+// the availability of the analyst, the two marks a transfer leaves on a ticket (transferred, then assumed), and the
+// answer of an analyst, which restarts the deadline.
 
 const SECRET = "service-secret";
 // Monday 10:00 in São Paulo.
-const clock = new Date("2026-10-26T13:00:00Z");
+const start = new Date("2026-10-26T13:00:00Z");
+const HOUR = 60 * 60 * 1000;
 
 let db: Db;
 let app: ReturnType<typeof createApp>;
+let clock: Date;
 
 beforeEach(async () => {
   db = createDb(":memory:");
   await migrateDb(db);
+  clock = start;
   await seed(db, clock);
   app = createApp({ db, serviceSecret: SECRET, adminKey: "admin", outageRate: 0, now: () => clock, random: () => 0.99 });
 });
@@ -143,6 +149,16 @@ describe("POST /tickets/:id/assign", () => {
     expect(await resolved.json()).toMatchObject({ status: "resolved" });
   });
 
+  it("leaves the deadline and the last update as they were: assuming is not an answer of IT (RN-02)", async () => {
+    const [before] = await db.select().from(tickets).where(eq(tickets.id, "INC-20311"));
+    clock = new Date(start.getTime() + HOUR);
+    await write("POST", "/tickets/INC-20311/assign", assignBody, "note-2");
+    const [after] = await db.select().from(tickets).where(eq(tickets.id, "INC-20311"));
+    expect(after?.dueAt).toEqual(before?.dueAt);
+    expect(after?.updatedAt).toEqual(before?.updatedAt);
+    expect(after?.lastItResponseAt).toEqual(before?.lastItResponseAt);
+  });
+
   it("hands an assigned ticket to the analyst who assumed the conversation now", async () => {
     await write("POST", "/tickets/INC-20311/assign", assignBody, "note-2");
     const again = await write("POST", "/tickets/INC-20311/assign", { ...assignBody, analystId: "analyst-larissa" }, "note-5");
@@ -154,6 +170,134 @@ describe("POST /tickets/:id/assign", () => {
     expect(unknown.status).toBe(400);
     expect(await unknown.json()).toEqual(error("unknown_analyst", "Analyst not found"));
     expect((await write("POST", "/tickets/INC-20319/assign", assignBody, "note-7")).status).toBe(404);
+  });
+});
+
+const answerBody = { employeeId: "emp-ana", text: "Oi, Ana! Pode deixar o notebook ligado agora?" };
+const answer = (id: string, body: unknown = answerBody, key = "msg-1") => write("POST", `/tickets/${id}/answer`, body, key);
+const ticketRow = async (id: string) => (await db.select().from(tickets).where(eq(tickets.id, id)))[0]!;
+
+describe("POST /tickets/:id/answer", () => {
+  it("records the answer of IT: the last answer, the last update, the deadline and the line in the history", async () => {
+    const response = await answer("INC-20311");
+    expect(response.status).toBe(200);
+    // Medium: 3 business days from Monday 10:00 is Thursday 10:00 in São Paulo. It was overdue before.
+    expect(await response.json()).toMatchObject({
+      id: "INC-20311",
+      status: "waiting_for_analyst",
+      lastItResponseAt: start.toISOString(),
+      updatedAt: start.toISOString(),
+      dueAt: "2026-10-29T13:00:00.000Z",
+    });
+    const saved = await ticketRow("INC-20311");
+    expect(saved.lastItResponseAt).toEqual(start);
+    expect(saved.updatedAt).toEqual(start);
+    expect(saved.dueAt).toEqual(new Date("2026-10-29T13:00:00.000Z"));
+    expect(await updatesOf("INC-20311")).toEqual([{ author: "analyst", text: answerBody.text }]);
+  });
+
+  it("gives the agent what IT wrote last, in the detail of the ticket", async () => {
+    await answer("INC-20298", { employeeId: "emp-ana", text: "O dono da pasta liberou." });
+    const detail = (await (await get("/tickets/INC-20298?employeeId=emp-ana")).json()) as TicketDetail;
+    expect(detail.updates.at(-1)).toMatchObject({ author: "analyst", text: "O dono da pasta liberou." });
+  });
+
+  it("restarts with the deadline of the priority", async () => {
+    // Critical counts 1 hour around the clock; low, 5 business days.
+    const critical = await answer("INC-20319", { employeeId: "emp-diego", text: "Estou olhando." }, "msg-critical");
+    expect(((await critical.json()) as Ticket).dueAt).toBe("2026-10-26T14:00:00.000Z");
+    const low = await answer("REQ-10442", { employeeId: "emp-ana", text: "Sai amanhã." }, "msg-low");
+    expect(((await low.json()) as Ticket).dueAt).toBe("2026-11-02T13:00:00.000Z");
+  });
+
+  it("restarts again at each answer", async () => {
+    await answer("INC-20311", answerBody, "msg-1");
+    clock = new Date(start.getTime() + 2 * HOUR);
+    const later = (await (await answer("INC-20311", answerBody, "msg-2")).json()) as Ticket;
+    expect(later.lastItResponseAt).toBe(clock.toISOString());
+    expect(later.dueAt).toBe("2026-10-29T15:00:00.000Z");
+    expect(await updatesOf("INC-20311")).toHaveLength(2);
+  });
+
+  it("counts from the answer on a reopened ticket, and any later count of the deadline agrees", async () => {
+    await write("POST", "/tickets/INC-20150/reopen", { employeeId: "emp-ana", text: "De novo." }, "draft-1");
+    clock = new Date(start.getTime() + 2 * HOUR);
+    const answered = (await (await answer("INC-20150")).json()) as Ticket;
+    expect(answered.dueAt).toBe("2026-10-29T15:00:00.000Z");
+    const saved = await ticketRow("INC-20150");
+    expect(dueAt(saved)).toEqual(saved.dueAt);
+  });
+
+  it("writes it once per key: a retry answers the same, and the deadline stays", async () => {
+    const first = await (await answer("INC-20311")).json();
+    clock = new Date(start.getTime() + 2 * HOUR);
+    const again = await answer("INC-20311");
+    expect(again.status).toBe(200);
+    expect(await again.json()).toEqual(first);
+    expect(await updatesOf("INC-20311")).toHaveLength(1);
+    expect((await ticketRow("INC-20311")).lastItResponseAt).toEqual(start);
+  });
+
+  it("saves it when an outage falls before the answer; the retry gets it, added once", async () => {
+    // Opens the outage, 1 second window, saves first.
+    const randoms = [0, 0, 0];
+    const falling = createApp({ db, serviceSecret: SECRET, adminKey: "admin", outageRate: 0.1, now: () => clock, random: () => randoms.shift() ?? 0.99 });
+    const client = createTicketServiceClient({
+      baseUrl: "http://tickets.test",
+      secret: SECRET,
+      fetch: async (url, init) => falling.request(String(url), init),
+      sleep: async (ms) => {
+        clock = new Date(clock.getTime() + ms);
+      },
+      backoffMs: [600, 900],
+    });
+    const result = await client.answerTicket("INC-20311", answerBody, "msg-1");
+    expect(result.ok && result.data.lastItResponseAt).toBe(start.toISOString());
+    expect(await updatesOf("INC-20311")).toEqual([{ author: "analyst", text: answerBody.text }]);
+  });
+
+  it("refuses a key used for another ticket, and writes nothing", async () => {
+    await answer("INC-20311");
+    const before = await ticketRow("INC-20298");
+    expect((await answer("INC-20298")).status).toBe(422);
+    expect(await ticketRow("INC-20298")).toEqual(before);
+  });
+
+  it("does not restart the deadline of a resolved ticket: it refuses, and changes nothing", async () => {
+    const before = await ticketRow("INC-20150");
+    const history = await updatesOf("INC-20150");
+    const response = await answer("INC-20150");
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual(error("ticket_resolved", "The ticket is resolved"));
+    expect(await ticketRow("INC-20150")).toEqual(before);
+    expect(await updatesOf("INC-20150")).toEqual(history);
+  });
+
+  it("answers the same 404 for a ticket of somebody else and for one that does not exist, and writes nothing", async () => {
+    const theirs = await answer("INC-20319");
+    const missing = await answer("INC-99999");
+    expect(theirs.status).toBe(404);
+    expect(await theirs.json()).toEqual(error("ticket_not_found", "Ticket not found"));
+    expect(await missing.json()).toEqual(error("ticket_not_found", "Ticket not found"));
+    expect(await updatesOf("INC-20319")).toEqual([]);
+  });
+
+  it("needs the key, a valid body and a ticket number", async () => {
+    expect((await write("POST", "/tickets/INC-20311/answer", answerBody)).status).toBe(400);
+    expect((await answer("INC-20311", { employeeId: "emp-ana", text: " " })).status).toBe(400);
+    expect((await answer("INC-20311", { text: "Oi" })).status).toBe(400);
+    expect((await answer("drop-table")).status).toBe(400);
+    expect(await updatesOf("INC-20311")).toEqual([]);
+  });
+
+  it("needs the service secret", async () => {
+    const response = await app.request("/tickets/INC-20311/answer", {
+      method: "POST",
+      headers: { [SERVICE_SECRET_HEADER]: "wrong", "content-type": "application/json", [IDEMPOTENCY_KEY_HEADER]: "msg-1" },
+      body: JSON.stringify(answerBody),
+    });
+    expect(response.status).toBe(401);
+    expect(await updatesOf("INC-20311")).toEqual([]);
   });
 });
 
@@ -181,5 +325,12 @@ describe("the client of the console", () => {
     expect(transfer.ok && transfer.data.id).toBe("INC-20311");
     const assign = await client.assignTicket("INC-20311", assignBody, "note-2");
     expect(assign.ok && assign.data.status).toBe("assigned");
+  });
+
+  it("notes the answer of an analyst, and tells a resolved ticket by the code it refused with", async () => {
+    const answered = await client.answerTicket("INC-20311", answerBody, "msg-1");
+    expect(answered.ok && answered.data.lastItResponseAt).toBe(start.toISOString());
+    const resolved = await client.answerTicket("INC-20150", answerBody, "msg-2");
+    expect(!resolved.ok && resolved.error.serviceCode).toBe("ticket_resolved");
   });
 });

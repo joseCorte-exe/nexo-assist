@@ -68,6 +68,36 @@ test("Gabriela comes back three days later to the same conversation, each day op
   await expect(replies(page).last()).toContainText("8h");
 });
 
+test("the reply that closed the conversation, lost on the way: the retry shows how it ended, with no empty conversation", async ({ browser }) => {
+  await conversationWith("emp-gabriela", { count: 29, lastAt: new Date(Date.now() - 30 * 60 * 1000), topic: "Dúvidas sobre o notebook novo" });
+  const page = await newPage(browser);
+  await signIn(page, "gabriela.rocha@nexo.com.br");
+  await page.route(
+    "**/api/chat",
+    async (route) => {
+      // The server answers in full, saves the reply and applies the limit; only the browser never gets it.
+      await (await route.fetch()).body();
+      await route.abort("internetdisconnected");
+    },
+    { times: 1 },
+  );
+
+  await composer(page).fill("Qual o horário do service desk?");
+  await composer(page).press("Enter");
+  const mine = page.getByRole("article", { name: "Você" }).last();
+  await expect(mine).toContainText("Não enviada.");
+
+  await mine.getByRole("button", { name: "Tentar de novo" }).click();
+  await expect(page.getByRole("separator", { name: /conversa encerrada/ })).toBeVisible();
+  await expect(mine).not.toContainText("Não enviada.");
+  await expect(page.getByRole("button", { name: "Nova conversa" })).toBeVisible();
+  await expect(counter(page)).toHaveText("30/30 mensagens nesta sessão");
+
+  await page.reload();
+  await expect(page.getByRole("separator", { name: /conversa encerrada/ })).toBeVisible();
+  await expect(page.getByRole("article", { name: "Você" }).last()).toHaveText("Qual o horário do service desk?");
+});
+
 test("near the limit the counter says what is left; the 30th is answered and, with nothing pending, the conversation ends", async ({ browser }) => {
   await conversationWith("emp-gabriela", { count: 28, lastAt: new Date(Date.now() - 30 * 60 * 1000), topic: "Dúvidas sobre o notebook novo" });
   const page = await newPage(browser);
@@ -100,6 +130,27 @@ test("near the limit the counter says what is left; the 30th is answered and, wi
   await ask(page, "Qual o horário do service desk?");
   await expect(page.getByRole("article", { name: "Você" })).toHaveCount(1);
   await expect(counter(page)).toHaveText("1/30 mensagens nesta sessão");
+});
+
+test("she says it was solved: the conversation ends with one sentence, its note and the way to start over", async ({ browser }) => {
+  // Gabriela, in the conversation she started over with, already answered.
+  const page = await newPage(browser);
+  await signIn(page, "gabriela.rocha@nexo.com.br");
+  await expect(counter(page)).toHaveText("1/30 mensagens nesta sessão");
+  await ask(page, "resolveu, obrigado");
+
+  await expect(replies(page).last()).toContainText("encerrou a conversa");
+  await expect(replies(page).last()).toContainText("Que bom que resolveu.");
+  await expect(page.getByRole("separator", { name: /^Resolvida pelo Nexo · conversa encerrada · \d\d:\d\d$/ })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("button", { name: "Nova conversa" })).toBeVisible();
+  await expect(composer(page)).toHaveAttribute("placeholder", "Comece uma nova conversa…");
+
+  // A reload shows how it ended, until she starts another.
+  await page.reload();
+  await expect(page.getByRole("separator", { name: /Resolvida pelo Nexo/ })).toBeVisible();
+  await page.getByRole("button", { name: "Nova conversa" }).click();
+  await expect(composer(page)).toBeFocused();
+  await expect(counter(page)).toHaveText("0/30 mensagens nesta sessão");
 });
 
 test("Elisa reads how her last conversation ended, and writing there starts a new one on a clean screen", async ({ browser }) => {

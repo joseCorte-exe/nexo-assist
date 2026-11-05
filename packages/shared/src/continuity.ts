@@ -1,6 +1,7 @@
 import { MESSAGE_LIMIT, type NexoUIMessage } from "./chat";
 import { textOf } from "./chat-parts";
-import { type Affected, type Impact, MAX_TRANSFER_SUMMARY, type Urgency } from "./domain";
+import type { Affected, Impact, Urgency } from "./domain";
+import { fitSummary } from "./transfer";
 
 // The limit (feature 6, ARQUITETURA.md, sections 1 and 8): what is still pending when a conversation reaches 30 messages
 // and the case the code transfers then. The model decides nothing here.
@@ -72,9 +73,10 @@ const PENDING_WORDS: Record<LimitPending, (draftTitle: string | null) => string>
  * its working memory, so nobody asks her again.
  */
 export function limitSummary({ pending, draftTitle, caseLines }: { pending: LimitPending; draftTitle: string | null; caseLines: string[] }) {
-  const summary = [
-    `A conversa chegou ao limite de ${MESSAGE_LIMIT} mensagens com ${PENDING_WORDS[pending](draftTitle)}.`,
-    ...(caseLines.length > 0 ? caseLines : ["Leia a conversa para o contexto."]),
-  ].join(" ");
-  return summary.length <= MAX_TRANSFER_SUMMARY ? summary : `${summary.slice(0, MAX_TRANSFER_SUMMARY - 1).trimEnd()}…`;
+  return fitSummary(
+    [
+      `A conversa chegou ao limite de ${MESSAGE_LIMIT} mensagens com ${PENDING_WORDS[pending](draftTitle)}.`,
+      ...(caseLines.length > 0 ? caseLines : ["Leia a conversa para o contexto."]),
+    ].join(" "),
+  );
 }

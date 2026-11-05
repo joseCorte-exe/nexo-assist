@@ -8,6 +8,7 @@ import {
   type ConversationOutcome,
   conversationState,
   type ConversationState,
+  MAX_MESSAGE_TEXT,
   messageAuthor,
   priority,
   ticketStatus,
@@ -115,7 +116,7 @@ export const analystMessageInput = z.object({
     .string({ error: "Escreva sua mensagem." })
     .trim()
     .min(1, "Escreva sua mensagem.")
-    .max(2000, "A mensagem pode ter até 2.000 caracteres."),
+    .max(MAX_MESSAGE_TEXT, "A mensagem pode ter até 2.000 caracteres."),
 });
 export type AnalystMessageInput = z.infer<typeof analystMessageInput>;
 
@@ -227,6 +228,8 @@ export function noteLabel(note: NoteView): string {
       return `${note.analystName} devolveu ao agent`;
     case "closed":
       return `${note.analystName} encerrou o atendimento`;
+    case "resolved":
+      return "Resolvida pelo agent · conversa encerrada";
     case "limit_reached":
       return `${LIMIT_LEAD} · ${limitThen(note.limit)}`;
   }
@@ -264,6 +267,8 @@ export function employeeNoteLabel(note: NoteView): string {
       return `${note.analystName} entrou na conversa`;
     case "released":
       return `${note.analystName} devolveu a conversa ao Nexo`;
+    case "resolved":
+      return "Resolvida pelo Nexo · conversa encerrada";
     case "limit_reached":
       if (note.limit.then === "with_analyst") return `${LIMIT_LEAD} · ${note.limit.analystName ?? "o analista"} continua com você`;
       return note.limit.then === "waiting" ? `${LIMIT_LEAD} · o analista continua com você` : noteLabel(note);

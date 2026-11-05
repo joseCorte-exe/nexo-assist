@@ -104,7 +104,7 @@ describe("loadConversation", () => {
     const deps = await testDeps();
     const view = await loadConversation(deps, "emp-elisa");
     expect(view.conversation).toMatchObject({ id: "conv-elisa", state: "closed", limitReached: false });
-    expect(view.messages.at(-1)?.parts).toEqual([{ type: "text", text: "Resolveu, obrigada!" }]);
+    expect(view.messages.at(-1)?.parts).toMatchObject([{ type: "data-note", data: { event: "resolved" } }]);
   });
 
   it("prefers the active conversation to any that ended", async () => {

@@ -48,6 +48,25 @@ export function shownDraft(part: Parts[number]): DraftView | null {
 }
 
 /**
+ * A new ticket RN-01 read as critical: an analyst takes the case without waiting for her to confirm (Anexo A). A follow-up
+ * or a reopening keeps the priority of a ticket someone already has.
+ */
+export const isCriticalCase = (draft: Pick<DraftView, "operation" | "priority">) => draft.operation === "create" && draft.priority === "critical";
+
+/** The critical case a reply drafted, if any. The route transfers it once the reply is saved, and the chat reads it again. */
+export const criticalDraft = (parts: Parts): DraftView | null => {
+  for (const part of parts) {
+    const draft = shownDraft(part);
+    if (draft && isCriticalCase(draft)) return draft;
+  }
+  return null;
+};
+
+/** Whether a reply says the conversation was solved: markResolved ran and the code let it. It closes once the reply is saved. */
+export const markedResolved = (parts: Parts) =>
+  parts.some((part) => part.type === "tool-markResolved" && part.state === "output-available" && !isRefusedInput(part.output) && part.output.ok);
+
+/**
  * A tool input the agent refused streams as a normal result with { error: true }, which matches no output schema: the
  * saved reply would no longer read back. It is saved as what it is, an error of that tool, with the message the model got.
  */

@@ -15,7 +15,7 @@ import { conversations, messages } from "@/db/schema";
 import { afterReplyPlace } from "./messages";
 
 // How a conversation moves between the agent and the analysts (ARQUITETURA.md, sections 2 and 6): the agent transfers
-// it; an analyst assumes, releases or closes it. Each move says, without a database, whether it applies to the row as it
+// it, or ends it as solved; an analyst assumes, releases or closes it. Each move says, without a database, whether it applies to the row as it
 // was read, what it sets and what its note says. applyMove then writes it over the version it read, and the note in the
 // same batch, written only if the update changed the row: two clicks, two tabs or two analysts never leave two notes,
 // and a move that lost the race is decided again on the row that won.
@@ -28,7 +28,7 @@ type Who = Pick<Analyst, "id" | "name" | "level">;
  * messages keeps it from going back to the agent.
  */
 export type ConsoleRefusal = "closed" | "not_assumed" | "taken" | "limit_reached";
-/** Why the agent cannot transfer: it no longer has the conversation. */
+/** Why the agent cannot transfer or end it: it no longer has the conversation. */
 type AgentRefusal = "not_with_agent";
 export type Decision<Refusal extends string> = "apply" | "already" | { refused: Refusal };
 
@@ -80,6 +80,17 @@ export const moves = {
     }),
     // The agent wrote the reply that announced it: its memory already has it. The note goes after that reply.
     note: { authorId: null, note: { event: "transferred", level }, text: `Transferida para o ${LEVEL_LABEL[level]}.`, memory: false },
+    notePlace: (at) => afterReplyPlace(turnStartedAt, at),
+  }),
+
+  /**
+   * She said it was solved, while the agent still has it: the end the login screen counts as resolved without a queue.
+   * It closes once the reply that says so is saved, and its note goes after that reply.
+   */
+  resolve: (turnStartedAt: Date): Move<AgentRefusal> => ({
+    decide: (row) => (row.state === "with_agent" ? "apply" : refuse("not_with_agent")),
+    set: (at) => ({ state: "closed", outcome: "resolved_by_agent", closedAt: at }),
+    note: { authorId: null, note: { event: "resolved" }, text: "Resolvida pelo agent. Conversa encerrada.", memory: false },
     notePlace: (at) => afterReplyPlace(turnStartedAt, at),
   }),
 
@@ -177,6 +188,29 @@ export async function applyMove<Refusal extends string>(
     return { ok: true, row: moved, noteId };
   }
   return { ok: false, refused: "busy", row: null };
+}
+
+/**
+ * The transfer as statements of someone else's batch, for what must be one fact with it: the reply that announces it.
+ * The guard is the state, not a version read before: an analyst who assumed meanwhile keeps it, and no note is left.
+ */
+export function transferInBatch(db: Db, conversationId: string, fields: TransferFields, at: Date) {
+  const move = moves.transfer(fields);
+  const { authorId, note, text } = move.note;
+  return [
+    db
+      .update(conversations)
+      .set({ ...move.set(at), version: sql`${conversations.version} + 1` })
+      .where(and(eq(conversations.id, conversationId), eq(conversations.state, "with_agent"))),
+    noteIfMoved(db, {
+      noteId: `note-${conversationId}-${note.event}-${randomUUID()}`,
+      conversationId,
+      authorId,
+      text,
+      note: { ...note, at: at.toISOString() },
+      place: move.notePlace?.(at) ?? at,
+    }),
+  ] as const;
 }
 
 /**

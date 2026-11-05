@@ -1,10 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, ne } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
-import { conversations, decisions, messages } from "@/db/schema";
+import { scriptedModel } from "@nexo/agent/testing";
+import { MAX_TRANSFER_SUMMARY } from "@nexo/shared";
+import { and, asc, eq, ne, sql } from "drizzle-orm";
+import { describe, expect, it, vi } from "vitest";
+import { conversations, decisions, drafts, messages } from "@/db/schema";
 import { chat } from "./chat";
+import { assumeHandler, messageHandler } from "./console/actions";
 import { loadConversation } from "./conversation";
-import { ana, NOW, readStream, request, sessionCookieFor, testDeps, type TestDeps } from "./test-deps";
+import { confirmDraftHandler } from "./drafts";
+import { ana, fakeTicketService, type FakeTicketService, NOW, rafael, readStream, request, sessionCookieFor, testDeps, type TestDeps } from "./test-deps";
 import { createTransferStore } from "./transfers";
 
 // The transfer of feature 5 as the chat runs it: the agent (the simulated model, the same the end-to-end tests use)
@@ -152,5 +156,298 @@ describe("createTransferStore", () => {
     expect(notes.map((note) => note.id)).toContain((result as { noteId: string }).noteId);
     const [row] = await deps.db.select().from(conversations).where(eq(conversations.id, "conv-bruno"));
     expect(row).toMatchObject({ state: "waiting_for_analyst", targetLevel: "N2", transferReason: "critical", transferConfidence: 0.82, lastActivityAt: NOW });
+  });
+});
+
+describe("a critical case (Anexo A)", () => {
+  const decision = {
+    understanding: "O sistema de ponto caiu para a empresa",
+    action: "Montar o rascunho do chamado crítico",
+    confidence: 0.85,
+    reason: "Algo parado para a empresa é crítico.",
+  };
+  const anaCookie = () => sessionCookieFor({ role: "employee", ...ana });
+  /** A new message of hers, with the id the chat gives it. */
+  const post = async (text: string, id = `msg-${randomUUID()}`) => request("/api/chat", { method: "POST", body: { id, text }, cookie: await anaCookie() });
+  const messagesOf = (deps: TestDeps, conversationId: string) =>
+    deps.db.select().from(messages).where(eq(messages.conversationId, conversationId)).orderBy(asc(messages.createdAt));
+  const pontoDraft = {
+    operation: "create",
+    title: "Sistema de ponto fora do ar para toda a empresa",
+    description: "O sistema de ponto caiu para toda a empresa e ninguém consegue registrar o horário desde hoje de manhã.",
+    category: "software",
+    subcategory: "Ponto",
+    impact: "stopped",
+    urgency: "none",
+    affected: "company",
+  };
+  const line = "O caso é crítico porque está parado para a empresa. Encaminhei para o Suporte N2, e um analista vai falar com você hoje, até 11:00.";
+  const recorded = { toolCalls: [{ toolName: "recordDecision", input: decision }] };
+  const draftThenLine = (input: object = pontoDraft) => [recorded, { toolCalls: [{ toolName: "draftTicket", input }] }, { text: line }];
+  const conversationRow = async (deps: TestDeps) => {
+    const [row] = await deps.db.select().from(conversations).where(eq(conversations.employeeId, ana.id));
+    return row;
+  };
+
+  it("transfers it to N2 right after the reply, with the case as the summary and the wait the reply told her", async () => {
+    const deps = await testDeps({ model: scriptedModel(draftThenLine()) });
+    const chunks = await readStream(await chat(await post("O sistema de ponto caiu para toda a empresa"), deps));
+    await deps.settled();
+
+    expect(await conversationRow(deps)).toMatchObject({
+      state: "waiting_for_analyst",
+      targetLevel: "N2",
+      transferReason: "critical",
+      transferSummary: `${pontoDraft.title}. ${pontoDraft.description}`,
+      transferConfidence: decision.confidence,
+      ticketId: null,
+      waitUntil: new Date("2026-10-26T14:00:00.000Z"),
+    });
+    // It streamed as with the agent: the transfer came after the reply, and the chat reads it again then.
+    expect(chunks[0]).toMatchObject({ data: { state: "with_agent" } });
+    const output = chunks.find((chunk) => chunk.type === "tool-output-available" && (chunk.output as { draft?: unknown }).draft);
+    expect(output).toMatchObject({ output: { dueText: "hoje, até 11:00" } });
+    const saved = await messagesOf(deps, (await conversationRow(deps))!.id);
+    expect(saved.map(({ author }) => author)).toEqual(["employee", "agent", "system"]);
+    expect(saved.at(-1)?.parts).toEqual([{ type: "data-note", data: { event: "transferred", level: "N2", at: NOW.toISOString() } }]);
+  });
+
+  it("keeps the card, which she can still confirm with the conversation waiting for the analyst", async () => {
+    const deps = await testDeps({ model: scriptedModel(draftThenLine()) });
+    await readStream(await chat(await post("O sistema de ponto caiu para toda a empresa"), deps));
+    await deps.settled();
+    const [draft] = await deps.db.select().from(drafts);
+    expect(draft).toMatchObject({ status: "pending", priority: "critical" });
+
+    const confirmed = await confirmDraftHandler(request(`/api/drafts/${draft!.id}/confirm`, { method: "POST", cookie: await anaCookie() }), deps, draft!.id);
+
+    expect(await confirmed.json()).toMatchObject({ status: "confirmed", priority: "critical" });
+    expect(await conversationRow(deps)).toMatchObject({ state: "waiting_for_analyst", targetLevel: "N2" });
+  });
+
+  it("does not ask the model for anything but its sentence once the case is drafted, without a second transfer", async () => {
+    const model = scriptedModel(draftThenLine());
+    const deps = await testDeps({ model });
+    await readStream(await chat(await post("O sistema de ponto caiu para toda a empresa"), deps));
+    await deps.settled();
+
+    expect((model.calls[2]!.tools ?? []).map((tool) => tool.name)).toEqual(["updateWorkingMemory"]);
+    const notes = (await messagesOf(deps, (await conversationRow(deps))!.id)).filter(({ author }) => author === "system");
+    expect(notes).toHaveLength(1);
+  });
+
+  it("transfers it even when the draft came in the last step the reply had, with nothing written", async () => {
+    const list = { toolCalls: [{ toolName: "listMyTickets", input: { scope: "open" } }] };
+    const search = { toolCalls: [{ toolName: "searchArticles", input: { query: "sistema de ponto" } }] };
+    const model = scriptedModel([recorded, list, search, list, { toolCalls: [{ toolName: "draftTicket", input: pontoDraft }] }]);
+    const deps = await testDeps({ model });
+    await readStream(await chat(await post("O sistema de ponto caiu para toda a empresa"), deps));
+    await deps.settled();
+
+    expect(model.calls).toHaveLength(5);
+    expect(await conversationRow(deps)).toMatchObject({ state: "waiting_for_analyst", targetLevel: "N2", transferReason: "critical" });
+  });
+
+  it("fits a long case in the summary of the analyst", async () => {
+    const deps = await testDeps({ model: scriptedModel(draftThenLine({ ...pontoDraft, description: `O sistema de ponto caiu. ${"Ninguém registra o horário. ".repeat(30)}` })) });
+    await readStream(await chat(await post("O sistema de ponto caiu para toda a empresa"), deps));
+    await deps.settled();
+
+    const summary = (await conversationRow(deps))?.transferSummary;
+    expect(summary).toHaveLength(MAX_TRANSFER_SUMMARY);
+    expect(summary?.endsWith("…")).toBe(true);
+  });
+
+  it("leaves a case that is not critical with the agent, waiting for her to confirm", async () => {
+    const deps = await testDeps({ model: scriptedModel(draftThenLine({ ...pontoDraft, affected: "only_me" })) });
+    await readStream(await chat(await post("O sistema de ponto caiu para mim"), deps));
+    await deps.settled();
+
+    expect(await conversationRow(deps)).toMatchObject({ state: "with_agent", transferReason: null });
+  });
+
+  it("moves nothing when the reply failed after the draft, which is discarded for her to try again", async () => {
+    const deps = await testDeps({ model: scriptedModel([recorded, { toolCalls: [{ toolName: "draftTicket", input: pontoDraft }] }, new Error("overloaded")]) });
+    await readStream(await chat(await post("O sistema de ponto caiu para toda a empresa"), deps));
+    await deps.settled();
+
+    expect(await conversationRow(deps)).toMatchObject({ state: "with_agent", transferReason: null });
+    expect((await deps.db.select({ status: drafts.status }).from(drafts)).map(({ status }) => status)).toEqual(["cancelled"]);
+  });
+
+  it("saves the reply and the transfer as one fact: neither when either fails, and both on the retry", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const deps = await testDeps({ model: scriptedModel([...draftThenLine(), ...draftThenLine()]) });
+    // The real database refuses the note of the transfer, the last statement of the batch.
+    await deps.db.run(sql`create trigger no_note before insert on messages when new.author = 'system' begin select raise(abort, 'database down'); end`);
+    const text = "O sistema de ponto caiu para toda a empresa";
+
+    await expect(readStream(await chat(await post(text, "msg-ana-1"), deps))).rejects.toThrow("The agent reply was not saved");
+    await Promise.allSettled([deps.settled()]);
+
+    const failed = await conversationRow(deps);
+    expect(failed).toMatchObject({ state: "with_agent", transferReason: null, firstResponseAt: null });
+    // No reply says "Encaminhei" without the transfer, and no card is left without a reply.
+    expect((await messagesOf(deps, failed!.id)).map(({ author }) => author)).toEqual(["employee"]);
+    expect((await deps.db.select({ status: drafts.status }).from(drafts)).map(({ status }) => status)).toEqual(["cancelled"]);
+
+    await deps.db.run(sql`drop trigger no_note`);
+    const again = await chat(await post(text, "msg-ana-1"), deps);
+    expect(again.status).toBe(200);
+    await readStream(again);
+    await deps.settled();
+
+    const row = await conversationRow(deps);
+    expect(row).toMatchObject({ state: "waiting_for_analyst", targetLevel: "N2", transferReason: "critical" });
+    expect((await messagesOf(deps, row!.id)).map(({ author }) => author)).toEqual(["employee", "agent", "system"]);
+    expect((await deps.db.select({ status: drafts.status }).from(drafts)).map(({ status }) => status).sort()).toEqual(["cancelled", "pending"]);
+    log.mockRestore();
+  });
+
+  it("leaves it with the analyst who assumed it during the reply, without a log", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const deps = await testDeps({ model: scriptedModel(draftThenLine()) });
+    // The analyst assumes while the tool looks for duplicates.
+    vi.spyOn(deps.ticketService, "listCandidates").mockImplementationOnce(async () => {
+      await deps.db.update(conversations).set({ state: "with_analyst", analystId: rafael.id }).where(eq(conversations.employeeId, ana.id));
+      return { ok: true, data: [] };
+    });
+    await readStream(await chat(await post("O sistema de ponto caiu para toda a empresa"), deps));
+    await deps.settled();
+
+    const row = await conversationRow(deps);
+    expect(row).toMatchObject({ state: "with_analyst", analystId: rafael.id, transferReason: null });
+    // The reply is saved as any other, and no note says it was transferred.
+    expect((await messagesOf(deps, row!.id)).map(({ author }) => author)).toEqual(["employee", "agent"]);
+    expect(log).not.toHaveBeenCalled();
+    log.mockRestore();
+  });
+});
+
+describe("the ticket she confirms once an analyst has the case", () => {
+  const anaCookie = () => sessionCookieFor({ role: "employee", ...ana });
+  const rafaelCookie = () => sessionCookieFor({ role: "analyst", ...rafael });
+  const decision = { understanding: "Algo parou", action: "Montar o rascunho", confidence: 0.85, reason: "Precisa de um chamado." };
+  const pontoDraft = {
+    operation: "create",
+    title: "Sistema de ponto fora do ar para toda a empresa",
+    description: "O sistema de ponto caiu para toda a empresa e ninguém consegue registrar o horário desde hoje de manhã.",
+    category: "software",
+    subcategory: "Ponto",
+    impact: "stopped",
+    urgency: "none",
+    affected: "company",
+  };
+  const script = (input: object = pontoDraft) => [
+    { toolCalls: [{ toolName: "recordDecision", input: decision }] },
+    { toolCalls: [{ toolName: "draftTicket", input }] },
+    { text: "Confira o rascunho:" },
+  ];
+  /** Ana's reply with the draft, in deps whose service records its writes. */
+  async function drafted(input?: object) {
+    const ticketService = fakeTicketService();
+    const deps = await testDeps({ model: scriptedModel(script(input)), ticketService });
+    const body = { id: `msg-${randomUUID()}`, text: "O sistema de ponto caiu para toda a empresa" };
+    await readStream(await chat(request("/api/chat", { method: "POST", body, cookie: await anaCookie() }), deps));
+    await deps.settled();
+    const [draft] = await deps.db.select().from(drafts);
+    return { deps, ticketService, draft: draft!, id: draft!.conversationId };
+  }
+  const confirm = async (deps: TestDeps, draftId: string) => confirmDraftHandler(request(`/api/drafts/${draftId}/confirm`, { method: "POST", cookie: await anaCookie() }), deps, draftId);
+  const assume = async (deps: TestDeps, id: string) => assumeHandler(request("/x", { method: "POST", cookie: await rafaelCookie() }), deps, id);
+  const answer = async (deps: TestDeps, id: string) => {
+    await messageHandler(request("/x", { method: "POST", body: { id: `a-${randomUUID()}`, text: "Estou olhando." }, cookie: await rafaelCookie() }), deps, id);
+    await deps.settled();
+  };
+  const rowOf = async (deps: TestDeps, id: string) => (await deps.db.select().from(conversations).where(eq(conversations.id, id)))[0];
+  const paths = ({ writes }: FakeTicketService) => writes.map(({ path }) => path);
+
+  it("links it while she waits, so the analyst who assumes marks it and his answer restarts its deadline", async () => {
+    const { deps, ticketService, draft, id } = await drafted();
+    expect(await rowOf(deps, id)).toMatchObject({ state: "waiting_for_analyst", ticketId: null });
+
+    const confirmed = (await (await confirm(deps, draft.id)).json()) as { ticketId: string };
+
+    expect(confirmed.ticketId).toBe("INC-20320");
+    expect(await rowOf(deps, id)).toMatchObject({ state: "waiting_for_analyst", ticketId: "INC-20320" });
+    // Nobody to mark it for yet.
+    expect(paths(ticketService)).toEqual(["/tickets"]);
+
+    await assume(deps, id);
+    await answer(deps, id);
+    expect(paths(ticketService)).toEqual(["/tickets", "/tickets/INC-20320/assign", "/tickets/INC-20320/answer"]);
+  });
+
+  it("marks it now when the analyst assumed first, under a key of its own, since the draft is the key of the creation", async () => {
+    const { deps, ticketService, draft, id } = await drafted();
+    await assume(deps, id);
+
+    await confirm(deps, draft.id);
+
+    expect(await rowOf(deps, id)).toMatchObject({ state: "with_analyst", ticketId: "INC-20320" });
+    const [created, assigned] = ticketService.writes;
+    expect(created).toMatchObject({ path: "/tickets", key: draft.id });
+    expect(assigned).toMatchObject({ path: "/tickets/INC-20320/assign", key: `assign-${draft.id}`, body: { employeeId: ana.id, analystId: rafael.id } });
+
+    await answer(deps, id);
+    expect(paths(ticketService)).toEqual(["/tickets", "/tickets/INC-20320/assign", "/tickets/INC-20320/answer"]);
+  });
+
+  it("marks it once when she confirms again", async () => {
+    const { deps, ticketService, draft, id } = await drafted();
+    await assume(deps, id);
+    await confirm(deps, draft.id);
+    await confirm(deps, draft.id);
+    expect(paths(ticketService).filter((path) => path.endsWith("/assign"))).toHaveLength(1);
+  });
+
+  it("links it whatever the transfer was for", async () => {
+    const { deps, draft, id } = await drafted({ ...pontoDraft, affected: "only_me" });
+    expect(await rowOf(deps, id)).toMatchObject({ state: "with_agent" });
+    await deps.db.update(conversations).set({ state: "waiting_for_analyst", targetLevel: "N1", transferReason: "employee_request" }).where(eq(conversations.id, id));
+
+    await confirm(deps, draft.id);
+
+    expect(await rowOf(deps, id)).toMatchObject({ state: "waiting_for_analyst", ticketId: "INC-20320" });
+  });
+
+  it("links nothing while the agent has the conversation", async () => {
+    const { deps, ticketService, draft, id } = await drafted({ ...pontoDraft, affected: "only_me" });
+    await confirm(deps, draft.id);
+    expect(await rowOf(deps, id)).toMatchObject({ state: "with_agent", ticketId: null });
+    expect(paths(ticketService)).toEqual(["/tickets"]);
+  });
+
+  it("keeps the ticket the conversation already has", async () => {
+    const { deps, ticketService, draft, id } = await drafted();
+    await deps.db.update(conversations).set({ ticketId: "INC-20311", analystId: rafael.id, state: "with_analyst" }).where(eq(conversations.id, id));
+
+    await confirm(deps, draft.id);
+
+    expect(await rowOf(deps, id)).toMatchObject({ ticketId: "INC-20311" });
+    expect(paths(ticketService)).toEqual(["/tickets"]);
+  });
+
+  it("does not take a follow-up of another ticket as the ticket of the case", async () => {
+    const { deps, draft, id } = await drafted({ operation: "update", ticketId: "INC-20311", description: "O notebook agora também desliga sozinho." });
+    await deps.db.update(conversations).set({ state: "waiting_for_analyst", targetLevel: "N1" }).where(eq(conversations.id, id));
+
+    await confirm(deps, draft.id);
+
+    expect(await rowOf(deps, id)).toMatchObject({ ticketId: null });
+  });
+
+  it("keeps the link and answers the draft when marking it fails, which only costs the \"Em atendimento\"", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { deps, ticketService, draft, id } = await drafted();
+    await assume(deps, id);
+    vi.spyOn(ticketService, "assignTicket").mockResolvedValueOnce({ ok: false, error: { code: "unavailable", message: "Ticket service is unavailable" } });
+
+    const confirmed = await confirm(deps, draft.id);
+
+    expect(await confirmed.json()).toMatchObject({ status: "confirmed" });
+    expect(await rowOf(deps, id)).toMatchObject({ ticketId: "INC-20320" });
+    expect(log).toHaveBeenCalledWith("ticket not assigned", { ticketId: "INC-20320", error: "unavailable" });
+    log.mockRestore();
   });
 });

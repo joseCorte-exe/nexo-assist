@@ -138,6 +138,10 @@ test("Rafael hands her back to the agent, which answers her again", async ({ bro
   await expect(ana.getByRole("separator", { name: /Rafael Lima devolveu a conversa ao Nexo/ })).toBeVisible({ timeout: 10_000 });
   await ask(ana, "Qual o horário do service desk?");
   await expect(replies(ana).last()).not.toBeEmpty();
+  // The ticket was overdue when she asked for him: his answer restarted the deadline, and the agent says what he wrote.
+  await ask(ana, "INC-20311 · Notebook lento após atualização do Windows");
+  await expect(replies(ana).last()).toContainText("dentro do prazo");
+  await expect(replies(ana).last()).toContainText("Pode deixar o notebook ligado agora?");
 });
 
 test("after assuming again he closes the service, and her chat says it ended", async ({ browser }) => {
@@ -164,6 +168,49 @@ test("an analyst marks himself unavailable and available again", async ({ browse
   await expect(rafael.getByRole("switch", { name: "Disponível" })).toHaveAttribute("aria-checked", "false");
   await rafael.getByRole("switch", { name: "Disponível" }).click();
   await expect(rafael.getByRole("switch", { name: "Disponível" })).toHaveAttribute("aria-checked", "true");
+});
+
+test("something stopped for his team goes to N2 by itself: Bruno keeps the card, and Rafael gets the case with the summary", async ({ browser, request }) => {
+  const bruno = await (await browser.newContext()).newPage();
+  await signIn(bruno, "bruno.tavares@nexo.com.br", "/");
+  await ask(bruno, "O sistema de pedidos parou de funcionar desde cedo.");
+  await replies(bruno).last().getByRole("button", { name: "Minha equipe" }).click();
+  await idle(bruno);
+
+  await expect(replies(bruno).last()).toContainText("O caso é crítico porque está parado para mais gente. Encaminhei para o Suporte N2");
+  const draft = replies(bruno).last().getByRole("region").last();
+  await expect(draft).toContainText("Crítica");
+  await expect(bruno.getByRole("separator", { name: /Transferida para Suporte N2/ })).toBeVisible();
+  await expect(bruno.getByText("Suporte N2 · Pode escrever enquanto espera")).toBeVisible();
+  await expect(bruno.getByLabel("Mensagem para o analista")).toBeVisible();
+
+  const { rafael } = await people(browser);
+  await rafael.getByRole("button", { name: /^Para você/ }).click();
+  const line = row(rafael, "Bruno Tavares");
+  await expect(line).toContainText(/Transferida · contato em \d+ min/);
+  await line.click();
+  await conversation(rafael).getByRole("button", { name: "Ver o resumo do agent" }).click();
+  // The title of the draft opens the summary: only the summary writes it.
+  await expect(conversation(rafael)).toContainText("Sistema de pedidos parou de funcionar desde cedo.");
+
+  // Rafael assumes before Bruno confirms: the ticket is still his to confirm, and it becomes the ticket of the case.
+  await conversation(rafael).getByRole("button", { name: "Assumir atendimento" }).click();
+  await expect(conversation(rafael).getByLabel("Mensagem para Bruno")).toBeEnabled();
+  await draft.getByRole("button", { name: "Confirmar" }).click();
+  await expect(draft).toContainText(/Chamado INC-\d{5} criado\./);
+  const ticketId = (await draft.textContent())?.match(/INC-\d{5}/)?.[0];
+
+  // His answer is the answer of IT on that ticket, in the ticket-service itself: the 1 hour restarts from it.
+  const write = conversation(rafael).getByLabel("Mensagem para Bruno");
+  await write.fill("Estou olhando o sistema de pedidos.");
+  await write.press("Enter");
+  await expect
+    .poll(async () => {
+      const response = await request.get(`${e2eEnv.TICKET_SERVICE_URL}/tickets/${ticketId}?employeeId=emp-bruno`, { headers: { "x-service-secret": e2eEnv.TICKET_SERVICE_SECRET } });
+      const ticket = (await response.json()) as { status: string; assignedTo: string | null; lastItResponseAt: string | null };
+      return { status: ticket.status, assignedTo: ticket.assignedTo, answered: ticket.lastItResponseAt !== null };
+    }, { timeout: 10_000 })
+    .toEqual({ status: "assigned", assignedTo: "analyst-rafael", answered: true });
 });
 
 test("an employee is kept out of the console", async ({ browser }) => {

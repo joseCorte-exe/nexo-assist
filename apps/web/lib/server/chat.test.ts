@@ -4,15 +4,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createMemory, createNexoAgent, simulatedModel } from "@nexo/agent";
 import { scriptedModel } from "@nexo/agent/testing";
-import { and, eq, ne } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
+import { localDay } from "@nexo/shared";
+import { and, eq, ne, sql } from "drizzle-orm";
+import { describe, expect, it, vi } from "vitest";
 import { createDb } from "@/db";
 import { migrateDb } from "@/db/migrate";
-import { conversations, decisions, drafts, messages } from "@/db/schema";
+import { conversations, decisions, drafts, messages, usageCounters } from "@/db/schema";
 import { seed } from "@/db/seed";
 import { chat } from "./chat";
-import { loadConversation } from "./conversation";
+import { conversationHandler, loadConversation } from "./conversation";
 import { createDraftStore } from "./drafts";
+import { presenceHandler } from "./presence";
+import { createResolutionStore } from "./resolutions";
 import { createTransferStore } from "./transfers";
 import {
   ana,
@@ -294,7 +297,7 @@ describe("POST /api/chat", () => {
     expect(model.calls).toHaveLength(3);
   });
 
-  it("refuses the id of a message of another conversation, without answering or counting", async () => {
+  it("refuses the id of a message of another conversation, without answering, counting or opening one", async () => {
     // Bruno's first message in the sample data.
     const model = scriptedModel(vpnScript());
     const deps = await testDeps({ agent: testAgent(model) });
@@ -303,7 +306,7 @@ describe("POST /api/chat", () => {
     expect(response.status).toBe(409);
     expect((await response.json()).error.code).toBe("message_conflict");
     expect(model.calls).toHaveLength(0);
-    expect((await anaConversation(deps))?.messageCount).toBe(0);
+    expect(await anaConversation(deps)).toBeUndefined();
   });
 
   it("ends the stream with a short error and saves nothing of the agent when the model fails", async () => {
@@ -480,6 +483,7 @@ describe("POST /api/chat under concurrent messages", () => {
         ticketService,
         drafts: createDraftStore(db),
         transfers: createTransferStore({ db, memory }),
+        resolutions: createResolutionStore(db),
       }),
     });
     const employees = [
@@ -597,6 +601,68 @@ describe("POST /api/chat at the limit of 30 messages (feature 6)", () => {
     expect(row).toMatchObject({ state: "closed", outcome: "limit_reached", messageCount: 30 });
   });
 
+  it("says the reply that closed the conversation was already answered when its response was lost, opening no other", async () => {
+    const model = scriptedModel(plain());
+    const deps = await testDeps({ agent: testAgent(model) });
+    await conversationAt(deps, { count: 29, lastReply: [{ type: "text", text: "Pronto." }] });
+    const message = { id: "msg-ana-30", text: "Valeu, era isso" };
+    await readStream(await chat(await post(message), deps));
+    await deps.settled();
+    const calls = model.calls.length;
+
+    const again = await chat(await post(message), deps);
+
+    expect(again.status).toBe(409);
+    expect((await again.json()).error.code).toBe("already_answered");
+    expect(model.calls).toHaveLength(calls);
+    expect(await anaConversation(deps)).toBeUndefined();
+    // What the chat reads then, and a reload: how the conversation ended, with her message and the reply.
+    const { conversation, messages: shown } = await loadConversation(deps, ana.id);
+    expect(conversation).toMatchObject({ id: "conv-ana", state: "closed" });
+    expect(shown.map(({ id }) => id)).toContain(message.id);
+  });
+
+  it("says the same after she started another conversation, which the message does not touch", async () => {
+    const deps = await testDeps({ agent: testAgent(scriptedModel([...plain(), ...plain()])) });
+    await conversationAt(deps, { count: 29, lastReply: [{ type: "text", text: "Pronto." }] });
+    const message = { id: "msg-ana-30", text: "Valeu, era isso" };
+    await readStream(await chat(await post(message), deps));
+    await deps.settled();
+    deps.now = () => new Date(NOW.getTime() + 60_000);
+    await readStream(await chat(await say("Outra coisa: a impressora"), deps));
+    await deps.settled();
+
+    const again = await chat(await post(message), deps);
+
+    expect((await again.json()).error.code).toBe("already_answered");
+    expect(await anaConversation(deps)).toMatchObject({ messageCount: 1 });
+  });
+
+  it("sends the chat to the conversation an analyst closed with her message still unanswered, so it never loops on it", async () => {
+    const deps = await testDeps({ agent: testAgent(scriptedModel([])) });
+    await conversationAt(deps, { count: 3, lastReply: [{ type: "text", text: "Pronto." }], state: "with_analyst" });
+    const message = { id: "msg-ana-4", text: "Mais uma coisa" };
+    await readStream(await chat(await post(message), deps));
+    await deps.db.update(conversations).set({ state: "closed", outcome: "closed_by_analyst" }).where(eq(conversations.id, "conv-ana"));
+
+    const again = await chat(await post(message), deps);
+
+    expect((await again.json()).error.code).toBe("already_answered");
+    expect(await anaConversation(deps)).toBeUndefined();
+  });
+
+  it("refuses another text under the id of a message of a conversation that ended, opening no other", async () => {
+    const deps = await testDeps({ agent: testAgent(scriptedModel(plain())) });
+    await conversationAt(deps, { count: 29, lastReply: [{ type: "text", text: "Pronto." }] });
+    await readStream(await chat(await post({ id: "msg-ana-30", text: "Valeu, era isso" }), deps));
+    await deps.settled();
+
+    const response = await chat(await post({ id: "msg-ana-30", text: "Outra coisa" }), deps);
+
+    expect((await response.json()).error.code).toBe("message_conflict");
+    expect(await anaConversation(deps)).toBeUndefined();
+  });
+
   it("notes the limit once when she reaches it while an analyst has her, and keeps her writing to the analyst", async () => {
     const model = scriptedModel([]);
     const deps = await testDeps({ agent: testAgent(model) });
@@ -609,6 +675,280 @@ describe("POST /api/chat at the limit of 30 messages (feature 6)", () => {
     expect(thirtyFirst[1]).toMatchObject({ data: { state: "with_analyst", messageCount: 31, limitReached: true } });
     expect(model.calls).toHaveLength(0);
     expect(await limitNotes(deps, "conv-ana")).toHaveLength(1);
+  });
+});
+
+describe("POST /api/chat and the ceilings of the day", () => {
+  const usage = async (deps: TestDeps) => Object.fromEntries((await deps.db.select().from(usageCounters)).map(({ key, count }) => [key, count]));
+  const today = `global:${localDay(NOW)}`;
+  const carla = () => sessionCookieFor({ role: "employee", id: "emp-carla", name: "Carla Mendes", email: "carla.mendes@nexo.com.br" });
+
+  it("counts a message that calls the model under the IP the platform says, and the one for everyone", async () => {
+    const deps = await testDeps({ agent: testAgent(scriptedModel(vpnScript())) });
+    const sent = await say("Minha VPN dá erro 809");
+    sent.headers.set("x-forwarded-for", "200.1.2.3");
+    await readStream(await chat(sent, deps));
+    await deps.settled();
+
+    expect(await usage(deps)).toMatchObject({ [today]: 1, [`ip:200.1.2.3:${localDay(NOW)}`]: 1 });
+  });
+
+  it("saves the message past a ceiling, tells the chat and does not call the model", async () => {
+    const model = scriptedModel(vpnScript());
+    let now = NOW;
+    const deps = await testDeps({ agent: testAgent(model), usageLimits: { perIp: 300, global: 1 }, now: () => now });
+    await readStream(await chat(await say("Minha VPN dá erro 809"), deps));
+    await deps.settled();
+    const calls = model.calls.length;
+    now = new Date(NOW.getTime() + 60_000);
+
+    const chunks = await readStream(await chat(await post({ id: "msg-ana-2", text: "Ainda não voltou" }), deps));
+
+    expect(chunks.map((chunk) => chunk.type)).toEqual(["start", "data-conversation", "data-unavailable", "finish"]);
+    expect(chunks[1]).toMatchObject({ data: { messageCount: 2, state: "with_agent" } });
+    expect(model.calls).toHaveLength(calls);
+    const conversation = await anaConversation(deps);
+    const saved = await messagesOf(deps, conversation!.id);
+    expect(saved.at(-1)).toMatchObject({ id: "msg-ana-2", author: "employee", text: "Ainda não voltou" });
+    // Copied to the agent memory as she wrote it: the agent knows it when the demo comes back.
+    expect(deps.notes).toEqual(["Ainda não voltou"]);
+    expect((await usage(deps))[today]).toBe(1);
+  });
+
+  it("opens the conversation of a first message past a ceiling, so it is there after a reload", async () => {
+    const deps = await testDeps({ agent: testAgent(scriptedModel([])), usageLimits: { perIp: 300, global: 1 } });
+    await deps.db.insert(usageCounters).values({ key: today, count: 1 });
+
+    const chunks = await readStream(await chat(await post({ id: "msg-ana-1", text: "Oi" }), deps));
+
+    expect(chunks[1]).toMatchObject({ data: { messageCount: 1 } });
+    const loaded = await loadConversation(deps, ana.id);
+    expect(loaded.messages.map(({ id }) => id)).toEqual(["msg-ana-1"]);
+  });
+
+  it("counts a message once when it is refused, comes back the next day and is answered", async () => {
+    const model = scriptedModel(vpnScript());
+    let now = NOW;
+    const deps = await testDeps({ agent: testAgent(model), usageLimits: { perIp: 300, global: 1 }, now: () => now });
+    await deps.db.insert(usageCounters).values({ key: today, count: 1 });
+    const message = { id: "msg-ana-1", text: "Minha VPN dá erro 809" };
+
+    await readStream(await chat(await post(message), deps));
+    const again = await readStream(await chat(await post(message), deps));
+    expect(again.map((chunk) => chunk.type)).toContain("data-unavailable");
+    expect(model.calls).toHaveLength(0);
+
+    now = new Date(NOW.getTime() + 24 * 60 * 60 * 1000);
+    const nextDay = await readStream(await chat(await post(message), deps));
+    await deps.settled();
+    expect(nextDay.map((chunk) => chunk.type)).not.toContain("data-unavailable");
+    expect(model.calls.length).toBeGreaterThan(0);
+    expect(await usage(deps)).toMatchObject({ [today]: 1, [`global:${localDay(now)}`]: 1 });
+  });
+
+  it("does not count a message sent again after a reply that failed, and answers it even with the day used up", async () => {
+    const deps = await testDeps({
+      agent: testAgent(scriptedModel([new Error("overloaded"), ...vpnScript()])),
+      usageLimits: { perIp: 300, global: 1 },
+    });
+    const message = { id: "msg-ana-1", text: "Minha VPN dá erro 809" };
+    await readStream(await chat(await post(message), deps));
+    await deps.settled();
+    const again = await readStream(await chat(await post(message), deps));
+    await deps.settled();
+
+    expect(again.map((chunk) => chunk.type)).not.toContain("data-unavailable");
+    expect(again.map((chunk) => chunk.type)).toContain("text-delta");
+    expect((await usage(deps))[today]).toBe(1);
+  });
+
+  it("does not count a message sent again after it was answered, which is refused", async () => {
+    const deps = await testDeps({ agent: testAgent(scriptedModel(vpnScript())) });
+    const message = { id: "msg-ana-1", text: "Minha VPN dá erro 809" };
+    await readStream(await chat(await post(message), deps));
+    await deps.settled();
+    expect((await chat(await post(message), deps)).status).toBe(409);
+    expect((await usage(deps))[today]).toBe(1);
+  });
+
+  it("does not call the model again for a message replayed after its reply was saved, the same day or the next", async () => {
+    const model = scriptedModel(vpnScript());
+    let now = NOW;
+    const deps = await testDeps({ agent: testAgent(model), now: () => now });
+    const message = { id: "msg-ana-1", text: "Minha VPN dá erro 809" };
+    await readStream(await chat(await post(message), deps));
+    await deps.settled();
+    const calls = model.calls.length;
+
+    const sameDay = await chat(await post(message), deps);
+    now = new Date(NOW.getTime() + 24 * 60 * 60 * 1000);
+    const nextDay = await chat(await post(message), deps);
+
+    expect(sameDay.status).toBe(409);
+    expect(nextDay.status).toBe(409);
+    expect((await nextDay.json()).error.code).toBe("already_answered");
+    expect(model.calls).toHaveLength(calls);
+    expect(await usage(deps)).not.toHaveProperty(`global:${localDay(now)}`);
+  });
+
+  it("calls the model once for two turns at once under the same id", async () => {
+    const model = scriptedModel(vpnScript());
+    const deps = await testDeps({ agent: testAgent(model) });
+    const message = { id: "msg-ana-1", text: "Minha VPN dá erro 809" };
+
+    const [first, second] = await Promise.all([chat(await post(message), deps), chat(await post(message), deps)]);
+
+    const statuses = [first.status, second.status].sort();
+    expect(statuses).toEqual([200, 409]);
+    const refused = first.status === 409 ? first : second;
+    expect((await refused.json()).error.code).toBe("resend_refused");
+    await readStream(first.status === 200 ? first : second);
+    await deps.settled();
+    expect(model.calls).toHaveLength(vpnScript().length);
+    expect((await usage(deps))[today]).toBe(1);
+  });
+
+  it("refuses a message whose call is still running, though nothing of its reply was saved yet", async () => {
+    const model = scriptedModel(vpnScript());
+    const deps = await testDeps({ agent: testAgent(model) });
+    const message = { id: "msg-ana-1", text: "Minha VPN dá erro 809" };
+    const running = await chat(await post(message), deps);
+
+    const repeat = await chat(await post(message), deps);
+
+    expect(repeat.status).toBe(409);
+    await readStream(running);
+    await deps.settled();
+  });
+
+  it("stops retrying a message after three replies that failed, without counting them", async () => {
+    const overloaded = () => new Error("overloaded");
+    const model = scriptedModel([overloaded(), overloaded(), overloaded(), ...vpnScript()]);
+    const deps = await testDeps({ agent: testAgent(model) });
+    const message = { id: "msg-ana-1", text: "Minha VPN dá erro 809" };
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await readStream(await chat(await post(message), deps));
+      await deps.settled();
+    }
+    const calls = model.calls.length;
+
+    const fourth = await chat(await post(message), deps);
+
+    expect(fourth.status).toBe(409);
+    expect((await fourth.json()).error.code).toBe("resend_refused");
+    expect(model.calls).toHaveLength(calls);
+    expect((await usage(deps))[today]).toBe(1);
+  });
+
+  it("gives the call back when the reply could not be saved, so her retry is answered without counting again", async () => {
+    const deps = await testDeps({ agent: testAgent(scriptedModel([...vpnScript(), ...vpnScript()])) });
+    const message = { id: "msg-ana-1", text: "Minha VPN dá erro 809" };
+    const key = `message:${localDay(NOW)}:${message.id}`;
+    const response = await chat(await post(message), deps);
+    // The batch that saves the reply fails once: the first one after the message was saved.
+    const failing = vi.spyOn(deps.db, "batch").mockRejectedValueOnce(new Error("database down"));
+    await readStream(response).catch(() => []);
+    await Promise.allSettled([deps.settled()]);
+    expect(failing).toHaveBeenCalled();
+    failing.mockRestore();
+    expect((await usage(deps))[key]).toBe(-1);
+
+    const again = await readStream(await chat(await post(message), deps));
+    await deps.settled();
+
+    expect(again.map((chunk) => chunk.type)).toContain("text-delta");
+    expect((await usage(deps))[today]).toBe(1);
+  });
+
+  describe("when the reply cannot be saved", () => {
+    const vpnDraft = {
+      operation: "create",
+      title: "VPN não conecta no notebook — erro 809",
+      description: "Desde ontem o notebook (Windows 11) não conecta na VPN e mostra o erro 809. Precisa dela para a reunião das 14h.",
+      category: "network_vpn",
+      subcategory: "VPN",
+      impact: "stopped",
+      urgency: "same_day",
+      affected: "only_me",
+    };
+    const draftScript = () => [
+      { toolCalls: [{ toolName: "recordDecision", input: decision }] },
+      { toolCalls: [{ toolName: "draftTicket", input: vpnDraft }] },
+      { text: "Coloquei prioridade alta por causa da reunião. Confira antes de eu criar:" },
+    ];
+    const message = { id: "msg-ana-1", text: "Só eu. Tenho reunião às 14h." };
+    const callKey = `message:${localDay(NOW)}:${message.id}`;
+    /** The real database refuses the row: the decision of the reply goes in its batch, and nothing else writes it. */
+    const replyWontSave = (deps: TestDeps) =>
+      deps.db.run(sql`create trigger reply_wont_save before insert on decisions begin select raise(abort, 'database down'); end`);
+    const failedSave = async (deps: TestDeps) => {
+      await readStream(await chat(await post(message), deps)).catch(() => []);
+      await Promise.allSettled([deps.settled()]);
+    };
+    const draftStatuses = async (deps: TestDeps) => (await deps.db.select({ status: drafts.status }).from(drafts)).map(({ status }) => status);
+
+    it("gives the call back and discards the draft no card will show, so a retry starts clean", async () => {
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      const deps = await testDeps({ model: scriptedModel([...draftScript(), ...draftScript()]) });
+      await replyWontSave(deps);
+      await failedSave(deps);
+
+      expect((await usage(deps))[callKey]).toBe(-1);
+      expect(await draftStatuses(deps)).toEqual(["cancelled"]);
+
+      await deps.db.run(sql`drop trigger reply_wont_save`);
+      const again = await readStream(await chat(await post(message), deps));
+      await deps.settled();
+      expect(again.map((chunk) => chunk.type)).toContain("text-delta");
+      expect((await draftStatuses(deps)).sort()).toEqual(["cancelled", "pending"]);
+      log.mockRestore();
+    });
+
+    it("says why first, without what she wrote, and still does the rest when giving the call back fails too", async () => {
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      const deps = await testDeps({ model: scriptedModel(draftScript()) });
+      await replyWontSave(deps);
+      await deps.db.run(sql`create trigger release_fails before update on usage_counters when new.count < 0 begin select raise(abort, 'counters down'); end`);
+      await failedSave(deps);
+
+      const [first, ...rest] = log.mock.calls;
+      expect(first).toEqual(["agent reply not saved", { conversationId: (await anaConversation(deps))!.id, error: expect.any(String) }]);
+      expect(rest).toHaveLength(1);
+      expect(rest[0]?.[0]).toBe("agent reply not cleaned up");
+      expect(JSON.stringify(log.mock.calls)).not.toContain(message.text);
+      expect(await draftStatuses(deps)).toEqual(["cancelled"]);
+      log.mockRestore();
+    });
+
+    it("breaks the stream with an error that carries nothing of hers, so the chat offers the retry", async () => {
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      const deps = await testDeps({ model: scriptedModel(draftScript()) });
+      await replyWontSave(deps);
+
+      const response = await chat(await post(message), deps);
+
+      await expect(readStream(response)).rejects.toThrow("The agent reply was not saved");
+      await deps.settled();
+      log.mockRestore();
+    });
+  });
+
+  it("does not count a message for an analyst, and takes it past the ceilings as always", async () => {
+    const deps = await testDeps({ agent: testAgent(scriptedModel([])), usageLimits: { perIp: 1, global: 1 } });
+    await deps.db.insert(usageCounters).values({ key: today, count: 1 });
+
+    const chunks = await readStream(await chat(await post({ id: "msg-carla-9", text: "Alguma novidade?" }, await carla()), deps));
+
+    expect(chunks.map((chunk) => chunk.type)).toEqual(["start", "data-conversation", "finish"]);
+    expect(await usage(deps)).toEqual({ [today]: 1 });
+  });
+
+  it("does not count the reads of the polling, nor the beat of the chat", async () => {
+    const deps = await testDeps();
+    const cookie = await anaCookie();
+    await conversationHandler(request("/api/conversation", { cookie }), deps);
+    await presenceHandler(request("/api/conversation/presence", { method: "POST", body: { typing: false }, cookie }), deps);
+    expect(await usage(deps)).toEqual({});
   });
 });
 

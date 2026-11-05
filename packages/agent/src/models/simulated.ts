@@ -10,6 +10,7 @@ import {
   getTicketOutput,
   type Impact,
   listMyTicketsOutput,
+  markResolvedOutput,
   type OutOfScopeArea,
   PRIORITY_LABEL,
   redirectOutOfScopeOutput,
@@ -42,6 +43,10 @@ const CAME_BACK = /\b(de novo|novamente|voltou)\b/i;
 const WANTS_ANALYST = /\b(falar com (um |uma |o |a )?(analista|atendente|pessoa)|quero (um |uma )?(analista|atendente))\b/i;
 /** A case the simulated agent does not know what to do with, so the code makes it transfer (confidence under 0.6). */
 const UNSURE = /\b(fecha sozinh[oa]|macros?|tela azul)\b/i;
+
+/** She says it was solved. A "não" anywhere means it was not. */
+const SOLVED = /\b(resolveu|resolvido|deu certo|funcionou)\b/i;
+const NOT = /\bn[aã]o\b/i;
 
 /** The replies of the offer an overdue ticket gets, as the design shows them. */
 const OVERDUE_REPLIES = ["Falar com um analista", "Adicionar informação", "Não, obrigado"];
@@ -111,6 +116,7 @@ type Intent =
   | { kind: "offer_answer"; answer: (typeof OFFER_ANSWERS)[string] }
   | { kind: "transfer"; ticketId: string | null; about: string }
   | { kind: "unsure" }
+  | { kind: "solved" }
   | { kind: "ask_what_to_add"; ticketId: string | null }
   | { kind: "follow_up"; ticketId: string }
   | { kind: "draft"; problem: string; affected: Affected }
@@ -152,6 +158,7 @@ function intentOf(question: string, previous: PreviousTurn): Intent {
   if (UNSURE.test(question)) return { kind: "unsure" };
   const [ticketId] = findTicketIds(question);
   if (ticketId) return { kind: "ticket", ticketId };
+  if (SOLVED.test(question) && !NOT.test(question)) return { kind: "solved" };
   const area = AREAS.find(({ words }) => words.test(question));
   if (area) return { kind: "out_of_scope", area: area.area, name: area.name };
   if (GREETING.test(question)) return { kind: "greeting" };
@@ -238,6 +245,13 @@ function decide(intent: Intent, question: string): DecisionRecord {
         action: "Tentar entender a causa",
         confidence: 0.41,
         reason: "Pode ser o arquivo, as macros ou o próprio programa, e nenhum artigo cobre o caso.",
+      };
+    case "solved":
+      return {
+        understanding: "Disse que o problema foi resolvido",
+        action: "Encerrar a conversa como resolvida",
+        confidence: 0.95,
+        reason: "O funcionário confirmou que resolveu.",
       };
     case "ask_what_to_add":
       return {
@@ -425,9 +439,7 @@ function draftStep(intent: Extract<Intent, { kind: "draft" }>, answer: string, d
 
 /** Why RN-01 gave that priority, in the words of what the employee said. */
 function priorityReason(ticket: DraftTicketInput | undefined) {
-  if (ticket?.urgency === "same_day") return " por causa do compromisso de hoje";
-  if (ticket?.impact === "stopped" && ticket.affected !== "only_me") return " porque está parado para mais gente";
-  return "";
+  return ticket?.urgency === "same_day" ? " por causa do compromisso de hoje" : "";
 }
 
 /** The sentence above the card: what was decided and why, with the deadline the tool computed. */
@@ -441,6 +453,10 @@ function lineAboveTheCard(
     return afterDuplicate
       ? `Já existe o ${draft.ticketId} sobre isso, então vou acrescentar a informação a ele. Confira antes de eu enviar:`
       : `Confira o que vou acrescentar ao ${draft.ticketId} antes de eu enviar:`;
+  }
+  // The route transfers it once this reply is saved.
+  if (draft.priority === "critical") {
+    return `O caso é crítico porque está parado para mais gente. Encaminhei para o Suporte N2, e um analista vai falar com você ${dueText}. Confira o rascunho para registrar o chamado:`;
   }
   const priority = PRIORITY_LABEL[draft.priority].toLowerCase();
   return `Coloquei prioridade ${priority}${priorityReason(ticket)}: a resposta chega ${dueText}. Confira antes de eu criar:`;
@@ -505,6 +521,17 @@ function transferStep(intent: Extract<Intent, { kind: "transfer" | "unsure" }>, 
   };
 }
 
+/** Calls markResolved, then writes the closing sentence, or what is missing if the code refused. */
+function solvedStep(results: Map<string, unknown>): ModelStep {
+  if (!results.has("markResolved")) return { toolCalls: [{ toolName: "markResolved", input: {} }] };
+  const result = markResolvedOutput.safeParse(results.get("markResolved"));
+  if (!result.success) return { text: TICKETS_DOWN };
+  if (result.data.ok) return { text: "Que bom que resolveu. Se precisar de mais alguma coisa, é só escrever." };
+  return {
+    text: result.data.reason === "draft_pending" ? "Antes de encerrar, confirme ou cancele o rascunho no card." : "Um analista já está com a sua conversa e responde por aqui.",
+  };
+}
+
 function nextStep({ prompt }: LanguageModelV4CallOptions): ModelStep {
   const { question, results, drafts, previous } = readTurn(prompt);
   const intent = intentOf(question, previous);
@@ -524,6 +551,8 @@ function nextStep({ prompt }: LanguageModelV4CallOptions): ModelStep {
     case "transfer":
     case "unsure":
       return transferStep(intent, question, results);
+    case "solved":
+      return solvedStep(results);
     case "ask_what_to_add":
       return { text: intent.ticketId ? `O que você quer acrescentar ao ${intent.ticketId}?` : "A qual chamado você quer acrescentar uma informação?" };
     case "follow_up":

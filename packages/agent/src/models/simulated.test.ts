@@ -2,7 +2,7 @@ import { dueAt, type KbArticle, slaText, summarizeTurn, type Ticket, type Ticket
 import { describe, expect, it } from "vitest";
 import { createMemory, createNexoAgent, RESUME_NOTE, saveNote } from "../agent";
 import { replyOf } from "../testing";
-import type { DraftRecord, DraftStore, TicketDesk, TransferRecord, TransferStore } from "../tools";
+import type { DraftRecord, DraftStore, ResolutionStore, TicketDesk, TransferRecord, TransferStore } from "../tools";
 import { simulatedModel } from "./simulated";
 
 const vpn: KbArticle = {
@@ -101,6 +101,10 @@ const transfers: TransferStore = {
   },
 };
 
+/** What the store answers to markResolved, as the web would. */
+let resolutionAnswer: Awaited<ReturnType<ResolutionStore["check"]>> = null;
+const resolutions: ResolutionStore = { check: async () => resolutionAnswer };
+
 /** Every draft the agent saved, as the web would keep it. */
 const savedDrafts: DraftRecord[] = [];
 const drafts: DraftStore = {
@@ -121,7 +125,7 @@ const drafts: DraftStore = {
 };
 
 const newAgent = (center: TicketDesk) =>
-  createNexoAgent({ model: simulatedModel(), memory: createMemory({ url: ":memory:" }), ticketService: center, drafts, transfers, now: () => NOW });
+  createNexoAgent({ model: simulatedModel(), memory: createMemory({ url: ":memory:" }), ticketService: center, drafts, transfers, resolutions, now: () => NOW });
 
 async function reply(text: string, center = helpCenter(), agent = newAgent(center)) {
   const { text: answer, toolCalls } = await replyOf(agent, { conversationId: "conv-1", employeeId: "emp-ana", text });
@@ -238,6 +242,27 @@ describe("simulatedModel", () => {
     expect(savedTransfers).toHaveLength(1);
   });
 
+  it("ends the conversation when she says it was solved, with one sentence", async () => {
+    resolutionAnswer = null;
+    const result = await reply("resolveu, obrigado");
+    expect(result.decision.toolsUsed).toEqual(["recordDecision", "markResolved"]);
+    expect(result.text).toBe("Que bom que resolveu. Se precisar de mais alguma coisa, é só escrever.");
+  });
+
+  it("says what is missing when the code refuses to end it", async () => {
+    resolutionAnswer = "draft_pending";
+    expect((await reply("deu certo, valeu")).text).toBe("Antes de encerrar, confirme ou cancele o rascunho no card.");
+    resolutionAnswer = "not_with_agent";
+    expect((await reply("funcionou!")).text).toBe("Um analista já está com a sua conversa e responde por aqui.");
+    resolutionAnswer = null;
+  });
+
+  it("does not end it when she says it was not solved, or only thanks", async () => {
+    for (const text of ["não resolveu", "Não funcionou, continua igual", "obrigado"]) {
+      expect((await reply(text)).decision.toolsUsed).not.toContain("markResolved");
+    }
+  });
+
   it("does not know what to do with a case the help center does not cover, so the code makes it transfer", async () => {
     savedTransfers.length = 0;
     const result = await reply("Meu Excel fecha sozinho quando abro a planilha de campanhas com macros.");
@@ -291,7 +316,7 @@ describe("simulatedModel coming back another day (feature 6)", () => {
     savedTransfers.length = 0;
     const memory = createMemory({ url: ":memory:" });
     const center = helpCenter();
-    const agent = createNexoAgent({ model: simulatedModel(), memory, ticketService: center, drafts, transfers, now: () => NOW });
+    const agent = createNexoAgent({ model: simulatedModel(), memory, ticketService: center, drafts, transfers, resolutions, now: () => NOW });
     await reply("INC-20311 · Notebook lento após atualização do Windows", center, agent);
     await saveNote(memory, {
       id: "resume-1",
@@ -345,12 +370,12 @@ describe("simulatedModel opening and following up tickets (feature 4)", () => {
     expect(result.text).toBe("Coloquei prioridade alta por causa do compromisso de hoje: a resposta chega hoje, até 14:00. Confira antes de eu criar:");
   });
 
-  it("says why the priority is what it is: something stopped for the team is critical, with no meeting involved", async () => {
+  it("says something stopped for the team is critical and who it went to, with no meeting involved", async () => {
     const say = conversation();
     await say("O sistema de pedidos parou de funcionar desde cedo.");
     const result = await say("Minha equipe");
     expect(savedDrafts.at(-1)?.priority).toBe("critical");
-    expect(result.text).toBe("Coloquei prioridade crítica porque está parado para mais gente: a resposta chega hoje, até 11:00. Confira antes de eu criar:");
+    expect(result.text).toBe("O caso é crítico porque está parado para mais gente. Encaminhei para o Suporte N2, e um analista vai falar com você hoje, até 11:00. Confira o rascunho para registrar o chamado:");
   });
 
   it("follows up the open ticket about the same problem instead of opening another", async () => {

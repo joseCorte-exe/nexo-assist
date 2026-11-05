@@ -71,7 +71,7 @@ Por que essas escolhas:
          |                                         |
          v                                         v
  +--------------------- apps/web (Next.js) ------------------------+
- | auth, 30-message limit, agent-paused check,                     |
+ | auth, 30-message limit, usage limits, agent-paused check,       |
  | draft confirmation, console routes                              |
  +--+-------+----------------------------------------+-------------+
     |       | import                                 | Drizzle
@@ -149,7 +149,7 @@ Status do chamado e o que muda cada um (só o que o design mostra):
 | messages | id, conversation_id, author (employee, agent, analyst, system), text, parts (as partes da resposta do agent como saíram no stream: decisão, ferramentas, texto e, depois, cards, opções e rascunho, com um resumo dos ids para o agent lembrar no turno seguinte), created_at |
 | decisions | id, message_id, understanding, action, tools_used, confidence, reason |
 | drafts | id, conversation_id, operation (create, update, reopen), title, description, type, category, subcategory, impact, urgency, priority, affected, ticket_id, status (pending, confirmed, cancelled) |
-| usage_counters | key (ip + dia, ou global + dia), count (atualizada de forma atômica) |
+| usage_counters | key (ip + dia, global + dia, ou mensagem + dia), count (atualizada de forma atômica; na linha da mensagem, as chamadas ao modelo que ela fez naquele dia, negativas depois de uma resposta que falhou ou não foi salva, o que libera nova tentativa). Por decisão do José, a nova tentativa depois de uma resposta que falhou não conta nos tetos de IP e global. Uma chamada sem fim conhecido (o processo caiu) fica recusada só naquele dia |
 | mastra_* | tabelas da memória do Mastra |
 
 A sessão fica num cookie HttpOnly assinado, sem tabela.
@@ -166,7 +166,7 @@ A sessão fica num cookie HttpOnly assinado, sem tabela.
 
 O agent só responde em `with_agent`. Nos outros estados, a mensagem do funcionário é gravada e o LLM não é chamado. A checagem fica no código da rota. Se o analista assumir enquanto o agent ainda responde, a resposta é gravada, mas os efeitos dela só valem se a conversa continuar `with_agent` (`UPDATE ... WHERE state = 'with_agent'`).
 
-`outcome` registra como a conversa terminou: `resolved_by_agent` (o funcionário confirmou que resolveu), `closed_by_analyst` ou `limit_reached`. É daí que sai o selo "Resolvido pelo agent" do console.
+`outcome` registra como a conversa terminou: `resolved_by_agent` (o funcionário confirmou que resolveu), `closed_by_analyst` ou `limit_reached`. É daí que sai o selo "Resolvido pelo agent" do console. `resolved_by_agent` vem da ferramenta `markResolved`, que só confere se a conversa pode terminar. O código encerra logo depois de gravar a resposta, como no limite, e confere de novo: só em `with_agent` e sem rascunho esperando confirmação.
 
 Números da tela de login:
 - Tempo médio da primeira resposta: média de `first_response_at - created_at`, nas conversas dos últimos 30 dias.
@@ -198,7 +198,7 @@ Os contratos ficam em `packages/shared` como schemas Zod, inclusive o formato da
 | POST /api/me/reset-password | só devolve o aviso (também usado por "Esqueci minha senha") |
 | GET /api/stats/login | os três números da tela de login |
 | GET /api/conversation | conversa ativa do funcionário, com mensagens, decisões e estado. O chat consulta a cada 3 s enquanto a conversa não está com o agent, e também ao reabrir a página |
-| POST /api/chat | mensagem do funcionário, com o id que o chat deu a ela (reenviada com o mesmo id, é respondida sem contar de novo); responde em partes |
+| POST /api/chat | mensagem do funcionário, com o id que o chat deu a ela. Reenviada com o mesmo id depois de uma resposta que falhou, é respondida sem contar de novo (por decisão do José, também não conta nos tetos de uso), até três chamadas por dia. Enquanto a chamada roda, ou depois de três falhas, é recusada com 409 `resend_refused`, e o chat avisa sem oferecer nova tentativa. Reenviada depois de respondida, ou com a conversa já encerrada, é recusada com 409 `already_answered` sem abrir conversa nenhuma, e o chat lê a conversa como ficou. Responde em partes |
 | PATCH /api/drafts/:id | salva o que foi editado no card (título, descrição, categoria) |
 | POST /api/drafts/:id/confirm | cria, atualiza ou reabre o chamado no ticket-service, sem passar pelo LLM |
 | POST /api/drafts/:id/cancel | descarta o rascunho |
@@ -230,6 +230,7 @@ Toda rota exige o cabeçalho com o segredo compartilhado entre os dois projetos.
 | POST /tickets/:id/reopen | reabre se foi resolvido há até 7 dias |
 | POST /tickets/:id/transfer | marca a transferência com nível e resumo |
 | POST /tickets/:id/assign | analista assumiu (status Em atendimento) |
+| POST /tickets/:id/answer | resposta do analista no console: grava `last_it_response_at`, recalcula `due_at` e guarda o texto no histórico (RN-02). Recusa chamado resolvido. Exige `Idempotency-Key` = id da mensagem |
 | GET /kb/search?q= | busca na central de ajuda |
 | POST /admin/outage?seconds= | força uma janela de queda (protegida por chave de admin) |
 | POST /admin/reseed | recria os dados de exemplo com datas de hoje (protegida por chave de admin) |
@@ -250,22 +251,29 @@ Ferramentas:
 | getTicket | Detalhe e situação do prazo (vencido ou não) |
 | draftTicket | Monta o rascunho para criar, atualizar ou reabrir. Antes de criar, o código busca os chamados que podem ser o mesmo problema (abertos e resolvidos há até 7 dias) e exige que o rascunho diga por que não é duplicado. Depois de um rascunho, as ofertas saem da resposta: o card tem os próprios botões |
 | transferToAnalyst | Muda o estado da conversa, escolhe N1 ou N2 pela regra, calcula a espera e grava o resumo do caso |
+| markResolved | Para quando o funcionário disse que resolveu. Confere se a conversa pode terminar e recusa se um analista estiver com ela ou se houver rascunho esperando confirmação. Depois dela, o modelo só escreve a frase de encerramento. A conversa fecha com `outcome = resolved_by_agent` quando a resposta é gravada |
 | redirectOutOfScope | Responde a assuntos de RH, financeiro e facilities indicando o canal |
 | offerTicketChoice | Mostra a pergunta e a lista dos chamados do funcionário para ele escolher um. Encerra a resposta |
 | offerReplies | Mostra a pergunta e de 2 a 4 respostas rápidas. Encerra a resposta |
 
 Como o registro de decisão aparece em toda resposta: no primeiro passo, o `prepareStep` obriga o modelo a chamar `recordDecision`; nos passos seguintes, ele escolhe à vontade. A tela recebe essa chamada pelo próprio stream, como a parte `tool-recordDecision`, e com ela monta o detalhe da decisão. A linha de ações acima da resposta ("consultou seus chamados", "classificou a prioridade") sai das partes `tool-*`, com um mapa de nome para rótulo. No fim da resposta, o código completa `tools_used` com os passos que rodaram. Se por algum motivo o registro não vier, o código grava um registro reduzido, sem confiança. Se a confiança vier abaixo de 0,6 e não for caso de pedir informação, o passo seguinte obriga `transferToAnalyst`. A resposta é gravada com as mesmas partes do stream, em `messages.parts`, e ao recarregar a página `GET /api/conversation` devolve essas partes: a tela desenha a resposta do mesmo jeito que desenhou ao vivo. A tabela `decisions` guarda o registro para o console.
 
-Memória: cada conversa é uma thread do Mastra (`thread` = id da conversa, `resource` = id do funcionário), configurada com as últimas mensagens e com a memória de trabalho. Cinco coisas acontecem fora do agent e precisam ser copiadas para a thread pela API de memória: mensagem do analista, mensagem do funcionário enquanto o agent está pausado, confirmação de rascunho (com id e prazo do chamado criado), aviso de limite e notas de sistema (transferido, assumido, devolvido). Elas são gravadas primeiro na nossa tabela, depois na memória. A mensagem do agent é gravada no fim da resposta, mesmo que a aba seja fechada.
+Memória: cada conversa é uma thread do Mastra (`thread` = id da conversa, `resource` = id do funcionário), configurada com as últimas mensagens e com a memória de trabalho. Cinco coisas acontecem fora do agent e precisam ser copiadas para a thread pela API de memória: mensagem do analista, mensagem do funcionário enquanto o agent está pausado ou a demo está indisponível, confirmação de rascunho (com id e prazo do chamado criado), aviso de limite e notas de sistema (transferido, assumido, devolvido). Elas são gravadas primeiro na nossa tabela, depois na memória. A mensagem do agent é gravada no fim da resposta, mesmo que a aba seja fechada.
+
+Caso crítico: quando o `draftTicket` de um chamado novo sai com prioridade crítica, o modelo só escreve a frase dele, e o código transfere a conversa para o N2 no mesmo batch que grava a resposta, com o título e a descrição do rascunho como resumo e a espera que a resposta informou. Se o batch falhar, nem a resposta nem a transferência ficam, e o "Tentar de novo" refaz as duas. Se um analista assumiu durante a resposta, ele fica com a conversa e não sai nota. O card continua na tela; o chamado só existe depois de ela confirmar. Chamado vencido continua com a oferta de chamar um analista (tela 3).
+
+Chamado confirmado depois de uma transferência: quando ela confirma um chamado novo com a conversa esperando ou com um analista, e a conversa ainda não tem chamado, ele vira o chamado da conversa no mesmo batch da confirmação. Assim, assumir marca o chamado como Em atendimento e a resposta do analista reinicia o prazo (RN-02). Se o analista já assumiu, a confirmação marca o chamado na hora. Complemento e reabertura não ligam nada, porque falam de outro chamado.
 
 Regras que ficam em código e não no prompt:
 - a prioridade a partir do impacto e da urgência (RN-01);
+- a transferência do caso crítico novo;
 - o prazo e o vencido (RN-02);
 - a busca de candidatos a duplicado;
 - a janela de 7 dias para reabrir;
 - a privacidade (o id do funcionário vem da sessão);
 - a criação do chamado só depois do clique em Confirmar;
 - a escolha entre N1 e N2 e a espera da transferência;
+- encerrar como resolvida só em `with_agent` e sem rascunho esperando;
 - o limite de 30 mensagens e a pausa do agent.
 
 O modelo decide o que o funcionário quer, classifica o tipo e a categoria, identifica impacto e urgência, julga se um chamado parecido é o mesmo problema, pergunta o que falta e escreve a resposta.
@@ -283,7 +291,7 @@ RN-02, prazo: conta da abertura ou da última resposta da TI, o que for mais rec
 - A chave do LLM só existe no servidor, em variável de ambiente. Nada fica em `NEXT_PUBLIC_*`.
 - Sessão em cookie HttpOnly assinado. Toda rota confere o papel e, no caso do funcionário, só devolve os dados dele.
 - O ticket-service exige um segredo em toda rota, e as rotas de admin exigem outra chave.
-- Contra abuso no deploy (planejado, o teto por IP e o global ainda não estão ligados): o limite de 30 mensagens por conversa, um teto por IP por dia e um teto global por dia em `usage_counters` (ao estourar, aparece "demo indisponível"), além de `maxSteps`, `maxDuration` e limite de tokens explícitos, e um limite de gasto mensal num workspace da Anthropic separado para o projeto.
+- Contra abuso no deploy: o limite de 30 mensagens por conversa, um teto por IP por dia (`USAGE_LIMIT_PER_IP_PER_DAY`) e um teto global por dia (`USAGE_LIMIT_GLOBAL_PER_DAY`) em `usage_counters`, contados por dia de São Paulo só para a mensagem que vai chamar o modelo (ao estourar, a mensagem fica salva, o modelo não é chamado e aparece "demo indisponível"), além de `maxSteps`, `maxDuration` e limite de tokens explícitos, e um limite de gasto mensal num workspace da Anthropic separado para o projeto.
 
 ## 10. Fases e critérios de pronto
 

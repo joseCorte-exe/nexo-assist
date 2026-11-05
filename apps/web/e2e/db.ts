@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@libsql/client";
+import { localDay } from "@nexo/shared";
 
 // The conversations database of the end-to-end run, written directly only to set a scene that takes days or dozens of
 // messages to happen: a conversation left yesterday, or one a couple of messages from the limit. Everything after that
 // goes through the app.
 
-const db = createClient({ url: `file:${fileURLToPath(new URL("../.e2e/conversations.db", import.meta.url))}` });
+// A write waits for the server's lock on the file, as the server waits for this one (db/index.ts).
+const db = createClient({ url: `file:${fileURLToPath(new URL("../.e2e/conversations.db", import.meta.url))}`, timeout: 5_000 });
 
 const MINUTE = 60 * 1000;
 
@@ -55,6 +57,21 @@ export async function conversationWith(employeeId: string, { count, lastAt, topi
   }
   await db.batch(statements, "write");
   return id;
+}
+
+/** Uses up the day for everyone, or gives it back: the ceilings of this run are too high to reach by sending messages. */
+export async function setDayUsedUp(usedUp: boolean) {
+  const key = `global:${localDay(new Date())}`;
+  await db.execute(
+    usedUp
+      ? { sql: "insert into usage_counters (key, count) values (?, 1000000) on conflict (key) do update set count = 1000000", args: [key] }
+      : { sql: "delete from usage_counters where key = ?", args: [key] },
+  );
+}
+
+/** A call of this message that never told how it ended, as a server that died leaves it. */
+export async function leaveCallWithNoEnd(messageId: string) {
+  await db.execute({ sql: "insert into usage_counters (key, count) values (?, 1)", args: [`message:${localDay(new Date())}:${messageId}`] });
 }
 
 /**

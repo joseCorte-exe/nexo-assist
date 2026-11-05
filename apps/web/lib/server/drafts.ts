@@ -14,7 +14,7 @@ import {
   type Ticket,
   type TicketServiceResult,
 } from "@nexo/shared";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import type { Db } from "@/db";
 import { conversations, drafts, messages } from "@/db/schema";
@@ -100,12 +100,15 @@ const viewOf = (row: DraftRow) => NextResponse.json<DraftView>(toDraftView(row))
 
 type Action = "confirm" | "cancel" | "edit";
 
+/** A draft still waiting for her, which a confirmation can move: nothing may end the conversation as if it were not there. */
+export const WAITING_DRAFT: DraftRow["status"][] = ["pending", "confirming"];
+
 /**
  * The states each action of the card moves a draft from. A confirmation also leaves confirming, since confirming again
  * cannot duplicate anything; once it started, nothing else can.
  */
 const MOVES_FROM: Record<Action, DraftRow["status"][]> = {
-  confirm: ["pending", "confirming"],
+  confirm: WAITING_DRAFT,
   cancel: ["pending"],
   edit: ["pending"],
 };
@@ -142,12 +145,17 @@ type Settle = {
  * Moves the draft to its next state and notes it in the conversation in one batch, so a draft never changes without
  * its note; then copies the note to the agent memory. A draft that already left the states it moves from (two clicks,
  * two tabs) is answered as it is, and its note, under the same id, is never written twice.
+ *
+ * A new ticket she confirmed while an analyst has her case, or is on the way, becomes the ticket of that conversation in
+ * the same batch: assuming marks it, and the answers of the analyst restart its deadline (RN-02). With the analyst there
+ * already, nothing else will mark it, so it is marked here. The ticket exists either way, so that failure is only logged.
  */
 async function settle(deps: Deps, { draft, employeeId, from, event, set, note }: Settle) {
   const id = `note-${draft.id}-${event}`;
   const at = deps.now();
   const status = set.status ?? draft.status;
-  const [[row]] = await deps.db.batch([
+  const confirmedTicket = sql`select d.ticket_id from ${drafts} d where d.id = ${draft.id} and d.status = 'confirmed' and d.operation = 'create'`;
+  const [[row], , [linked]] = await deps.db.batch([
     deps.db
       .update(drafts)
       .set(set)
@@ -159,7 +167,24 @@ async function settle(deps: Deps, { draft, employeeId, from, event, set, note }:
       select ${id}, ${draft.conversationId}, 'system', ${note}, null, ${at.getTime()}
       where exists (select 1 from ${drafts} d where d.id = ${draft.id} and d.status = ${status})
       on conflict (id) do nothing`),
+    deps.db
+      .update(conversations)
+      .set({ ticketId: sql`(${confirmedTicket})` })
+      .where(
+        and(
+          eq(conversations.id, draft.conversationId),
+          isNull(conversations.ticketId),
+          inArray(conversations.state, ["waiting_for_analyst", "with_analyst"]),
+          sql`exists (${confirmedTicket})`,
+        ),
+      )
+      .returning({ ticketId: conversations.ticketId, analystId: conversations.analystId }),
   ]);
+  if (linked?.ticketId && linked.analystId) {
+    // The draft is the key of the creation: under the same key the service refuses this as another write.
+    const assigned = await deps.ticketService.assignTicket(linked.ticketId, { employeeId, analystId: linked.analystId }, `assign-${draft.id}`);
+    if (!assigned.ok) console.error("ticket not assigned", { ticketId: linked.ticketId, error: assigned.error.code });
+  }
   if (!row) {
     const [current] = await deps.db.select().from(drafts).where(eq(drafts.id, draft.id));
     return current ?? draft;

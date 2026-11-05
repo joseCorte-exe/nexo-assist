@@ -78,7 +78,7 @@ function draftStore(): DraftStore & { saved: DraftRecord[] } {
   };
 }
 
-const tools = (desk: TicketDesk, drafts: DraftStore = draftStore()) => createTools({ ticketService: desk, drafts, transfers: { transfer: unexpected }, now: () => NOW });
+const tools = (desk: TicketDesk, drafts: DraftStore = draftStore()) => createTools({ ticketService: desk, drafts, transfers: { transfer: unexpected }, resolutions: { check: unexpected }, now: () => NOW });
 
 // The tools run outside an agent here. Those of the tickets read the employee from the request context, which
 // the route fills with the session; the others need no context.
@@ -342,6 +342,29 @@ describe("getTicket", () => {
       ok: true,
       ticket: { overdue: false, assigneeName: "Juliana Costa", deadline: "5 dias úteis", daysSinceUpdate: 7, lastItUpdate: "Pedido aprovado pelo gestor. O monitor será enviado." },
     });
+  });
+
+  it("keeps what IT wrote last when the agent noted a transfer after it", async () => {
+    const transferred: TicketDetail = {
+      ...monitorDetail,
+      updates: [
+        ...monitorDetail.updates,
+        { author: "agent", text: "Transferido para o Suporte N1. Ana quer saber do monitor.", createdAt: new Date(NOW.getTime() - 1 * DAY).toISOString() },
+      ],
+    };
+    const { desk } = ticketDesk({ details: { "REQ-10442": transferred } });
+    const result = await runAs("emp-ana", tools(desk).getTicket, { ticketId: "REQ-10442" });
+    expect(result).toMatchObject({ ok: true, ticket: { lastItUpdate: "Pedido aprovado pelo gestor. O monitor será enviado." } });
+  });
+
+  it("has nothing IT wrote on a ticket with only the note of a transfer", async () => {
+    const transferred: TicketDetail = {
+      ...notebookDetail,
+      updates: [{ author: "agent", text: "Transferido para o Suporte N2. Notebook lento há 6 dias.", createdAt: NOW.toISOString() }],
+    };
+    const { desk } = ticketDesk({ details: { "INC-20311": transferred } });
+    const result = await runAs("emp-ana", tools(desk).getTicket, { ticketId: "INC-20311" });
+    expect(result).toMatchObject({ ok: true, ticket: { lastItUpdate: null } });
   });
 
   it("asks for the ticket as the employee of the session, so another person's ticket is not found", async () => {
