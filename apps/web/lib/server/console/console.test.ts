@@ -327,6 +327,20 @@ describe("assume, release and close", () => {
     expect(refused.body.error?.code).toBe("assumed_by_other");
   });
 
+  it("refuses to release a conversation the limit left with an analyst, and says so in the detail", async () => {
+    // Fábio is with Rafael in the sample data; he reaches the limit.
+    const deps = await testDeps();
+    await deps.db.update(conversations).set({ messageCount: 30, limitReachedAt: NOW }).where(eq(conversations.id, "conv-fabio"));
+    const refused = await act(deps, releaseHandler, "conv-fabio");
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toEqual({
+      code: "limit_reached",
+      message: "Esta conversa chegou ao limite de mensagens e não volta para o agent. Encerre quando terminar.",
+    });
+    const { body } = await act(deps, closeHandler, "conv-fabio");
+    expect(body.conversation).toMatchObject({ state: "closed", limitReached: true });
+  });
+
   it("closes an assumed conversation as closed by the analyst, without touching the ticket", async () => {
     const deps = await testDeps();
     const writesBefore = deps.ticketService.writes.length;
@@ -469,8 +483,10 @@ describe("the chat of the employee after the console acted", () => {
     const cookie = await anaCookie();
     const shown = await conversationHandler(request(`/api/conversation?conversationId=${conversation.id}`, { cookie }), deps);
     expect(await shown.json()).toMatchObject({ conversation: { id: conversation.id, state: "closed" } });
-    // Without the id, she has no active conversation: the next message starts a new one.
-    expect(await (await conversationHandler(request("/api/conversation", { cookie }), deps)).json()).toMatchObject({ conversation: null });
+    // Without the id too, as the last one that ended (feature 6): the next message starts a new one.
+    expect(await (await conversationHandler(request("/api/conversation", { cookie }), deps)).json()).toMatchObject({
+      conversation: { id: conversation.id, state: "closed" },
+    });
   });
 
   it("never shows somebody else's conversation by id", async () => {

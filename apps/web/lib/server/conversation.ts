@@ -1,5 +1,5 @@
 import type { ConversationResponse, ConversationView } from "@nexo/shared";
-import { and, asc, eq, isNotNull, ne, or } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, ne, or } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { conversations, messages } from "@/db/schema";
 import type { Deps } from "./deps";
@@ -19,6 +19,7 @@ export const viewColumns = {
   targetLevel: conversations.targetLevel,
   waitUntil: conversations.waitUntil,
   analystId: conversations.analystId,
+  limitReachedAt: conversations.limitReachedAt,
 };
 
 type ViewRow = { [Key in keyof typeof viewColumns]: (typeof conversations.$inferSelect)[Key] };
@@ -27,19 +28,24 @@ type ViewRow = { [Key in keyof typeof viewColumns]: (typeof conversations.$infer
  * The conversation as the chat shows it: who it waits for, until when, and who attends it, by the name and level the
  * directory has now. Only a conversation an analyst attends asks the directory; down, the chat says "o analista".
  */
-export async function toConversationView(deps: Pick<Deps, "directory">, { analystId, waitUntil, ...row }: ViewRow): Promise<ConversationView> {
+export async function toConversationView(
+  deps: Pick<Deps, "directory">,
+  { analystId, waitUntil, limitReachedAt, ...row }: ViewRow,
+): Promise<ConversationView> {
   const analyst = analystId ? (await deps.directory.analysts())?.get(analystId) : undefined;
   return {
     ...row,
     waitUntil: waitUntil?.toISOString() ?? null,
     analyst: analyst ? { name: analyst.name, level: analyst.level } : null,
+    limitReached: limitReachedAt !== null,
   };
 }
 
 /**
- * The conversation of the employee with its messages and drafts, in two round trips: the active one, or the one the chat
- * shows, by id, even closed, so the chat sees the analyst close it. Somebody else's conversation is never found. The chat
- * page and GET /api/conversation both read it from here.
+ * The conversation of the employee with its messages and drafts, in two round trips: the one the chat shows, by id, even
+ * closed, so the chat sees the analyst close it; otherwise her active one, or, with none, the last one that ended, so she
+ * reads how it ended until she starts another (feature 6). Somebody else's conversation is never found. The chat page and
+ * GET /api/conversation both read it from here.
  */
 export async function loadConversation(
   deps: Pick<Deps, "db" | "directory">,
@@ -50,11 +56,9 @@ export async function loadConversation(
   const [conversation] = await db
     .select(viewColumns)
     .from(conversations)
-    .where(
-      conversationId
-        ? and(eq(conversations.id, conversationId), eq(conversations.employeeId, employeeId))
-        : activeConversationOf(employeeId),
-    )
+    .where(conversationId ? and(eq(conversations.id, conversationId), eq(conversations.employeeId, employeeId)) : eq(conversations.employeeId, employeeId))
+    // The newest, on the index of her conversations by creation: one is only born when she has no active one.
+    .orderBy(desc(conversations.createdAt))
     .limit(1);
   if (!conversation) return { conversation: null, messages: [], drafts: [] };
 

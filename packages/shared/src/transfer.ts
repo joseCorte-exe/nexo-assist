@@ -7,8 +7,11 @@ import { dueAt, isOverdue } from "./sla";
 
 export const LEVEL_LABEL: Record<AnalystLevel, string> = { N1: "Suporte N1", N2: "Suporte N2" };
 
-/** What the model may ask for. Critical and overdue are only ever decided here, from the ticket or RN-01. */
-export type RequestedReason = Extract<TransferReason, "employee_request" | "agent_unsure">;
+/**
+ * What the model may ask for, plus the limit of messages, which the code asks for. Critical and overdue are only ever
+ * decided here, from the ticket or RN-01.
+ */
+export type RequestedReason = Extract<TransferReason, "employee_request" | "agent_unsure" | "message_limit">;
 
 export type TransferRoute = { level: AnalystLevel; reason: TransferReason; priority: Priority; waitUntil: Date };
 
@@ -24,13 +27,13 @@ export function routeTransfer({
   at,
 }: {
   requested: RequestedReason;
-  ticket: { priority: Priority; status: TicketStatus; dueAt: Date } | null;
+  ticket: { priority: Priority; status: TicketStatus; dueAt: string } | null;
   classification: { impact: Impact; urgency: Urgency; affected: Affected } | null;
   at: Date;
 }): TransferRoute {
   const priority = ticket?.priority ?? (classification ? priorityFor(classification) : "medium");
   const waitUntil = dueAt({ priority, createdAt: at, lastItResponseAt: null, reopenedAt: null });
   if (priority === "critical") return { level: "N2", reason: "critical", priority, waitUntil };
-  if (ticket && isOverdue(ticket, at)) return { level: "N2", reason: "overdue", priority, waitUntil };
+  if (ticket && isOverdue({ ...ticket, dueAt: new Date(ticket.dueAt) }, at)) return { level: "N2", reason: "overdue", priority, waitUntil };
   return { level: "N1", reason: requested, priority, waitUntil };
 }

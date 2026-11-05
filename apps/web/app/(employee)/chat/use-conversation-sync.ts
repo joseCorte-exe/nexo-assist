@@ -38,7 +38,7 @@ export function useConversationSync({
   /**
    * The one read of the conversation the chat makes. By default, the conversation on screen, even closed, merged with what
    * the chat has. serverWins is for a reply the network lost: the server is right about where she is, so it reads her
-   * active conversation, and its messages as saved replace the chat's. Answers whether the server answered.
+   * active conversation, or the last that ended, and its messages as saved replace the chat's. Answers whether the server answered.
    */
   const refresh = useCallback(
     async ({ serverWins = false }: { serverWins?: boolean } = {}) => {

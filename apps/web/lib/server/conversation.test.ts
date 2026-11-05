@@ -1,8 +1,8 @@
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
-import { messages } from "@/db/schema";
+import { conversations, messages } from "@/db/schema";
 import { conversationHandler, loadConversation } from "./conversation";
-import { ana, rafael, request, sessionCookieFor, testDeps } from "./test-deps";
+import { ana, NOW, rafael, request, sessionCookieFor, testDeps } from "./test-deps";
 
 const get = (cookie?: string) => request("/api/conversation", { cookie });
 
@@ -26,16 +26,18 @@ describe("loadConversation", () => {
     // Bruno is talking to the agent in the sample data.
     const deps = await testDeps();
     const view = await loadConversation(deps, "emp-bruno");
-    expect(view.conversation).toEqual({ id: "conv-bruno", state: "with_agent", messageCount: 1, targetLevel: null, waitUntil: null, analyst: null });
+    expect(view.conversation).toEqual({ id: "conv-bruno", state: "with_agent", messageCount: 1, targetLevel: null, waitUntil: null, analyst: null, limitReached: false });
     expect(view.messages).toEqual([
       {
         id: "conv-bruno-msg-1",
         role: "user",
+        metadata: { at: "2026-10-26T12:57:00.000Z" },
         parts: [{ type: "text", text: "Como está meu pedido da licença do Power BI?" }],
       },
       {
         id: "conv-bruno-msg-2",
         role: "assistant",
+        metadata: { at: "2026-10-26T12:57:08.000Z" },
         parts: [
           {
             type: "tool-recordDecision",
@@ -97,10 +99,31 @@ describe("loadConversation", () => {
     expect(roles).toEqual(["user", "assistant", "system"]);
   });
 
-  it("leaves out closed conversations", async () => {
-    // Elisa only has closed conversations.
+  it("without an active conversation, returns the last one that ended, so she reads how it ended", async () => {
+    // Elisa only has closed conversations; the newest ended 2 hours ago.
     const deps = await testDeps();
-    expect(await loadConversation(deps, "emp-elisa")).toEqual({ conversation: null, messages: [], drafts: [] });
+    const view = await loadConversation(deps, "emp-elisa");
+    expect(view.conversation).toMatchObject({ id: "conv-elisa", state: "closed", limitReached: false });
+    expect(view.messages.at(-1)?.parts).toEqual([{ type: "text", text: "Resolveu, obrigada!" }]);
+  });
+
+  it("prefers the active conversation to any that ended", async () => {
+    // Carla waits for an analyst and has three past conversations that ended.
+    const deps = await testDeps();
+    expect((await loadConversation(deps, "emp-carla")).conversation?.id).toBe("conv-carla");
+  });
+
+  it("says the limit applied to the conversation", async () => {
+    const deps = await testDeps();
+    await deps.db.update(conversations).set({ limitReachedAt: NOW, messageCount: 30 }).where(eq(conversations.id, "conv-carla"));
+    expect((await loadConversation(deps, "emp-carla")).conversation).toMatchObject({ messageCount: 30, limitReached: true });
+  });
+
+  it("dates every message, for the pills of each day", async () => {
+    const deps = await testDeps();
+    const { messages: shown } = await loadConversation(deps, "emp-carla");
+    const saved = await deps.db.select().from(messages).where(eq(messages.conversationId, "conv-carla")).orderBy(messages.createdAt);
+    expect(shown.map((message) => message.metadata)).toEqual(saved.map((row) => ({ at: row.createdAt.toISOString() })));
   });
 
   it("never returns the messages of another employee", async () => {

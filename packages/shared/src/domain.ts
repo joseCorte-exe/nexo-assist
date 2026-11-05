@@ -50,7 +50,8 @@ export type DraftOperation = z.infer<typeof draftOperation>;
 export const draftStatus = z.enum(["pending", "confirming", "confirmed", "cancelled", "superseded", "rejected"]);
 export type DraftStatus = z.infer<typeof draftStatus>;
 
-export const transferReason = z.enum(["employee_request", "critical", "overdue", "agent_unsure"]);
+/** message_limit: the code transferred it at the 30 messages, with something still pending (feature 6). */
+export const transferReason = z.enum(["employee_request", "critical", "overdue", "agent_unsure", "message_limit"]);
 export type TransferReason = z.infer<typeof transferReason>;
 
 /** Why the ticket-service refused to confirm a draft: the ticket changed between the draft and the click. */
@@ -58,5 +59,8 @@ export const draftRejection = z.enum(["ticket_not_found", "ticket_resolved", "ti
 export type DraftRejection = z.infer<typeof draftRejection>;
 
 /** What happened in a conversation outside the messages, as the system notes tell it (feature 5). */
-export const conversationEvent = z.enum(["transferred", "assumed", "released", "closed"]);
+/** The longest summary a transfer keeps, from the model, the code or the ticket-service. */
+export const MAX_TRANSFER_SUMMARY = 600;
+
+export const conversationEvent = z.enum(["transferred", "assumed", "released", "closed", "limit_reached"]);
 export type ConversationEvent = z.infer<typeof conversationEvent>;

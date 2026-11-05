@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { type NoteView, noteView, storedDecision } from "./chat";
+import { MESSAGE_LIMIT, type NoteView, noteView, storedDecision } from "./chat";
 import { draftView } from "./drafts";
 import {
   analystLevel,
@@ -57,6 +57,8 @@ export const consoleConversation = z.object({
   waitUntil: z.iso.datetime().nullable(),
   transferredAt: z.iso.datetime().nullable(),
   assumedAt: z.iso.datetime().nullable(),
+  /** The limit of messages applied: it does not go back to the agent. */
+  limitReached: z.boolean(),
   /** Who is attending, or who closed it. */
   analyst: analystSign.nullable(),
   lastActivityAt: z.iso.datetime(),
@@ -172,8 +174,9 @@ export function conversationTag(conversation: TagInput, viewerId: string, now: D
       const { transferConfidence: confidence } = conversation;
       return { tone: "warning", text: confidence === null ? "Agent pediu ajuda" : `Agent pediu ajuda · confiança ${percentOf(confidence)}%` };
     }
-    if (conversation.ticketId) return { tone: "danger", text: `Transferida · ${conversation.ticketId}` };
-    return { tone: "danger", text: conversation.waitUntil ? `Transferida · ${contactText(conversation.waitUntil, now)}` : "Transferida" };
+    const lead = conversation.transferReason === "message_limit" ? "Limite de mensagens" : "Transferida";
+    if (conversation.ticketId) return { tone: "danger", text: `${lead} · ${conversation.ticketId}` };
+    return { tone: "danger", text: conversation.waitUntil ? `${lead} · ${contactText(conversation.waitUntil, now)}` : lead };
   }
   if (state === "with_analyst") {
     return { tone: "primary", text: analyst && analyst.id !== viewerId ? `${analyst.name} atendendo` : "Você está atendendo" };
@@ -224,6 +227,24 @@ export function noteLabel(note: NoteView): string {
       return `${note.analystName} devolveu ao agent`;
     case "closed":
       return `${note.analystName} encerrou o atendimento`;
+    case "limit_reached":
+      return `${LIMIT_LEAD} · ${limitThen(note.limit)}`;
+  }
+}
+
+const LIMIT_LEAD = `Limite de ${MESSAGE_LIMIT} mensagens atingido`;
+
+/** What the limit did, as the console reads it. */
+function limitThen(limit: Extract<NoteView, { event: "limit_reached" }>["limit"]): string {
+  switch (limit.then) {
+    case "closed":
+      return "conversa encerrada";
+    case "transferred":
+      return `transferida para ${LEVEL_LABEL[limit.level]}`;
+    case "with_analyst":
+      return limit.analystName ? `com ${limit.analystName}` : "com o analista";
+    case "waiting":
+      return `esperando o ${LEVEL_LABEL[limit.level]}`;
   }
 }
 
@@ -243,6 +264,9 @@ export function employeeNoteLabel(note: NoteView): string {
       return `${note.analystName} entrou na conversa`;
     case "released":
       return `${note.analystName} devolveu a conversa ao Nexo`;
+    case "limit_reached":
+      if (note.limit.then === "with_analyst") return `${LIMIT_LEAD} · ${note.limit.analystName ?? "o analista"} continua com você`;
+      return note.limit.then === "waiting" ? `${LIMIT_LEAD} · o analista continua com você` : noteLabel(note);
     default:
       return noteLabel(note);
   }

@@ -1,7 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { toAISdkStream } from "@mastra/ai-sdk";
-import { rememberNote, streamReply } from "@nexo/agent";
-import { chatInput, type ConversationView, isPaused, type NexoUIMessage, replyText, shownDraft, summarizeTurn, withToolErrors } from "@nexo/shared";
+import { rememberNote, RESUME_NOTE, resumeNote, streamReply } from "@nexo/agent";
+import {
+  chatInput,
+  type ConversationView,
+  isPaused,
+  MESSAGE_LIMIT,
+  type NexoUIMessage,
+  reachedLimit,
+  replyText,
+  shownDraft,
+  summarizeTurn,
+  withToolErrors,
+} from "@nexo/shared";
 import { consumeStream, createUIMessageStream, createUIMessageStreamResponse, type InferUIMessageChunk } from "ai";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NextRequest } from "next/server";
@@ -10,19 +21,26 @@ import { conversations, decisions, drafts, messages } from "@/db/schema";
 import { activeConversationOf, toConversationView, viewColumns } from "./conversation";
 import type { Deps } from "./deps";
 import { jsonError, readBody, readEmployeeSession } from "./http";
+import { applyLimit } from "./limit";
 import { replyPlace } from "./messages";
 
 const AGENT_FAILED = "O Nexo não conseguiu responder. Tente de novo.";
 
 const REFUSALS = {
-  already_answered: "Essa mensagem já foi respondida.",
-  message_conflict: "Essa mensagem já foi enviada.",
+  already_answered: { code: "already_answered", message: "Essa mensagem já foi respondida." },
+  message_conflict: { code: "message_conflict", message: "Essa mensagem já foi enviada." },
+  limit_due: { code: "conversation_busy", message: "A conversa acabou de mudar. Tente de novo." },
 };
 
-/** paused: the conversation is with an analyst, or waits for one: the message is saved and the agent is not called. */
+/**
+ * paused: the conversation is with an analyst, or waits for one: the message is saved and the agent is not called.
+ * previousAt: the message before hers, for the note that she came back another day. limit_due: the agent has a
+ * conversation that reached the limit without it being applied; the message was not saved.
+ */
 type StartedTurn =
-  | { ok: true; conversation: ConversationView; startedAt: Date; paused: boolean }
-  | { ok: false; reason: "already_answered" | "message_conflict" };
+  | { ok: true; conversation: ConversationView; startedAt: Date; paused: boolean; previousAt: Date | null }
+  | { ok: false; reason: "already_answered" | "message_conflict" }
+  | { ok: false; reason: "limit_due"; conversationId: string };
 
 /**
  * Saves the employee message in the active conversation, or in a new one, and counts it, in one batch: a single
@@ -51,6 +69,8 @@ async function startTurn(deps: Pick<Deps, "db" | "directory">, { employeeId, id,
       select ${id}, c.id, 'employee', ${text}, null, ${at}
       from ${conversations} c
       where c.employee_id = ${employeeId} and c.state <> 'closed'
+        -- The agent answers no message past the limit: it applies first (applyLimit), then the message goes where it went.
+        and not (c.state = 'with_agent' and c.message_count >= ${MESSAGE_LIMIT})
       on conflict (id) do nothing`),
     db
       .update(conversations)
@@ -73,17 +93,23 @@ async function startTurn(deps: Pick<Deps, "db" | "directory">, { employeeId, id,
             on r.conversation_id = m.conversation_id and r.created_at > m.created_at and r.author in ('agent', 'analyst')
           where m.id = ${id}
         )`,
+        // The message before hers, whoever wrote it.
+        previousAt: sql<number | null>`(
+          select max(m.created_at) from ${messages} m where m.conversation_id = ${conversations}.id and m.id <> ${id}
+        )`,
       })
       .from(conversations)
       .where(activeConversationOf(employeeId)),
   ]);
   if (!conversation) throw new Error("The active conversation is missing after it was ensured");
-  const { mine, answered, ...row } = conversation;
+  const { mine, answered, previousAt, ...row } = conversation;
+  if (!mine && row.state === "with_agent" && reachedLimit(row.messageCount)) return { ok: false, reason: "limit_due", conversationId: row.id } satisfies StartedTurn;
   // Anything but this employee's unanswered message would be answered without being saved or counted.
   if (!mine) return { ok: false, reason: "message_conflict" } satisfies StartedTurn;
   const paused = isPaused(row.state);
   if (!paused && answered) return { ok: false, reason: "already_answered" } satisfies StartedTurn;
-  return { ok: true, conversation: await toConversationView(deps, row), startedAt: now, paused } satisfies StartedTurn;
+  const view = await toConversationView(deps, row);
+  return { ok: true, conversation: view, startedAt: now, paused, previousAt: previousAt === null ? null : new Date(previousAt) } satisfies StartedTurn;
 }
 
 /**
@@ -129,6 +155,8 @@ async function pausedTurn(
   { conversation, employeeId, id, text, at }: { conversation: ConversationView; employeeId: string; id: string; text: string; at: Date },
 ) {
   await rememberNote(deps.memory, { id, conversationId: conversation.id, employeeId, text, at, prefix: null });
+  // The message that reaches the limit leaves its note here: the analyst stays with her. The chat reads it right after.
+  if (reachedLimit(conversation.messageCount) && !conversation.limitReached) await applyLimit(deps, conversation.id);
   const stream = createUIMessageStream<NexoUIMessage>({
     execute: ({ writer }) => {
       writer.write({ type: "start" });
@@ -137,6 +165,20 @@ async function pausedTurn(
     },
   });
   return createUIMessageStreamResponse({ stream });
+}
+
+/**
+ * She came back on another São Paulo day: before her message, the agent reads since when, so it looks again at what may
+ * have changed. Under an id of her message, so a retry replaces the note instead of repeating it.
+ */
+async function rememberResume(
+  deps: Deps,
+  { conversationId, employeeId, messageId, previousAt, startedAt }: { conversationId: string; employeeId: string; messageId: string; previousAt: Date | null; startedAt: Date },
+) {
+  const text = resumeNote(previousAt, startedAt);
+  if (!text) return;
+  const at = new Date(startedAt.getTime() - 1);
+  await rememberNote(deps.memory, { id: `resume-${messageId}`, conversationId, employeeId, text, at, prefix: RESUME_NOTE });
 }
 
 /**
@@ -152,11 +194,21 @@ export async function chat(request: NextRequest, deps: Deps) {
 
   const employeeId = session.session.id;
   const { id, text } = body.data;
-  const turn = await startTurn(deps, { employeeId, id, text, now: deps.now() });
-  if (!turn.ok) return jsonError(409, turn.reason, REFUSALS[turn.reason]);
+  let turn = await startTurn(deps, { employeeId, id, text, now: deps.now() });
+  // The conversation reached the limit and it was not applied (the 30th was left without an answer): it applies now,
+  // and the message goes where the conversation went, a new one or an analyst.
+  if (!turn.ok && turn.reason === "limit_due") {
+    await applyLimit(deps, turn.conversationId);
+    turn = await startTurn(deps, { employeeId, id, text, now: deps.now() });
+  }
+  if (!turn.ok) {
+    const { code, message } = REFUSALS[turn.reason];
+    return jsonError(409, code, message);
+  }
 
   const { conversation, startedAt } = turn;
   if (turn.paused) return pausedTurn(deps, { conversation, employeeId, id, text, at: startedAt });
+  await rememberResume(deps, { conversationId: conversation.id, employeeId, messageId: id, previousAt: turn.previousAt, startedAt });
   const reply = streamReply(deps.agent, { conversationId: conversation.id, employeeId, text, startedAt });
   const stream = createUIMessageStream<NexoUIMessage>({
     execute: async ({ writer }) => {
@@ -175,6 +227,8 @@ export async function chat(request: NextRequest, deps: Deps) {
         return;
       }
       await saveReply(deps.db, { conversationId: conversation.id, startedAt, now: deps.now(), reply: responseMessage });
+      // The message that reached the limit is answered; the limit applies right after (ARQUITETURA.md, section 1).
+      if (reachedLimit(conversation.messageCount)) await applyLimit(deps, conversation.id);
     },
   });
   return createUIMessageStreamResponse({

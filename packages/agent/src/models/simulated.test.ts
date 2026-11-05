@@ -1,6 +1,6 @@
 import { dueAt, type KbArticle, slaText, summarizeTurn, type Ticket, type TicketDetail } from "@nexo/shared";
 import { describe, expect, it } from "vitest";
-import { createMemory, createNexoAgent } from "../agent";
+import { createMemory, createNexoAgent, RESUME_NOTE, saveNote } from "../agent";
 import { replyOf } from "../testing";
 import type { DraftRecord, DraftStore, TicketDesk, TransferRecord, TransferStore } from "../tools";
 import { simulatedModel } from "./simulated";
@@ -283,6 +283,29 @@ describe("simulatedModel transferring (feature 5)", () => {
       { level: "N2", reason: "overdue", ticketId: "INC-20311" },
     ]);
     expect(result.text).toBe("Encaminhei para o Suporte N2. Um analista vai falar com você até 29 out, 10:00.");
+  });
+});
+
+describe("simulatedModel coming back another day (feature 6)", () => {
+  it("reads the note that she came back as context, not as her message: what she answers is still read against the turn before", async () => {
+    savedTransfers.length = 0;
+    const memory = createMemory({ url: ":memory:" });
+    const center = helpCenter();
+    const agent = createNexoAgent({ model: simulatedModel(), memory, ticketService: center, drafts, transfers, now: () => NOW });
+    await reply("INC-20311 · Notebook lento após atualização do Windows", center, agent);
+    await saveNote(memory, {
+      id: "resume-1",
+      conversationId: "conv-1",
+      employeeId: "emp-ana",
+      text: "A conversa continua hoje, 27 out, depois de uma pausa: a mensagem anterior é de 26 out.",
+      at: new Date(),
+      prefix: RESUME_NOTE,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await reply("Falar com um analista", center, agent);
+    expect(savedTransfers.map(({ level, reason, ticketId }) => ({ level, reason, ticketId }))).toEqual([
+      { level: "N2", reason: "overdue", ticketId: "INC-20311" },
+    ]);
   });
 });
 

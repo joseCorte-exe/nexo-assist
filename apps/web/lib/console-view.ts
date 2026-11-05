@@ -3,11 +3,12 @@ import {
   type ConsoleMessage,
   dueIn,
   localDay,
+  type NoteView,
   type PanelTicket,
   type TagTone,
   wallClock,
 } from "@nexo/shared";
-import { firstName, formatDay } from "./format";
+import { dayLabel, firstName, formatDay } from "./format";
 
 // What the console draws, read from the contracts once: the screen only lays it out.
 
@@ -43,7 +44,8 @@ export function conversationMeta(conversation: ConsoleConversation): string {
   return parts.filter(Boolean).join(" · ");
 }
 
-export type HeaderMode = { kind: "pill"; tone: TagTone; text: string } | { kind: "actions" };
+/** release: whether it can go back to the agent; past the limit of messages it cannot. */
+export type HeaderMode = { kind: "pill"; tone: TagTone; text: string } | { kind: "actions"; release: boolean };
 
 /** What the header of the open conversation shows on its right: a pill with its state, or the actions of who attends. */
 export function headerMode(conversation: ConsoleConversation, viewerId: string): HeaderMode {
@@ -55,7 +57,7 @@ export function headerMode(conversation: ConsoleConversation, viewerId: string):
     case "with_analyst":
       return conversation.analyst && conversation.analyst.id !== viewerId
         ? { kind: "pill", tone: "primary", text: `Com ${conversation.analyst.name}` }
-        : { kind: "actions" };
+        : { kind: "actions", release: !conversation.limitReached };
     case "closed":
       return { kind: "pill", tone: "muted", text: "Encerrada" };
   }
@@ -72,6 +74,12 @@ export type TakeoverBar =
   | { kind: "compose"; placeholder: string }
   | { kind: "locked"; text: string };
 
+/** Who wrote the summary a note of transfer opens: the agent, or the code at the limit, from the case the agent kept. */
+export function transferSummaryLabel(note: NoteView | null): string | null {
+  if (note?.event === "transferred") return "Resumo do agent";
+  return note?.event === "limit_reached" && note.limit.then === "transferred" ? "Resumo do caso" : null;
+}
+
 const LOCKED_PLACEHOLDER = "Assuma o atendimento para responder";
 
 /**
@@ -80,13 +88,15 @@ const LOCKED_PLACEHOLDER = "Assuma o atendimento para responder";
  */
 export function takeoverBar(conversation: ConsoleConversation, viewerId: string, now: Date): TakeoverBar {
   const name = firstName(conversation.employee.name);
+  const paused = conversation.limitReached ? "Limite de mensagens · agent pausado" : "Agent pausado";
   switch (conversation.state) {
     case "waiting_for_analyst":
       return {
         kind: "take",
         title: `${name} espera um atendente`,
-        body: conversation.waitUntil ? `Agent pausado · até ${untilText(conversation.waitUntil, now)}` : "Agent pausado",
-        release: true,
+        body: conversation.waitUntil ? `${paused} · até ${untilText(conversation.waitUntil, now)}` : paused,
+        // Past the limit of messages it does not go back to the agent.
+        release: !conversation.limitReached,
         placeholder: LOCKED_PLACEHOLDER,
       };
     case "with_agent":
@@ -104,13 +114,6 @@ export type HistoryItem =
   | { kind: "day"; key: string; label: string }
   | { kind: "message"; key: string; message: ConsoleMessage; grouped: boolean };
 
-/** "Hoje", "Ontem" or "20 out": the pill that opens each day. */
-function dayLabel(iso: string, now: Date) {
-  const days = localDay(now) - localDay(new Date(iso));
-  if (days === 0) return "Hoje";
-  if (days === 1) return "Ontem";
-  return formatDay(iso).replace(/^0/, "");
-}
 
 /**
  * The history as the console lays it out: a pill when the day changes, and her messages in a row grouped, the second

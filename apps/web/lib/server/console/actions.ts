@@ -44,6 +44,8 @@ function refusal(refused: ConsoleRefusal | "not_found" | "busy", row: Row | null
     }
     case "busy":
       return busy();
+    case "limit_reached":
+      return jsonError(409, "limit_reached", "Esta conversa chegou ao limite de mensagens e não volta para o agent. Encerre quando terminar.");
   }
 }
 

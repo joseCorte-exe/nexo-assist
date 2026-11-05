@@ -1,6 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { type AgentMemory, CONSOLE_NOTE, rememberNote } from "@nexo/agent";
-import { type Analyst, type AnalystLevel, type ChatNote, LEVEL_LABEL, type NexoUIMessage, type NoteView, type TransferReason } from "@nexo/shared";
+import {
+  type Analyst,
+  type AnalystLevel,
+  type ChatNote,
+  LEVEL_LABEL,
+  type NexoUIMessage,
+  type NoteView,
+  type TransferReason,
+} from "@nexo/shared";
 import { and, eq, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { conversations, messages } from "@/db/schema";
@@ -15,8 +23,11 @@ import { afterReplyPlace } from "./messages";
 type Row = typeof conversations.$inferSelect;
 type Who = Pick<Analyst, "id" | "name" | "level">;
 
-/** Why an analyst cannot do it: the conversation ended, they do not attend it, or another analyst does. */
-export type ConsoleRefusal = "closed" | "not_assumed" | "taken";
+/**
+ * Why an analyst cannot do it: the conversation ended, they do not attend it, another analyst does, or the limit of
+ * messages keeps it from going back to the agent.
+ */
+export type ConsoleRefusal = "closed" | "not_assumed" | "taken" | "limit_reached";
 /** Why the agent cannot transfer: it no longer has the conversation. */
 type AgentRefusal = "not_with_agent";
 export type Decision<Refusal extends string> = "apply" | "already" | { refused: Refusal };
@@ -88,10 +99,11 @@ export const moves = {
     },
   }),
 
-  /** Back to the agent: one waiting for an analyst, or one this analyst attends. */
+  /** Back to the agent: one waiting for an analyst, or one this analyst attends, unless the limit keeps it from the agent. */
   release: (who: Who): Move<ConsoleRefusal> => ({
     decide: (row) => {
       if (row.state === "closed") return refuse("closed");
+      if (row.limitReachedAt) return refuse("limit_reached");
       if (row.state === "with_agent") return "already";
       return row.state === "with_analyst" && row.analystId !== who.id ? refuse("taken") : "apply";
     },

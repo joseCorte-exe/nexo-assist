@@ -1,6 +1,6 @@
 import type { DraftView, NexoUIMessage, TicketCard, TicketSummary } from "@nexo/shared";
 import { describe, expect, it } from "vitest";
-import { type AgentTurn, currentDraft, lastDraftId, liveTurns, messageCount, ticketChoiceText, type Turn, withSaved } from "./chat-turns";
+import { type AgentTurn, currentDraft, dayBreaks, lastDraftId, liveTurns, messageCount, ticketChoiceText, type Turn, withSaved } from "./chat-turns";
 
 const decision = {
   understanding: "Quer saber o horário do service desk",
@@ -499,7 +499,7 @@ describe("liveTurns, with an analyst (feature 5)", () => {
       id: "a9",
       role: "assistant",
       parts: [
-        { type: "data-conversation", data: { id: "conv-1", state: "with_analyst", messageCount: 4, targetLevel: "N2", waitUntil: null, analyst: null } },
+        { type: "data-conversation", data: { id: "conv-1", state: "with_analyst", messageCount: 4, targetLevel: "N2", waitUntil: null, analyst: null, limitReached: false } },
       ],
     };
     expect(liveTurns([user("u1", "Oi"), counter], "ready", { paused: true })).toEqual([{ kind: "employee", id: "u1", text: "Oi", unsent: false }]);
@@ -527,5 +527,44 @@ describe("withSaved", () => {
   it("does not redraw when nothing changed", () => {
     const current = [user("u1", "Oi"), user("u2", "Alguma novidade?")];
     expect(withSaved(current, [user("u1", "Oi"), user("u2", "Alguma novidade?")], "ready")).toBe(current);
+  });
+});
+
+describe("dayBreaks", () => {
+  // 2026-10-26 is a Monday. Times are São Paulo local (-03:00).
+  const NOW = new Date("2026-10-26T10:15:00-03:00");
+  const at = (message: NexoUIMessage, local: string): NexoUIMessage => ({ ...message, metadata: { at: new Date(`${local}-03:00`).toISOString() } });
+
+  it("draws no pill for a conversation of a single day, as the design of the chat", () => {
+    const messages = [at(user("u1", "Oi"), "2026-10-26T09:00"), at(user("u2", "E?"), "2026-10-26T10:00"), user("u3", "Agora")];
+    expect(dayBreaks(messages, NOW)).toEqual(new Map());
+  });
+
+  it("opens each day with a pill once the conversation spans more than one, the first day included", () => {
+    const messages = [
+      at(user("u1", "Oi"), "2026-10-23T17:00"),
+      at(user("u2", "E?"), "2026-10-23T17:05"),
+      at(user("u3", "Voltei"), "2026-10-25T09:00"),
+      // A message on its way has no date yet: it is now, today.
+      user("u4", "Alguém?"),
+    ];
+    expect(dayBreaks(messages, NOW)).toEqual(
+      new Map([
+        ["u1", "23 out"],
+        ["u3", "Ontem"],
+        ["u4", "Hoje"],
+      ]),
+    );
+  });
+
+  it("counts the days in São Paulo, not in UTC", () => {
+    // 23:30 in São Paulo on the 25th is already the 26th in UTC.
+    const messages = [at(user("u1", "Oi"), "2026-10-25T23:30"), at(user("u2", "E?"), "2026-10-26T00:10")];
+    expect(dayBreaks(messages, NOW)).toEqual(
+      new Map([
+        ["u1", "Ontem"],
+        ["u2", "Hoje"],
+      ]),
+    );
   });
 });

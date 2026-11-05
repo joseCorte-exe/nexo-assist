@@ -24,12 +24,14 @@ export type Deps = {
     | "searchEmployees"
     | "setAvailability"
     | "assignTicket"
+    | "getTicket"
+    | "transferTicket"
   >;
   /** The names the console shows, cached for a short while. */
   directory: Directory;
   agent: NexoAgent;
-  /** The agent memory, for the notes of what the employee did outside the agent. */
-  memory: Pick<AgentMemory, "saveMessages">;
+  /** The agent memory, for the notes of what the employee did outside the agent, and the case it kept (the limit). */
+  memory: Pick<AgentMemory, "saveMessages" | "getWorkingMemory">;
   /** Keeps the server running for work that ends after the response, like saving the agent reply. */
   waitUntil: (task: Promise<unknown>) => void;
   sessionSecret: string;

@@ -27,6 +27,7 @@ import {
   slaText,
   type Ticket,
   type TicketCard,
+  noteTransferOnTicket,
   type TicketServiceClient,
   type TicketSummary,
   type TicketType,
@@ -420,7 +421,7 @@ export function createTools({
     const unsure = confidence !== null && confidence < MIN_CONFIDENCE;
     const route = routeTransfer({
       requested: unsure ? "agent_unsure" : input.reason,
-      ticket: ticket && { priority: ticket.priority, status: ticket.status, dueAt: new Date(ticket.dueAt) },
+      ticket,
       classification: impact && urgency && affected ? { impact, urgency, affected } : null,
       at,
     });
@@ -439,10 +440,7 @@ export function createTools({
       return { ok: false as const, reason: "not_with_agent" as const, message: "Um analista já está com esta conversa." };
     }
     if (ticket) {
-      const body = { employeeId, level: route.level, summary: input.summary };
-      const marked = await ticketService.transferTicket(ticket.id, body, saved.noteId);
-      // The conversation is with the analyst either way; the history of the ticket only misses the line.
-      if (!marked.ok) console.error("transfer not noted on the ticket", { ticketId: ticket.id, error: marked.error.code });
+      await noteTransferOnTicket(ticketService, ticket.id, { employeeId, level: route.level, summary: input.summary }, saved.noteId);
     }
     return {
       ok: true as const,

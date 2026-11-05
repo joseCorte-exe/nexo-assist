@@ -5,6 +5,7 @@ import {
   chatNote,
   type ConsoleMessage,
   conversationView,
+  messageMeta,
   type NexoUIMessage,
   nexoToolSchemas,
   replyText,
@@ -54,14 +55,15 @@ export function signOf(row: MessageRow): AnalystPart | null {
 /** The message as the chat draws it: an agent reply with the parts it streamed, a note or an analyst message with theirs. */
 export async function toUIMessage(row: MessageRow): Promise<NexoUIMessage> {
   const { id, author, text, parts } = row;
-  const asText: NexoUIMessage = { id, role: author === "employee" ? "user" : "assistant", parts: [{ type: "text", text }] };
+  const metadata = { at: row.createdAt.toISOString() };
+  const asText: NexoUIMessage = { id, role: author === "employee" ? "user" : "assistant", metadata, parts: [{ type: "text", text }] };
   if (author === "system") {
     const note = noteOf(row);
-    return note ? { id, role: "system", parts: [{ type: "data-note", data: note }] } : { ...asText, role: "system" };
+    return note ? { id, role: "system", metadata, parts: [{ type: "data-note", data: note }] } : { ...asText, role: "system" };
   }
   if (author === "analyst") {
     const sign = signOf(row);
-    return sign ? { id, role: "assistant", parts: [{ type: "data-analyst", data: sign }, { type: "text", text }] } : asText;
+    return sign ? { id, role: "assistant", metadata, parts: [{ type: "data-analyst", data: sign }, { type: "text", text }] } : asText;
   }
   return author === "agent" && parts ? savedReply({ ...asText, parts }, asText) : asText;
 }
@@ -70,6 +72,7 @@ export async function toUIMessage(row: MessageRow): Promise<NexoUIMessage> {
 async function savedReply(message: NexoUIMessage, asText: NexoUIMessage): Promise<NexoUIMessage> {
   const checked = await safeValidateUIMessages<NexoUIMessage>({
     messages: [message],
+    metadataSchema: messageMeta,
     dataSchemas: { conversation: conversationView, note: chatNote, analyst: analystPart },
     tools: nexoToolSchemas,
   });

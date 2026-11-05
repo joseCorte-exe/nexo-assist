@@ -57,6 +57,11 @@ export const conversations = sqliteTable(
     /** The chat of the employee was open, and she was writing, until these moments: the console's "online" and "digitando…". */
     employeeSeenAt: timestamp("employee_seen_at"),
     employeeTypingUntil: timestamp("employee_typing_until"),
+    /**
+     * When the limit of messages applied (feature 6): the Nexo answers no more in it, so it does not go back to the agent,
+     * and the note of the limit is written once.
+     */
+    limitReachedAt: timestamp("limit_reached_at"),
     /** Moves with each transfer, assume, release and close: a move only writes over the version it read. */
     version: integer("version").notNull().default(0),
   },
@@ -65,6 +70,8 @@ export const conversations = sqliteTable(
     index("conversations_last_activity").on(table.lastActivityAt),
     // The queues: what waits at a level, and what an analyst attends.
     index("conversations_state_level").on(table.state, table.targetLevel),
+    // The chat of an employee: her active conversation, or the last one that ended.
+    index("conversations_employee_created").on(table.employeeId, table.createdAt),
     // Each employee has one active conversation at a time.
     uniqueIndex("conversations_one_active_per_employee")
       .on(table.employeeId)

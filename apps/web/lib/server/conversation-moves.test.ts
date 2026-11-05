@@ -32,6 +32,7 @@ const row = (fields: Partial<Row>): Row => ({
   employeeSeenAt: null,
   employeeTypingUntil: null,
   needsAnalystSince: null,
+  limitReachedAt: null,
   version: 0,
   ...fields,
 });
@@ -139,5 +140,13 @@ describe("close", () => {
     expect(moves.close(rafael).decide(closedByHer)).toEqual({ refused: "closed" });
     expect(moves.close(juliana).decide(withRafael)).toEqual({ refused: "taken" });
     expect(moves.close(rafael).decide(waiting)).toEqual({ refused: "not_assumed" });
+  });
+});
+
+describe("release at the limit", () => {
+  it("refuses to hand the conversation back once the limit applied: the Nexo answers no more", () => {
+    const limited = row({ state: "with_analyst", analystId: rafael.id, messageCount: 30, limitReachedAt: NOW });
+    expect(moves.release(rafael).decide(limited)).toEqual({ refused: "limit_reached" });
+    expect(moves.release(rafael).decide({ ...limited, state: "waiting_for_analyst", analystId: null })).toEqual({ refused: "limit_reached" });
   });
 });

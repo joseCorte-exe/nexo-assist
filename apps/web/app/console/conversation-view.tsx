@@ -8,6 +8,7 @@ import {
   type DraftView,
   draftLabel,
   noteLabel,
+  type NoteView,
   PRIORITY_LABEL,
 } from "@nexo/shared";
 import { ChevronLeft, CircleAlert } from "lucide-react";
@@ -23,7 +24,7 @@ import {
   SendHorizontalIcon,
 } from "@/components/console-icons";
 import { SystemNote } from "@/components/system-note";
-import { avatarTone, conversationMeta, type HistoryItem, headerMode, historyItems, takeoverBar } from "@/lib/console-view";
+import { avatarTone, conversationMeta, type HistoryItem, headerMode, historyItems, takeoverBar, transferSummaryLabel } from "@/lib/console-view";
 import { firstName, formatConfidence, initials } from "@/lib/format";
 import { usePinnedScroll } from "@/lib/use-pinned-scroll";
 import { useWholePixelRef } from "@/lib/use-whole-pixel-width";
@@ -139,16 +140,19 @@ function Header({
         </p>
       ) : (
         <>
-          <button
-            ref={releaseRef}
-            type="button"
-            onClick={() => void state.act("release")}
-            aria-disabled={state.acting !== null}
-            className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg pr-3 pl-2.5 text-13.5 font-medium whitespace-nowrap text-ink-2 outline-1 -outline-offset-[0.5px] outline-field transition-[background-color,scale] duration-150 ease-out hover:bg-desk active:scale-[0.96] aria-disabled:cursor-progress max-lg:hidden"
-          >
-            <BotIcon aria-hidden className="size-3.5" />
-            Devolver ao agent
-          </button>
+          {/* Past the limit of messages the conversation does not go back to the agent: only Encerrar. */}
+          {mode.release ? (
+            <button
+              ref={releaseRef}
+              type="button"
+              onClick={() => void state.act("release")}
+              aria-disabled={state.acting !== null}
+              className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg pr-3 pl-2.5 text-13.5 font-medium whitespace-nowrap text-ink-2 outline-1 -outline-offset-[0.5px] outline-field transition-[background-color,scale] duration-150 ease-out hover:bg-desk active:scale-[0.96] aria-disabled:cursor-progress max-lg:hidden"
+            >
+              <BotIcon aria-hidden className="size-3.5" />
+              Devolver ao agent
+            </button>
+          ) : null}
           <button
             ref={closeRef}
             type="button"
@@ -176,7 +180,7 @@ function Header({
         name={firstName(conversation.employee.name)}
         panelOpen={panelOpen}
         onTogglePanel={onTogglePanel}
-        canRelease={mode.kind === "actions"}
+        canRelease={mode.kind === "actions" && mode.release}
         onRelease={() => void state.act("release")}
       />
     </header>
@@ -333,8 +337,9 @@ function HistoryEntry({
   const { message, grouped } = item;
   if (message.author === "system") {
     const text = message.note ? `${noteLabel(message.note)} · ${clockTime(new Date(message.at))}` : message.text;
-    if (message.note?.event === "transferred" && summary) return <TransferNote text={text} summary={summary} />;
-    return <SystemNote event={message.note?.event ?? null} text={text} className="pt-[18px] pb-1" />;
+    const summaryLabel = transferSummaryLabel(message.note);
+    if (summary && summaryLabel) return <TransferNote note={message.note} text={text} summary={summary} label={summaryLabel} />;
+    return <SystemNote note={message.note} text={text} className="pt-[18px] pb-1" />;
   }
   if (message.author === "employee") {
     return (
@@ -460,27 +465,27 @@ function DecisionTag({ message }: { message: ConsoleMessage }) {
   );
 }
 
-/** The note of the transfer opens the summary the agent wrote for the analyst. */
-function TransferNote({ text, summary }: { text: string; summary: string }) {
+/** The note of the transfer opens the summary for the analyst: the agent's, or the one the code wrote at the limit. */
+function TransferNote({ note, text, summary, label }: { note: NoteView | null; text: string; summary: string; label: string }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="flex flex-col items-center gap-2 pt-[18px] pb-1">
       {/* The note stays a separator for a screen reader; a button over it opens the summary. */}
       <div className="relative w-full">
-        <SystemNote event="transferred" text={text} />
+        <SystemNote note={note} text={text} />
         <button
           type="button"
           aria-expanded={open}
           onClick={() => setOpen((current) => !current)}
-          title="Ver o resumo do agent"
+          title={`Ver o ${label.toLowerCase()}`}
           className="absolute inset-0 cursor-pointer rounded-md"
         >
-          <span className="sr-only">Ver o resumo do agent</span>
+          <span className="sr-only">Ver o {label.toLowerCase()}</span>
         </button>
       </div>
       {open ? (
         <p className="fade-enter max-w-[520px] rounded-xl bg-white px-4 py-3 text-13.5 text-pretty text-ink-2 shadow-bubble">
-          <span className="font-semibold text-ink">Resumo do agent: </span>
+          <span className="font-semibold text-ink">{label}: </span>
           {summary}
         </p>
       ) : null}

@@ -1,12 +1,14 @@
 "use client";
 
-import { MESSAGE_LIMIT } from "@nexo/shared";
 import { type KeyboardEvent, type RefObject, useEffect, useRef, useState } from "react";
+import { MESSAGE_LIMIT } from "@nexo/shared";
 import { ArrowUpIcon } from "@/components/design-icons";
+import { type Counter, counterAnnouncement, counterWords } from "@/lib/counter";
 import { createTypingSignal } from "@/lib/typing";
 
 type Props = {
-  count: number;
+  /** The line under the field: the count, what is left near the limit, or who stays with her past it. */
+  counter: Counter;
   /** While the agent answers she can keep writing; only sending waits. */
   busy: boolean;
   onSend: (text: string) => void;
@@ -20,7 +22,7 @@ type Props = {
 
 /** "Escreva para o Nexo…", Enviar and the counter. Enter sends, Shift+Enter breaks the line. */
 export function Composer({
-  count,
+  counter,
   busy,
   onSend,
   inputRef,
@@ -88,9 +90,28 @@ export function Composer({
           Enviar
         </button>
       </div>
-      <p id="chat-counter" className="self-end text-12.5 text-ink-3">
-        {count}/{MESSAGE_LIMIT} mensagens nesta sessão
+      <p
+        id="chat-counter"
+        className={`self-end text-12.5 ${counter.kind === "left" ? "text-warning-text" : "text-ink-3"}`}
+      >
+        <CounterText counter={counter} />
+      </p>
+      <p role="status" className="sr-only">
+        {counterAnnouncement(counter)}
       </p>
     </form>
+  );
+}
+
+/**
+ * The count in the four runs of text the chat always drew it with ("12", "/", "30", " mensagens…"): the browser places
+ * the letters of separate runs a fraction of a pixel apart from one run, and nexo.pen was measured against these.
+ */
+function CounterText({ counter }: { counter: Counter }) {
+  if (counter.kind !== "count") return counterWords(counter);
+  return (
+    <>
+      {counter.count}/{MESSAGE_LIMIT} mensagens nesta sessão
+    </>
   );
 }

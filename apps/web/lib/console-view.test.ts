@@ -9,6 +9,7 @@ import {
   panelSections,
   takeoverBar,
   ticketEvent,
+  transferSummaryLabel,
 } from "./console-view";
 
 // 2026-10-26 is a Monday. Times are São Paulo local (-03:00).
@@ -28,6 +29,7 @@ const ana: ConsoleConversation = {
   waitUntil: at("2026-10-26T12:05"),
   transferredAt: at("2026-10-26T10:05"),
   assumedAt: null,
+  limitReached: false,
   analyst: null,
   lastActivityAt: at("2026-10-26T10:05"),
   preview: null,
@@ -77,7 +79,9 @@ describe("headerMode", () => {
   it("shows the waiting pill, the agent pill, and the actions of whoever attends", () => {
     expect(headerMode(ana, RAFAEL.id)).toEqual({ kind: "pill", tone: "warning", text: "Aguardando atendente" });
     expect(headerMode({ ...ana, state: "with_agent" }, RAFAEL.id)).toEqual({ kind: "pill", tone: "success", text: "Agent atendendo" });
-    expect(headerMode({ ...ana, state: "with_analyst", analyst: RAFAEL }, RAFAEL.id)).toEqual({ kind: "actions" });
+    expect(headerMode({ ...ana, state: "with_analyst", analyst: RAFAEL }, RAFAEL.id)).toEqual({ kind: "actions", release: true });
+    // Past the limit it does not go back to the agent: only Encerrar.
+    expect(headerMode({ ...ana, state: "with_analyst", analyst: RAFAEL, limitReached: true }, RAFAEL.id)).toEqual({ kind: "actions", release: false });
     expect(headerMode({ ...ana, state: "with_analyst", analyst: RAFAEL }, "analyst-juliana")).toEqual({
       kind: "pill",
       tone: "primary",
@@ -88,6 +92,14 @@ describe("headerMode", () => {
 });
 
 describe("takeoverBar", () => {
+  it("does not offer to hand back a waiting conversation the limit sent, and says why", () => {
+    expect(takeoverBar({ ...ana, limitReached: true }, RAFAEL.id, NOW)).toMatchObject({
+      kind: "take",
+      body: "Limite de mensagens · agent pausado · até 12:05",
+      release: false,
+    });
+  });
+
   it("tells who waits and until when, with both buttons", () => {
     expect(takeoverBar(ana, RAFAEL.id, NOW)).toEqual({
       kind: "take",
@@ -192,5 +204,17 @@ describe("ticketEvent", () => {
     const assumed = { ...ana, state: "with_analyst" as const, analyst: RAFAEL, assumedAt: at("2026-10-26T10:12") };
     expect(ticketEvent(assumed)).toEqual({ icon: "analyst", text: "Assumido por Rafael Lima", at: assumed.assumedAt });
     expect(ticketEvent({ ...ana, transferredAt: null })).toBeNull();
+  });
+});
+
+describe("transferSummaryLabel", () => {
+  it("names who wrote the summary a note of transfer opens", () => {
+    expect(transferSummaryLabel({ event: "transferred", level: "N1" })).toBe("Resumo do agent");
+    expect(transferSummaryLabel({ event: "limit_reached", limit: { then: "transferred", level: "N1" } })).toBe("Resumo do caso");
+  });
+
+  it("is nothing for a note that opens no summary", () => {
+    expect(transferSummaryLabel({ event: "limit_reached", limit: { then: "closed" } })).toBeNull();
+    expect(transferSummaryLabel({ event: "closed", analystName: "Rafael Lima" })).toBeNull();
   });
 });

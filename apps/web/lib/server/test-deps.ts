@@ -9,6 +9,7 @@ import {
   type Employee,
   isReopenable,
   type KbArticle,
+  type NexoUIMessage,
   type Priority,
   reopenedDueAt,
   sampleAnalysts,
@@ -20,6 +21,7 @@ import {
 } from "@nexo/shared";
 import { NextRequest } from "next/server";
 import { createDb } from "@/db";
+import { conversations, messages } from "@/db/schema";
 import { migrateDb } from "@/db/migrate";
 import { seed } from "@/db/seed";
 import type { Deps } from "./deps";
@@ -283,6 +285,7 @@ export async function testDeps({ model, ...overrides }: TestOptions = {}): Promi
       }
       return agentMemory.saveMessages(args);
     },
+    getWorkingMemory: (args) => agentMemory.getWorkingMemory(args),
   };
   // The agent reads the clock of the deps, so a test that moves it moves the tools too.
   const deps: TestDeps = {
@@ -347,3 +350,42 @@ export async function roundTrips(deps: TestDeps, work: () => Promise<unknown>) {
   }
   return count;
 }
+
+/**
+ * Ana's conversation with her `count` messages, each answered by the Nexo with the last reply given, one second apart.
+ * Without a last reply, her last message is the one left without an answer. The last of them ends 10 s before `end`.
+ */
+export async function conversationAt(
+  deps: TestDeps,
+  {
+    count,
+    lastReply,
+    state = "with_agent",
+    end = NOW,
+  }: { count: number; lastReply: NexoUIMessage["parts"] | null; state?: "with_agent" | "with_analyst"; end?: Date },
+) {
+  const SECOND = 1000;
+  const plainReply: NexoUIMessage["parts"] = [{ type: "text", text: "No Windows 10, reinstale o cliente da VPN." }];
+  const id = "conv-ana";
+  const start = end.getTime() - count * 2 * SECOND - 10 * SECOND;
+  await deps.db.insert(conversations).values({
+    id,
+    employeeId: ana.id,
+    state,
+    analystId: state === "with_analyst" ? rafael.id : null,
+    messageCount: count,
+    createdAt: new Date(start),
+  });
+  const rows: (typeof messages.$inferInsert)[] = [];
+  for (let index = 0; index < count; index++) {
+    const at = start + index * 2 * SECOND;
+    rows.push({ id: `ana-${index}`, conversationId: id, author: "employee", text: `Mensagem ${index + 1}`, createdAt: new Date(at) });
+    const last = index === count - 1;
+    if (last && !lastReply) continue;
+    const parts = last ? lastReply! : plainReply;
+    rows.push({ id: `nexo-${index}`, conversationId: id, author: "agent", text: "Resposta", parts, createdAt: new Date(at + 1) });
+  }
+  await deps.db.insert(messages).values(rows);
+  return id;
+}
+

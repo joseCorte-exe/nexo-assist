@@ -1,4 +1,4 @@
-import { clockTime, dueIn, MONTHS, twoDigits, wallClock } from "@nexo/shared";
+import { clockTime, dueIn, localDay, MONTHS, twoDigits, wallClock } from "@nexo/shared";
 
 const DASH = "–";
 const HOUR_MS = 60 * 60 * 1000;
@@ -84,4 +84,12 @@ export function formatTimeAgo(iso: string, since: string): string {
 export function formatDueTime(dueAt: string, since: string): string {
   const { days, time } = dueIn(new Date(dueAt), new Date(since));
   return days === 0 ? time : `${formatDay(dueAt)}, ${time}`;
+}
+
+/** "Hoje", "Ontem" or "20 out": the pill that opens each day, in the console and in the chat. */
+export function dayLabel(iso: string, now: Date) {
+  const days = localDay(now) - localDay(new Date(iso));
+  if (days === 0) return "Hoje";
+  if (days === 1) return "Ontem";
+  return formatDay(iso).replace(/^0/, "");
 }
