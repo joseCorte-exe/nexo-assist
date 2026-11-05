@@ -138,6 +138,10 @@ test("Rafael hands her back to the agent, which answers her again", async ({ bro
   await expect(ana.getByRole("separator", { name: /Rafael Lima devolveu a conversa ao Nexo/ })).toBeVisible({ timeout: 10_000 });
   await ask(ana, "Qual o horário do service desk?");
   await expect(replies(ana).last()).not.toBeEmpty();
+  // The ticket was overdue when she asked for him: his answer restarted the deadline, and the agent says what he wrote.
+  await ask(ana, "INC-20311 · Notebook lento após atualização do Windows");
+  await expect(replies(ana).last()).toContainText("dentro do prazo");
+  await expect(replies(ana).last()).toContainText("Pode deixar o notebook ligado agora?");
 });
 
 test("after assuming again he closes the service, and her chat says it ended", async ({ browser }) => {

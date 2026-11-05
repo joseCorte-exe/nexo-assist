@@ -146,7 +146,7 @@ As instruções e as ferramentas somam 3,5 mil tokens e ficam em cache por cerca
 
 ## Limitações conhecidas
 
-- A resposta do analista no console ainda não reinicia o prazo do chamado. Só os dados de exemplo têm `last_it_response_at` preenchido.
+- Numa queda do ticket-service com a lista de analistas ainda válida no cache do web, a mensagem do analista fica gravada, mas o prazo e a linha do histórico do chamado não são registrados. O prazo só recomeça na próxima mensagem que passar.
 - Nenhum fluxo grava o desfecho `resolved_by_agent`, só o seed. O número de resolvidos sem fila na tela de login vem dos dados de exemplo.
 - Os testes com o modelo real foram rodados à mão. Não existe um comando que os repita.
 - O limite por IP e o limite global por dia ainda não estão ligados. A tabela `usage_counters` existe, mas nada a usa.
