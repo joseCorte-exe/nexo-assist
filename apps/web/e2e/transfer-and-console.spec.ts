@@ -170,7 +170,7 @@ test("an analyst marks himself unavailable and available again", async ({ browse
   await expect(rafael.getByRole("switch", { name: "Disponível" })).toHaveAttribute("aria-checked", "true");
 });
 
-test("something stopped for his team goes to N2 by itself: Bruno keeps the card, and Rafael gets the case with the summary", async ({ browser }) => {
+test("something stopped for his team goes to N2 by itself: Bruno keeps the card, and Rafael gets the case with the summary", async ({ browser, request }) => {
   const bruno = await (await browser.newContext()).newPage();
   await signIn(bruno, "bruno.tavares@nexo.com.br", "/");
   await ask(bruno, "O sistema de pedidos parou de funcionar desde cedo.");
@@ -193,10 +193,24 @@ test("something stopped for his team goes to N2 by itself: Bruno keeps the card,
   // The title of the draft opens the summary: only the summary writes it.
   await expect(conversation(rafael)).toContainText("Sistema de pedidos parou de funcionar desde cedo.");
 
-  // The ticket is still hers to confirm, while the analyst is on the way.
+  // Rafael assumes before Bruno confirms: the ticket is still his to confirm, and it becomes the ticket of the case.
+  await conversation(rafael).getByRole("button", { name: "Assumir atendimento" }).click();
+  await expect(conversation(rafael).getByLabel("Mensagem para Bruno")).toBeEnabled();
   await draft.getByRole("button", { name: "Confirmar" }).click();
   await expect(draft).toContainText(/Chamado INC-\d{5} criado\./);
-  await expect(bruno.getByLabel("Mensagem para o analista")).toBeVisible();
+  const ticketId = (await draft.textContent())?.match(/INC-\d{5}/)?.[0];
+
+  // His answer is the answer of IT on that ticket, in the ticket-service itself: the 1 hour restarts from it.
+  const write = conversation(rafael).getByLabel("Mensagem para Bruno");
+  await write.fill("Estou olhando o sistema de pedidos.");
+  await write.press("Enter");
+  await expect
+    .poll(async () => {
+      const response = await request.get(`${e2eEnv.TICKET_SERVICE_URL}/tickets/${ticketId}?employeeId=emp-bruno`, { headers: { "x-service-secret": e2eEnv.TICKET_SERVICE_SECRET } });
+      const ticket = (await response.json()) as { status: string; assignedTo: string | null; lastItResponseAt: string | null };
+      return { status: ticket.status, assignedTo: ticket.assignedTo, answered: ticket.lastItResponseAt !== null };
+    }, { timeout: 10_000 })
+    .toEqual({ status: "assigned", assignedTo: "analyst-rafael", answered: true });
 });
 
 test("an employee is kept out of the console", async ({ browser }) => {
