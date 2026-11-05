@@ -91,11 +91,11 @@ Estas regras ficam no código:
 | Só dá para reabrir até 7 dias depois da resolução | `packages/shared/src/ticket-change.ts` |
 | O id do funcionário vem da sessão, nunca do modelo, e o ticket-service recusa chamado de outra pessoa | `packages/agent/src/agent.ts`, `apps/ticket-service/src/routes/tickets.ts` |
 | Caso crítico ou chamado vencido vai para o N2. Pedido do funcionário ou dúvida do agent vai para o N1 | `packages/shared/src/transfer.ts` |
-| Um rascunho novo que sai crítico transfere a conversa para o N2 na mesma gravação da resposta. O chamado confirmado depois fica ligado à conversa | `apps/web/lib/server/transfers.ts`, `apps/web/lib/server/conversation-moves.ts`, `apps/web/lib/server/drafts.ts` |
+| Um rascunho novo que sai crítico transfere a conversa para o N2 na mesma gravação da resposta. O chamado confirmado depois fica ligado à conversa | `apps/web/lib/server/transfers.ts`, `apps/web/lib/server/conversation-moves.ts`, `apps/web/lib/server/chat.ts`, `apps/web/lib/server/drafts.ts` |
 | Confiança abaixo de 0,6 obriga a transferência no passo seguinte | `packages/agent/src/agent.ts` |
 | Com a conversa com um analista ou esperando um, a mensagem é gravada e o modelo não é chamado | `apps/web/lib/server/chat.ts` |
 | A resposta do analista no console reinicia o prazo do chamado ligado à conversa, exceto se ele já estiver resolvido | `apps/web/lib/server/console/actions.ts`, `apps/ticket-service/src/routes/tickets.ts` |
-| Cada mensagem que chama o modelo conta num teto por IP e num teto global por dia. Acima do teto, a mensagem fica gravada e o modelo não é chamado | `apps/web/lib/server/usage.ts` |
+| Cada mensagem que chama o modelo conta num teto por IP e num teto global por dia. Acima do teto, a mensagem fica gravada e o modelo não é chamado | `apps/web/lib/server/usage.ts`, `apps/web/lib/server/chat.ts` |
 | O limite de 30 mensagens não passa pelo modelo. Com algo pendente, a conversa vai para um analista; sem nada pendente, ela encerra; se um analista já está com ela ou ela já espera um, nada muda. O limite conta as mensagens do funcionário por conversa: é essa a "sessão" do PRD | `apps/web/lib/server/limit.ts`, `apps/web/lib/server/chat.ts`, `packages/shared/src/continuity.ts` |
 
 ### Como ver o que ele fez
@@ -108,7 +108,7 @@ Os 833 testes de unidade e de integração cobrem as regras do código: priorida
 
 Os 60 testes em Playwright rodam as histórias do PRD de ponta a ponta com o modelo simulado: login, consulta, rascunho, confirmação, analista assumindo, limite e volta em outro dia.
 
-O que depende do modelo foi testado com o Haiku 5.5 de verdade. Cada feature a partir da 3 rodou seus caminhos, em geral três vezes cada, e o resultado está no relatório dela. Exemplos:
+O que depende do modelo foi testado com o Haiku 5.5 de verdade. Cada feature a partir da 3 rodou seus caminhos, em geral três vezes cada, e o resultado está no relatório dela. Os casos críticos e o encerramento como resolvida estão nos PRs [14](https://github.com/joseCorte-exe/nexo-assist/pull/14) e [12](https://github.com/joseCorte-exe/nexo-assist/pull/12). Exemplos:
 
 | Caso | Resultado |
 |---|---|
@@ -116,7 +116,7 @@ O que depende do modelo foi testado com o Haiku 5.5 de verdade. Cada feature a p
 | Abrir e complementar um chamado (9 rodadas) | Classificou certo nas 9 |
 | Pedido de analista | N1, 3 de 3 |
 | Chamado vencido | N2, 3 de 3 |
-| Caso crítico ("o sistema de ponto caiu para toda a empresa") | N2 na primeira resposta, 4 de 4. Sem a regra no código, 0 de 4 |
+| Caso crítico ("o sistema de ponto caiu para toda a empresa") | N2 na primeira resposta, 4 de 4. Antes dessa regra no código e nas instruções, 0 de 4 |
 | "Resolveu, obrigado" | Encerrou como resolvida, 3 de 3 |
 | "Obrigado" com rascunho esperando ou nada pendente | A conversa continuou aberta, 3 de 3 em cada caso |
 | "O Excel fecha sozinho com macros" | N1 por dúvida do agent em 2 de 3. Na terceira, ele perguntou de onde veio a planilha |
@@ -158,7 +158,7 @@ As instruções e as ferramentas ficam em cache por cerca de 5 minutos e são li
 - "Tentar de novo" depois de uma resposta que falhou não conta nos tetos de uso, até 3 chamadas por mensagem. O custo de um dia ruim pode passar da conta feita só com primeiras tentativas.
 - O teto por IP pode ser contornado por quem troca de endereço, como no IPv6. O teto global por dia continua segurando o custo.
 - Só um chamado novo crítico transfere sozinho. Um chamado crítico já existente segue pela consulta. Se o funcionário nunca confirmar o rascunho, o caso fica com o analista sem chamado aberto.
-- Um "obrigado" solto não encerra a conversa, então quem sai sem confirmar não entra no número de resolvidos sem fila.
+- O número de resolvidos sem fila na tela de login começa dos dados de exemplo (13 de 18 conversas encerradas). Um "obrigado" solto não encerra a conversa, então quem sai sem confirmar não entra nele. Uma conversa que passou por um analista e voltou ao agent entra.
 
 ## Deploy
 
