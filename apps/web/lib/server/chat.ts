@@ -252,12 +252,16 @@ export async function chat(request: NextRequest, deps: Deps) {
       // step or token limits did finish, and is saved as it is.
       if (finishReason === undefined || finishReason === "error") {
         console.error("agent reply not saved", { conversationId: conversation.id, finishReason });
-        await discardDrafts(deps.db, responseMessage);
-        // It failed, so she may try again ("Tentar de novo"), a few times. A reply saved keeps the call: it is never repeated.
+        // Before anything else that can throw: she may try again ("Tentar de novo"), a few times.
         await releaseModelCall(deps.db, callKey);
+        await discardDrafts(deps.db, responseMessage);
         return;
       }
-      await saveReply(deps.db, { conversationId: conversation.id, startedAt, now: deps.now(), reply: responseMessage });
+      // A reply that could not be saved never reaches her either, so the call goes back too. One saved keeps it: never repeated.
+      await saveReply(deps.db, { conversationId: conversation.id, startedAt, now: deps.now(), reply: responseMessage }).catch(async (error: unknown) => {
+        await releaseModelCall(deps.db, callKey);
+        throw error;
+      });
       await closeIfResolved(deps, { conversationId: conversation.id, turnStartedAt: startedAt, reply: responseMessage });
       // The message that reached the limit is answered; the limit applies right after (ARQUITETURA.md, section 1).
       if (reachedLimit(conversation.messageCount)) await applyLimit(deps, conversation.id);

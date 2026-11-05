@@ -1,5 +1,5 @@
 import { localDay } from "@nexo/shared";
-import { inArray, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import type { Db } from "@/db";
 import { usageCounters } from "@/db/schema";
@@ -31,11 +31,12 @@ export function clientIp({ headers }: Pick<NextRequest, "headers">): string {
  * A message that passes keeps a row of that day, whose count is the calls it made: positive while a call runs or after
  * it ended, so a repeat is refused and two turns never call the model for one message. Only a reply that failed turns it
  * negative (releaseModelCall), which lets the same message try again, without counting on the ceilings, up to
- * MAX_CALLS_PER_MESSAGE. A process that died leaves it positive: nobody knows whether the model ran, so it is not repeated.
+ * MAX_CALLS_PER_MESSAGE. A process that died leaves it positive: nobody knows whether the model ran, so it is not repeated
+ * that day.
  *
- * The next day the row no longer counts, and a message that comes back goes through the ceilings like a new one, unless
- * a call of the day before may still be running. A reply saved is refused before this, on any day (chat.ts, startTurn).
- * A message refused by a ceiling has no row: it is looked at again if it comes back, and counts only then.
+ * The next day the row no longer counts, and a message that comes back goes through the ceilings like a new one. A reply
+ * saved is refused before this, on any day (chat.ts, startTurn). A message refused by a ceiling has no row: it is looked
+ * at again if it comes back, and counts only then.
  */
 export async function claimModelCall(
   { db, usageLimits, now }: Pick<Deps, "db" | "usageLimits" | "now">,
@@ -43,7 +44,6 @@ export async function claimModelCall(
 ): Promise<ModelCall> {
   const day = localDay(now());
   const key = `message:${day}:${messageId}`;
-  const dayBefore = `message:${day - 1}:${messageId}`;
   const visitor = `ip:${ip}:${day}`;
   const everyone = `global:${day}`;
   const used = (counter: string) => sql`coalesce((select count from ${usageCounters} where "key" = ${counter}), 0)`;
@@ -53,14 +53,13 @@ export async function claimModelCall(
       insert into ${usageCounters} ("key", count)
       select column1, 1 from (values (${key}), (${visitor}), (${everyone}))
       where not exists (select 1 from ${usageCounters} where "key" = ${key})
-        and not exists (select 1 from ${usageCounters} where "key" = ${dayBefore} and count > 0)
         and ${used(visitor)} < ${usageLimits.perIp}
         and ${used(everyone)} < ${usageLimits.global}
       on conflict ("key") do update set count = count + 1`),
-    db.select({ key: usageCounters.key, count: usageCounters.count }).from(usageCounters).where(inArray(usageCounters.key, [key, dayBefore])),
+    db.select({ key: usageCounters.key }).from(usageCounters).where(eq(usageCounters.key, key)),
   ]);
   if (retried.rowsAffected > 0 || counted.rowsAffected > 0) return { outcome: "granted", key };
-  return { outcome: rows.some((row) => row.key === key || row.count > 0) ? "repeat" : "over_ceiling" };
+  return { outcome: rows.length > 0 ? "repeat" : "over_ceiling" };
 }
 
 /** The reply of this call failed: the message may try again. */

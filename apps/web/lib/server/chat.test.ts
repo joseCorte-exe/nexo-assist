@@ -6,7 +6,7 @@ import { createMemory, createNexoAgent, simulatedModel } from "@nexo/agent";
 import { scriptedModel } from "@nexo/agent/testing";
 import { localDay } from "@nexo/shared";
 import { and, eq, ne } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createDb } from "@/db";
 import { migrateDb } from "@/db/migrate";
 import { conversations, decisions, drafts, messages, usageCounters } from "@/db/schema";
@@ -775,6 +775,26 @@ describe("POST /api/chat and the ceilings of the day", () => {
     expect(fourth.status).toBe(409);
     expect((await fourth.json()).error.code).toBe("resend_refused");
     expect(model.calls).toHaveLength(calls);
+    expect((await usage(deps))[today]).toBe(1);
+  });
+
+  it("gives the call back when the reply could not be saved, so her retry is answered without counting again", async () => {
+    const deps = await testDeps({ agent: testAgent(scriptedModel([...vpnScript(), ...vpnScript()])) });
+    const message = { id: "msg-ana-1", text: "Minha VPN dá erro 809" };
+    const key = `message:${localDay(NOW)}:${message.id}`;
+    const response = await chat(await post(message), deps);
+    // The batch that saves the reply fails once: the first one after the message was saved.
+    const failing = vi.spyOn(deps.db, "batch").mockRejectedValueOnce(new Error("database down"));
+    await readStream(response).catch(() => []);
+    await Promise.allSettled([deps.settled()]);
+    expect(failing).toHaveBeenCalled();
+    failing.mockRestore();
+    expect((await usage(deps))[key]).toBe(-1);
+
+    const again = await readStream(await chat(await post(message), deps));
+    await deps.settled();
+
+    expect(again.map((chunk) => chunk.type)).toContain("text-delta");
     expect((await usage(deps))[today]).toBe(1);
   });
 

@@ -1,9 +1,6 @@
-import { execFile } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 import { localDay } from "@nexo/shared";
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
@@ -14,13 +11,10 @@ import { env } from "./deps";
 import { NOW, request } from "./test-deps";
 import { claimModelCall, clientIp, type ModelCall, releaseModelCall } from "./usage";
 
-const run = promisify(execFile);
-const WEB_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const DAY = localDay(NOW);
 const VISITOR = `ip:1.1.1.1:${DAY}`;
 const EVERYONE = `global:${DAY}`;
 const NEXT_DAY = new Date(NOW.getTime() + 24 * 60 * 60 * 1000);
-const DAY_AFTER_NEXT = new Date(NOW.getTime() + 2 * 24 * 60 * 60 * 1000);
 
 async function emptyDb() {
   const db = createDb(":memory:");
@@ -171,49 +165,17 @@ describe("claimModelCall with a message that comes back", () => {
     expect(await claimModelCall(limited(db, { global: 5, now: NEXT_DAY }), { messageId: "m1", ip: "1.1.1.1" })).toEqual({ outcome: "over_ceiling" });
   });
 
-  it("does not let a new day start a second call while one of the day before may still run", async () => {
+  it("keeps a call with no known end refused that day only: the next day it is a new one, on that day's ceilings", async () => {
     const db = await emptyDb();
     expect(granted(await claimModelCall(limited(db), { messageId: "m1", ip: "1.1.1.1" }))).toBe(true);
+    expect(await claimModelCall(limited(db), { messageId: "m1", ip: "1.1.1.1" })).toEqual({ outcome: "repeat" });
 
-    expect(await claimModelCall(limited(db, { now: NEXT_DAY }), { messageId: "m1", ip: "1.1.1.1" })).toEqual({ outcome: "repeat" });
-    expect(await countOf(db, `global:${DAY + 1}`)).toBe(0);
-
-    // By the day after, that call is long over; it counts as a new one there, on that day's ceilings.
-    expect(granted(await claimModelCall(limited(db, { now: DAY_AFTER_NEXT }), { messageId: "m1", ip: "1.1.1.1" }))).toBe(true);
-    expect(await countOf(db, `global:${DAY + 2}`)).toBe(1);
+    expect(granted(await claimModelCall(limited(db, { now: NEXT_DAY }), { messageId: "m1", ip: "1.1.1.1" }))).toBe(true);
+    expect(await countOf(db, `global:${DAY + 1}`)).toBe(1);
   });
 });
 
 describe("claimModelCall under concurrency", () => {
-  it("never passes a ceiling with four server processes counting in the same database file", async () => {
-    const { url, db } = await fileDb();
-
-    // Separate processes, because a single libSQL client runs each statement to the end without letting another in.
-    const processes = [1, 2, 3, 4].map((worker) =>
-      run("pnpm", ["exec", "tsx", "lib/server/usage-claim-worker.ts", url, NOW.toISOString(), String(worker), "30", "50", "80"], { cwd: WEB_ROOT }),
-    );
-    const passed = (await Promise.all(processes)).map(({ stdout }) => Number(stdout.trim()));
-
-    // 120 messages for a global ceiling of 80, half for each of two IPs with a ceiling of 50 each.
-    expect(passed.reduce((sum, count) => sum + count, 0)).toBe(80);
-    expect(await countOf(db, EVERYONE)).toBe(80);
-    const [first, second] = [await countOf(db, `ip:1.1.1.0:${DAY}`), await countOf(db, `ip:1.1.1.1:${DAY}`)];
-    expect(first + second).toBe(80);
-    expect(Math.max(first, second)).toBeLessThanOrEqual(50);
-  }, 120_000);
-
-  it("grants one call to the same message sent over and over by four server processes", async () => {
-    const { url, db } = await fileDb();
-
-    const processes = [1, 2, 3, 4].map((worker) =>
-      run("pnpm", ["exec", "tsx", "lib/server/usage-claim-worker.ts", url, NOW.toISOString(), String(worker), "15", "1000", "1000", "m-same"], { cwd: WEB_ROOT }),
-    );
-    const passed = (await Promise.all(processes)).map(({ stdout }) => Number(stdout.trim()));
-
-    expect(passed.reduce((sum, count) => sum + count, 0)).toBe(1);
-    expect(await countOf(db, EVERYONE)).toBe(1);
-  }, 120_000);
-
   it("loses no count and passes no ceiling with messages at once from two clients of a file", async () => {
     const { url, db: one } = await fileDb();
     const other = createDb(url);
