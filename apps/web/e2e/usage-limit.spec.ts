@@ -10,7 +10,7 @@ test.afterAll(async () => {
   await forgetSince(["emp-gabriela"], STARTED);
 });
 
-test("past the ceiling the chat says the demo is unavailable, keeps the message and comes back with the next day", async ({ page }) => {
+test("past the ceiling the chat says the demo is unavailable and keeps the message, and the Nexo answers once there is room", async ({ page }) => {
   await setDayUsedUp(true);
   await page.goto("/login");
   await page.getByLabel("E-mail corporativo").fill("gabriela.rocha@nexo.com.br");
@@ -31,7 +31,6 @@ test("past the ceiling the chat says the demo is unavailable, keeps the message 
   await expect(page.getByText("Não enviada.")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Tentar de novo" })).toHaveCount(0);
   await expect(page.locator("#chat-counter")).toContainText("1/30");
-  if (process.env.USAGE_SHOT) await page.screenshot({ path: process.env.USAGE_SHOT });
 
   await page.reload();
   await expect(mine.last()).toHaveText("Qual o horário do service desk?");
