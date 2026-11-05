@@ -7,14 +7,14 @@ const MINUTE = 60 * SECOND;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
-type SampleEvent = Exclude<ConversationEvent, "limit_reached" | "resolved">;
+type SampleEvent = Exclude<ConversationEvent, "limit_reached">;
 
 type SampleMessage = {
   author: "employee" | "agent" | "analyst" | "system";
   text: string;
   ago: number;
   /** A note of the console: what happened, and the analyst who did it (or, for a transfer, nobody). */
-  /** The notes the sample data has; the limit and a resolved one are left to the tests and the walkthrough. */
+  /** The notes the sample data has; the limit is left to the tests and the walkthrough. */
   event?: SampleEvent;
   analystId?: string;
   decision?: { understanding: string; action: string; toolsUsed: string[]; confidence: number; reason: string };
@@ -172,7 +172,7 @@ const sampleConversations: SampleConversation[] = [
     employeeId: "emp-elisa",
     state: "closed",
     outcome: "resolved_by_agent",
-    closedAgo: 2 * HOUR,
+    closedAgo: 2 * HOUR - 5 * SECOND,
     messages: [
       { author: "employee", text: "A VPN está dando erro 809. Uso Windows 10.", ago: 2 * HOUR + 10 * MINUTE },
       {
@@ -188,6 +188,19 @@ const sampleConversations: SampleConversation[] = [
         },
       },
       { author: "employee", text: "Resolveu, obrigada!", ago: 2 * HOUR },
+      {
+        author: "agent",
+        text: "Que bom que resolveu. Se precisar de mais alguma coisa, é só escrever.",
+        ago: 2 * HOUR - 4 * SECOND,
+        decision: {
+          understanding: "Disse que o problema foi resolvido",
+          action: "Encerrar a conversa como resolvida",
+          toolsUsed: ["recordDecision", "markResolved"],
+          confidence: 0.95,
+          reason: "A funcionária confirmou que resolveu.",
+        },
+      },
+      { author: "system", text: "Resolvida pelo agent. Conversa encerrada.", event: "resolved", ago: 2 * HOUR - 5 * SECOND },
     ],
   },
   {
@@ -291,6 +304,7 @@ const analystOf = (id: string) => {
 
 /** A note as the moves of the conversation leave it: where a transfer went, and who assumed, released or closed. */
 function sampleNote({ event, analystId }: SampleMessage & { event: SampleEvent }, level: AnalystLevel | null, at: Date): ChatNote {
+  if (event === "resolved") return { event, at: at.toISOString() };
   if (event === "transferred") {
     if (!level) throw new Error("A sample transfer needs the level of its conversation");
     return { event, level, at: at.toISOString() };
