@@ -19,6 +19,7 @@ import {
   type Impact,
   isOverdue,
   isReopenable,
+  type MarkResolvedOutput,
   nexoToolSchemas,
   type OutOfScopeArea,
   type Priority,
@@ -67,6 +68,16 @@ export type TransferRecord = {
  */
 export type TransferStore = {
   transfer: (transfer: TransferRecord) => Promise<{ transferred: true; noteId: string } | { transferred: false }>;
+};
+
+type ResolutionRefusal = Extract<MarkResolvedOutput, { ok: false }>["reason"];
+
+/**
+ * Whether a conversation can end as solved, from the conversations database, which the web owns: why not, or null. It
+ * moves nothing: the route closes the conversation once the reply is saved, and checks again then.
+ */
+export type ResolutionStore = {
+  check: (conversationId: string) => Promise<ResolutionRefusal | null>;
 };
 
 /** Below this, the agent does not know what to do and an analyst takes the case (ARQUITETURA.md, section 2). */
@@ -139,11 +150,13 @@ export function createTools({
   ticketService,
   drafts,
   transfers,
+  resolutions,
   now,
 }: {
   ticketService: TicketDesk;
   drafts: DraftStore;
   transfers: TransferStore;
+  resolutions: ResolutionStore;
   now: () => Date;
 }) {
   const summarize = (ticket: Ticket, at: Date): TicketSummary => ({
@@ -453,6 +466,22 @@ export function createTools({
     };
   }
 
+  /**
+   * The model reads her words; whether the conversation may end is the store's to say. The tool only answers: a reply
+   * that fails closes nothing, since the route closes the conversation after saving the reply.
+   */
+  const markResolved = createTool({
+    id: "markResolved",
+    description:
+      "Encerra a conversa como resolvida, quando o funcionário disse que o problema foi resolvido. O código recusa se houver um rascunho esperando confirmação ou se um analista estiver com a conversa.",
+    ...nexoToolSchemas.markResolved,
+    requestContextSchema: turnContext,
+    execute: async (_input, context): Promise<MarkResolvedOutput> => {
+      const refusal = await resolutions.check(context.requestContext.get("conversationId"));
+      return refusal ? { ok: false, reason: refusal, message: RESOLUTION_REFUSAL[refusal] } : { ok: true };
+    },
+  });
+
   return {
     recordDecision,
     searchArticles,
@@ -463,8 +492,15 @@ export function createTools({
     offerReplies,
     draftTicket,
     transferToAnalyst,
+    markResolved,
   };
 }
+
+/** What the model is told when the conversation cannot end now, so it says what is missing instead. */
+const RESOLUTION_REFUSAL: Record<ResolutionRefusal, string> = {
+  draft_pending: "Há um rascunho esperando a confirmação do funcionário e a conversa continua aberta. Peça para ele confirmar ou cancelar no card.",
+  not_with_agent: "Um analista já está com esta conversa e ela continua aberta.",
+};
 
 /** What the model is told when the ticket cannot take the change, so it knows what to draft instead. */
 const REFUSAL_TO_MODEL: Record<DraftRejection, (ticketId: string) => string> = {

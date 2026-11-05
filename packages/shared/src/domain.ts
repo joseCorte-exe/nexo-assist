@@ -64,5 +64,5 @@ export const MAX_TRANSFER_SUMMARY = 600;
 /** The longest message of an analyst, which is also the longest text a ticket takes as an update. */
 export const MAX_MESSAGE_TEXT = 2000;
 
-export const conversationEvent = z.enum(["transferred", "assumed", "released", "closed", "limit_reached"]);
+export const conversationEvent = z.enum(["transferred", "assumed", "released", "closed", "resolved", "limit_reached"]);
 export type ConversationEvent = z.infer<typeof conversationEvent>;

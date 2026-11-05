@@ -21,6 +21,7 @@ function iconOf(note: NoteView): NoteIcon {
     case "released":
       return BotIcon;
     case "closed":
+    case "resolved":
       return CircleCheckBigIcon;
     case "limit_reached":
       return LIMIT_ICONS[note.limit.then];

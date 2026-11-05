@@ -68,7 +68,7 @@ function setup({ reads = "up", marks = "up", stillWithAgent = true } = {}) {
       return stillWithAgent ? { transferred: true, noteId: `note-${record.conversationId}-transferred-1` } : { transferred: false };
     },
   };
-  const { transferToAnalyst } = createTools({ ticketService: desk, drafts: { save: unexpected }, transfers: store, now: () => NOW });
+  const { transferToAnalyst } = createTools({ ticketService: desk, drafts: { save: unexpected }, transfers: store, resolutions: { check: unexpected }, now: () => NOW });
   return { transferToAnalyst, transfers, marked };
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { NexoUIMessage } from "./chat";
-import { decisionOf, isRefusedInput, replyText, shownDraft, summarizeTurn, textOf, withToolErrors } from "./chat-parts";
+import { decisionOf, isRefusedInput, markedResolved, replyText, shownDraft, summarizeTurn, textOf, withToolErrors } from "./chat-parts";
 
 const decision = {
   understanding: "Quer saber o horário do service desk",
@@ -15,6 +15,15 @@ type Part = NexoUIMessage["parts"][number];
 const tool = (name: string, input: unknown, output: unknown = { ok: true }) =>
   ({ type: `tool-${name}`, toolCallId: `call-${name}`, state: "output-available", input, output }) as Part;
 const text = (value: string): Part => ({ type: "text", text: value });
+
+describe("markedResolved", () => {
+  it("is only a markResolved the code let through", () => {
+    expect(markedResolved([tool("recordDecision", decision), tool("markResolved", {}), text("Que bom que resolveu.")])).toBe(true);
+    expect(markedResolved([tool("markResolved", {}, { ok: false, reason: "draft_pending", message: "Há um rascunho." })])).toBe(false);
+    expect(markedResolved([tool("markResolved", {}, { error: true, message: "Entrada inválida." })])).toBe(false);
+    expect(markedResolved([tool("searchArticles", { query: "vpn" }), text("Reinstale o cliente.")])).toBe(false);
+  });
+});
 
 describe("summarizeTurn", () => {
   it("takes the record from recordDecision and lists the tools in the order they ran", () => {

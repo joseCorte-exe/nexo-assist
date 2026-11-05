@@ -5,6 +5,7 @@ import {
   apiError,
   type ChatNote,
   isPaused,
+  markedResolved,
   type ConversationResponse,
   type ConversationView,
   clockTime,
@@ -117,8 +118,8 @@ export function Chat({
     onFinish: ({ message, isError }) => {
       if (isError) return;
       setFailures(0);
-      // The first part says where the message went: a new conversation, or one an analyst has now. A transfer in this
-      // reply moved it after that part: the conversation is read again, with the note it left.
+      // The first part says where the message went: a new conversation, or one an analyst has now. A transfer or an end
+      // in this reply moved it after that part: the conversation is read again, with the note it left.
       const part = message.parts.find((one) => one.type === "data-conversation");
       const known = conversationRef.current;
       if (part?.type === "data-conversation" && (part.data.id !== known?.id || part.data.state !== known?.state)) setConversation(part.data);
@@ -127,7 +128,7 @@ export function Chat({
       // Unless the demo was unavailable: nobody answered, so it applies at her next message, and a read would take the notice away.
       const unavailable = message.parts.some((one) => one.type === "data-unavailable");
       const atLimit = !unavailable && part?.type === "data-conversation" && reachedLimit(part.data.messageCount);
-      if (transferred || atLimit || (part?.type === "data-conversation" && part.data.state !== "with_agent")) void sync.refresh();
+      if (transferred || markedResolved(message.parts) || atLimit || (part?.type === "data-conversation" && part.data.state !== "with_agent")) void sync.refresh();
     },
   });
 

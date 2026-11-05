@@ -15,6 +15,7 @@ import { chat } from "./chat";
 import { conversationHandler, loadConversation } from "./conversation";
 import { createDraftStore } from "./drafts";
 import { presenceHandler } from "./presence";
+import { createResolutionStore } from "./resolutions";
 import { createTransferStore } from "./transfers";
 import {
   ana,
@@ -482,6 +483,7 @@ describe("POST /api/chat under concurrent messages", () => {
         ticketService,
         drafts: createDraftStore(db),
         transfers: createTransferStore({ db, memory }),
+        resolutions: createResolutionStore(db),
       }),
     });
     const employees = [
