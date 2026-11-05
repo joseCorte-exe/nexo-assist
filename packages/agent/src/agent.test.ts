@@ -126,6 +126,16 @@ describe("streamReply", () => {
     expect(model.calls[1]?.toolChoice).toEqual({ type: "auto" });
   });
 
+  it("takes recordDecision away after the first step: the decision is recorded once", async () => {
+    const { agent, model } = setup(hoursScript());
+    await replyOf(agent, turn);
+    const toolsOf = (call: number) => (model.calls[call]!.tools ?? []).map((tool) => tool.name);
+    expect(toolsOf(0)).toContain("recordDecision");
+    expect(toolsOf(1)).not.toContain("recordDecision");
+    expect(toolsOf(1)).toContain("searchArticles");
+    expect(toolsOf(2)).not.toContain("recordDecision");
+  });
+
   it("gives the model the article the help center found", async () => {
     const { agent, model } = setup(hoursScript());
     await replyOf(agent, turn);

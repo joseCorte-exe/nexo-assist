@@ -175,8 +175,14 @@ type Step = { text: string; toolResults: ReadonlyArray<ToolResult> };
 /** The Mastra tool the model calls to keep the summary of the case (the working memory). */
 const WORKING_MEMORY_TOOL = "updateWorkingMemory";
 
-/** Every tool but the offers, for the steps after a draft was shown. */
-const AFTER_DRAFT_TOOLS = [...Object.keys(nexoToolSchemas).filter((tool) => !OFFER_TOOLS.has(tool)), WORKING_MEMORY_TOOL];
+/**
+ * Every tool but recordDecision, for the steps after the first. The decision is recorded once: the first one is what the
+ * screen and the console keep (decisionOf), so a second only costs a step of the five.
+ */
+const AFTER_DECISION_TOOLS = [...Object.keys(nexoToolSchemas).filter((tool) => tool !== "recordDecision"), WORKING_MEMORY_TOOL];
+
+/** Those but the offers, for the steps after a draft was shown. */
+const AFTER_DRAFT_TOOLS = AFTER_DECISION_TOOLS.filter((tool) => !OFFER_TOOLS.has(tool));
 
 /** Tools that close a reply once the model wrote its sentence about them: the screen draws the rest. */
 const CLOSING_TOOLS = new Set(["draftTicket", "transferToAnalyst", "markResolved"]);
@@ -239,9 +245,9 @@ export function streamReply(agent: NexoAgent, { conversationId, employeeId, text
     // An offer that was shown hands the turn to the employee, who answers with a click: calling the model again would
     // only cost. One that could not be shown (refused input, no ticket of hers, service down) lets the model explain.
     stopWhen: ({ steps }: { steps: ReadonlyArray<Step> }) => replyDone(steps.at(-1)),
-    // recordDecision is mandatory in the first step; afterwards the model chooses. Once a draft is shown, the offers go:
-    // its card has Confirmar, Editar and Cancelar, and quick replies under it would only send those words as a message.
-    // Below 0.6 the step after the decision transfers, as the doubt of the agent: the code says so, not the model. Once
+    // recordDecision is mandatory in the first step and gone after it. Once a draft is shown, the offers go too: its card
+    // has Confirmar, Editar and Cancelar, and quick replies under it would only send those words as a message. Below 0.6
+    // the step after the decision transfers, as the doubt of the agent: the code says so, not the model. Once
     // transferred, or drafted as critical, which the route transfers, the model only says to whom and until when; once
     // resolved, its closing sentence.
     prepareStep: ({ stepNumber, steps }) => {
@@ -251,7 +257,7 @@ export function streamReply(agent: NexoAgent, { conversationId, employeeId, text
         turn.confidence = recordedConfidence(steps[0]);
         if (turn.confidence !== null && turn.confidence < MIN_CONFIDENCE) return { toolChoice: { type: "tool", toolName: "transferToAnalyst" } };
       }
-      return ran(steps, "draftTicket") ? { activeTools: AFTER_DRAFT_TOOLS } : undefined;
+      return { activeTools: ran(steps, "draftTicket") ? AFTER_DRAFT_TOOLS : AFTER_DECISION_TOOLS };
     },
     modelSettings: { maxOutputTokens: MAX_OUTPUT_TOKENS, timeout: { totalMs: TOTAL_TIMEOUT_MS } },
   });
