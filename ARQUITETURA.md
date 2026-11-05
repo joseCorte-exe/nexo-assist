@@ -73,16 +73,16 @@ Por que essas escolhas:
  +--------------------- apps/web (Next.js) ------------------------+
  | auth, 30-message limit, agent-paused check,                     |
  | draft confirmation, console routes, usage limits                |
- +----------+----------------------------------------+-------------+
-            | import                                 | Drizzle
-            v                                        v
- +--- packages/agent ---+                 +--- conversations DB ------+
- | Mastra + Haiku 5.5   |---------------->| conversations, messages,  |
- | tools,               |  memory         | decisions, drafts,        |
- | recordDecision       |  (mastra_*)     | usage_counters, mastra_*  |
- +----------+-----------+                 +---------------------------+
-            | HTTP with service secret, retry, timeout, idempotency key
-            v
+ +--+-------+----------------------------------------+-------------+
+    |       | import                                 | Drizzle
+    |       v                                        v
+    |  +--- packages/agent ---+           +--- conversations DB ------+
+    |  | Mastra + Haiku 5.5   |---------->| conversations, messages,  |
+    |  | tools,               |  memory   | decisions, drafts,        |
+    |  | recordDecision       | (mastra_*)| usage_counters, mastra_*  |
+    |  +----------+-----------+           +---------------------------+
+    |             |
+    v             v  HTTP with service secret, retry, timeout, idempotency key
  +--- apps/ticket-service (Hono) ---+     +--- tickets DB -----------+
  | people, tickets, articles,       |---->| employees, analysts,     |
  | SLA, reopen, transfer,           |     | tickets, ticket_updates, |

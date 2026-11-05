@@ -38,16 +38,16 @@ Para entrar, qualquer senha serve. `ana.souza@nexo.com.br` entra como funcionár
  +--------------------- apps/web (Next.js) ------------------------+
  | auth, 30-message limit, agent-paused check,                     |
  | draft confirmation, console routes                              |
- +----------+----------------------------------------+-------------+
-            | import                                 | Drizzle
-            v                                        v
- +--- packages/agent ---+                 +--- conversations DB ------+
- | Mastra + Haiku 5.5   |---------------->| conversations, messages,  |
- | tools,               |  memory         | decisions, drafts,        |
- | recordDecision       |  (mastra_*)     | mastra_*                  |
- +----------+-----------+                 +---------------------------+
-            | HTTP with service secret, retry, timeout, idempotency key
-            v
+ +--+-------+----------------------------------------+-------------+
+    |       | import                                 | Drizzle
+    |       v                                        v
+    |  +--- packages/agent ---+           +--- conversations DB ------+
+    |  | Mastra + Haiku 5.5   |---------->| conversations, messages,  |
+    |  | tools,               |  memory   | decisions, drafts,        |
+    |  | recordDecision       | (mastra_*)| mastra_*                  |
+    |  +----------+-----------+           +---------------------------+
+    |             |
+    v             v  HTTP with service secret, retry, timeout, idempotency key
  +--- apps/ticket-service (Hono) ---+     +--- tickets DB -----------+
  | people, tickets, articles,       |---->| employees, analysts,     |
  | SLA, reopen, transfer,           |     | tickets, ticket_updates, |
@@ -56,18 +56,18 @@ Para entrar, qualquer senha serve. `ana.souza@nexo.com.br` entra como funcionár
  packages/shared: Zod schemas, types, chat stream contract, SLA, HTTP client
 ```
 
-- `apps/web` tem as telas e as rotas `/api`. A resposta do agent chega em partes, e o chat e o console buscam novidades a cada 3 segundos.
+- `apps/web` tem as telas e as rotas `/api`, e fala direto com o ticket-service no login, na confirmação do rascunho e no console. A resposta do agent chega em partes. O console busca novidades a cada 3 segundos. O chat só busca enquanto a conversa está com um analista ou esperando um, a cada 3 segundos com a aba aberta e a cada 15 com ela escondida.
 - `packages/agent` tem o agent do Mastra, as ferramentas e as instruções. Ele roda dentro do web.
 - `apps/ticket-service` é o sistema de chamados simulado. Roda em outro processo, com banco próprio, e toda rota exige um segredo que só o web conhece.
 - `packages/shared` guarda o que os dois lados precisam entender igual: os contratos em Zod, as regras de prioridade e prazo e o cliente HTTP.
 
-Conversas, chamados e o estado de cada conversa ficam em banco (SQLite em arquivo no local), então sobrevivem a um reinício. O serviço de chamados cai de vez em quando, como o legado do PRD. O cliente tenta até 3 vezes, e as escritas só são repetidas com uma chave de idempotência, para uma nova tentativa não criar outro chamado.
+Conversas, chamados e o estado de cada conversa ficam em banco (SQLite em arquivo no local), então sobrevivem a um reinício. Com `OUTAGE_RATE` acima de 0, ou pela rota `POST /admin/outage?seconds=`, o serviço de chamados cai por alguns segundos, como o legado do PRD. O `.env.example` vem com `OUTAGE_RATE=0`. O cliente tenta até 3 vezes, e as escritas só são repetidas com uma chave de idempotência, para uma nova tentativa não criar outro chamado.
 
 ## Como o agent decide
 
 O modelo interpreta a conversa, e o código aplica as regras que não podem falhar.
 
-O modelo decide o que o funcionário quer, classifica o tipo e a categoria, identifica impacto e urgência, julga se um chamado parecido é o mesmo problema, pergunta o que falta e escreve a resposta. Para isso ele tem estas ferramentas:
+O modelo decide o que o funcionário quer, classifica a categoria, identifica impacto e urgência, julga se um chamado parecido é o mesmo problema e escreve a resposta. Quando falta informação, as instruções mandam perguntar em vez de transferir, e a confiança dele passa a ser sobre a pergunta. Para isso ele tem estas ferramentas:
 
 | Ferramenta | O que faz |
 |---|---|
@@ -81,16 +81,18 @@ O modelo decide o que o funcionário quer, classifica o tipo e a categoria, iden
 
 Estas regras ficam no código:
 
-- A prioridade sai do impacto e da urgência, lidos na tabela do Anexo A de cima para baixo. Vale a primeira linha que bater.
-- O prazo conta da abertura ou da última resposta da TI, em horas úteis no fuso de São Paulo. O complemento do funcionário não reinicia o prazo. Passou sem estar resolvido, está vencido.
-- Antes de criar um chamado, o código busca os que podem ser o mesmo problema e exige que o rascunho diga por que não é duplicado.
-- Nada é criado antes do clique em Confirmar. A confirmação vai direto para o ticket-service, sem passar pelo modelo.
-- Só dá para reabrir até 7 dias depois da resolução.
-- O id do funcionário vem da sessão, nunca do modelo, e o ticket-service recusa chamado de outra pessoa.
-- Caso crítico ou chamado vencido vai para o N2. Pedido do funcionário ou dúvida do agent vai para o N1.
-- Confiança abaixo de 0,6 obriga a transferência no passo seguinte. Quando falta informação, o agent pergunta, e a confiança dele é sobre a pergunta.
-- Com a conversa fora de `with_agent`, a mensagem é gravada e o modelo não é chamado.
-- O limite de 30 mensagens também não passa pelo modelo. Com algo pendente, a conversa vai para um analista; sem nada pendente, ela encerra. O limite conta as mensagens do funcionário por conversa: é essa a "sessão" do PRD.
+| Regra | Onde |
+|---|---|
+| O tipo e a prioridade saem do impacto e da urgência. A prioridade lê a tabela do Anexo A de cima para baixo, e vale a primeira linha que bater | `packages/shared/src/priority.ts`, `packages/agent/src/tools.ts` |
+| O prazo conta da abertura ou da última resposta da TI, em horas úteis no fuso de São Paulo. O crítico conta 24 horas por dia. A reabertura conta como nova abertura, e o complemento do funcionário não reinicia o prazo. Passou sem estar resolvido, está vencido | `packages/shared/src/sla.ts` |
+| Antes de criar um chamado, o código busca os que podem ser o mesmo problema. Se houver algum, exige que o rascunho diga por que não é duplicado | `packages/agent/src/tools.ts` |
+| Nada é criado antes do clique em Confirmar, e a confirmação vai direto para o ticket-service, sem passar pelo modelo | `apps/web/lib/server/drafts.ts` |
+| Só dá para reabrir até 7 dias depois da resolução | `packages/shared/src/ticket-change.ts` |
+| O id do funcionário vem da sessão, nunca do modelo, e o ticket-service recusa chamado de outra pessoa | `packages/agent/src/agent.ts`, `apps/ticket-service/src/routes/tickets.ts` |
+| Caso crítico ou chamado vencido vai para o N2. Pedido do funcionário ou dúvida do agent vai para o N1 | `packages/shared/src/transfer.ts` |
+| Confiança abaixo de 0,6 obriga a transferência no passo seguinte | `packages/agent/src/agent.ts` |
+| Com a conversa fora de `with_agent`, a mensagem é gravada e o modelo não é chamado | `apps/web/lib/server/chat.ts` |
+| O limite de 30 mensagens não passa pelo modelo. Com algo pendente, a conversa vai para um analista; sem nada pendente, ela encerra; se um analista já está com ela ou ela já espera um, nada muda. O limite conta as mensagens do funcionário por conversa: é essa a "sessão" do PRD | `apps/web/lib/server/limit.ts` |
 
 ### Como ver o que ele fez
 
@@ -128,14 +130,14 @@ Medido com preço de US$ 0,10 por milhão de tokens de entrada, US$ 0,01 de leit
 | Complementar um chamado | 3 a 4 s | cerca de US$ 0,002 |
 | Transferir para um analista | 4 a 5 s | US$ 0,0008 a 0,0015 por resposta |
 
-As instruções e as ferramentas somam 3,5 mil tokens e ficam em cache, lidos a um décimo do preço. Cada resposta tem limite de 5 passos, 800 tokens de saída e 45 segundos.
+As instruções e as ferramentas somam 3,5 mil tokens e ficam em cache por cerca de 5 minutos, lidos a um décimo do preço. Os relatórios não separam as respostas com e sem cache. Numa resposta sem cache, esses tokens custam cerca de US$ 0,00035 a mais pelo preço de entrada, fora a escrita no cache. Cada resposta tem limite de 5 passos, 800 tokens de saída e 45 segundos.
 
 ## Principais trade-offs
 
 | Escolha | Ganho | Custo |
 |---|---|---|
 | Mastra em vez de LangGraph | É a preferência do PRD e já traz ferramentas, memória e stream. O forte do LangGraph é fluxo com vários agents, e aqui só existe um | Menos controle explícito do fluxo, compensado com `prepareStep` |
-| Busca a cada 3 s em vez de conexão aberta | Funciona em serverless, sem infraestrutura a mais | A mensagem do analista pode levar até 3 s para aparecer |
+| Busca periódica em vez de conexão aberta | Funciona em serverless, sem infraestrutura a mais | A mensagem do analista pode levar até 3 s para aparecer com a aba aberta |
 | Histórico em dois lugares | A tabela `messages` é a fonte oficial e atende buscas e console; a memória do Mastra dá contexto ao agent | Tudo o que acontece fora do agent precisa ser copiado para a memória |
 | Agent como pacote dentro do web | Menos um deploy e menos um segredo | Agent e web sobem e caem juntos |
 | Dois bancos | O serviço de chamados fica mesmo separado, como o PRD pede | Duas migrações e dois seeds |
@@ -144,13 +146,14 @@ As instruções e as ferramentas somam 3,5 mil tokens e ficam em cache, lidos a 
 
 ## Limitações conhecidas
 
-- O selo "Resolvido pelo agent" e o número de resolvidos sem fila dependem do desfecho `resolved_by_agent`, que ainda não vem de uma confirmação do funcionário.
+- A resposta do analista no console ainda não reinicia o prazo do chamado. Só os dados de exemplo têm `last_it_response_at` preenchido.
+- Nenhum fluxo grava o desfecho `resolved_by_agent`, só o seed. O número de resolvidos sem fila na tela de login vem dos dados de exemplo.
 - Os testes com o modelo real foram rodados à mão. Não existe um comando que os repita.
 - O limite por IP e o limite global por dia ainda não estão ligados. A tabela `usage_counters` existe, mas nada a usa.
 
 ## Deploy
 
-O web e o ticket-service são dois projetos na Vercel, cada um com seu banco no Turso. As chaves ficam só no painel da Vercel, e o `apps/ticket-service/vercel.json` empacota o serviço junto com o `packages/shared`, porque o Node da Vercel não abre TypeScript dentro de `node_modules`.
+O web e o ticket-service são dois projetos na Vercel, cada um com seu banco no Turso. As chaves ficam só no painel da Vercel, e o script `build` do ticket-service junta o serviço e o `packages/shared` num arquivo só, que o `apps/ticket-service/vercel.json` manda publicar, porque o Node da Vercel não abre TypeScript dentro de `node_modules`.
 
 Link publicado: a preencher.
 
@@ -158,5 +161,5 @@ Link publicado: a preencher.
 
 - Transformar as rodadas com o modelo real em um comando, com cada caso ligado a uma história ou regra do PRD, para repetir a cada mudança nas instruções.
 - Registrar a confirmação do funcionário de que o problema foi resolvido, para o número de resolvidos sem fila ficar exato.
-- Trocar a busca a cada 3 s por uma conexão aberta no chat e no console.
+- Trocar a busca periódica por uma conexão aberta no chat e no console.
 - Testar um modelo feito só para decisões para dar a nota de confiança, deixando o Haiku com a conversa.
