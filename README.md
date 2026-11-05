@@ -1,6 +1,8 @@
 # Nexo Assist
 
-Desafio técnico da Beyond the Bytes. A arquitetura e as decisões estão em [ARQUITETURA.md](ARQUITETURA.md).
+Agent de atendimento do service desk de TI da Nexo, feito para o desafio técnico da Beyond the Bytes. O funcionário descreve o problema no chat. O agent consulta os chamados dele, busca na central de ajuda, monta o rascunho de um chamado e chama um analista quando precisa. O analista atende pelo console.
+
+As decisões completas estão em [ARQUITETURA.md](ARQUITETURA.md), e o que cada feature entregou, com testes e medições, está em [docs/features](docs/features).
 
 ## Como rodar
 
@@ -14,10 +16,147 @@ pnpm db:seed
 pnpm dev
 ```
 
-`pnpm db:seed` recria os dados de exemplo com datas relativas a hoje. `pnpm test` roda os testes. `pnpm test:e2e` sobe o ticket-service e o web com bancos novos e roda os testes no navegador (na primeira vez, `pnpm --filter @nexo/web exec playwright install chromium`).
-
 O web sobe em http://localhost:3000 e o ticket-service em http://localhost:3001.
 
-O agent usa o Claude Haiku 5.5 e precisa de `ANTHROPIC_API_KEY` no `.env`. Sem chave, `NEXO_AGENT_MODEL=simulated` troca o modelo por regras fixas, as mesmas dos testes no navegador: o resto do agent (ferramentas, memória, registro de decisão) roda igual.
+O agent usa o Claude Haiku 5.5 e precisa de `ANTHROPIC_API_KEY` no `.env`. Sem chave, `NEXO_AGENT_MODEL=simulated` troca o modelo por regras fixas, as mesmas dos testes no navegador. O resto do agent (ferramentas, memória, registro de decisão) roda igual.
 
 Para entrar, qualquer senha serve. `ana.souza@nexo.com.br` entra como funcionária e `rafael.lima@nexo.com.br` como analista N2.
+
+| Comando | O que faz |
+|---|---|
+| `pnpm db:seed` | Recria os dados de exemplo, com datas relativas a hoje |
+| `pnpm test` | Roda os testes de unidade e de integração |
+| `pnpm test:e2e` | Sobe o ticket-service e o web com bancos novos e roda os testes no navegador. Na primeira vez, rode `pnpm --filter @nexo/web exec playwright install chromium` |
+| `pnpm typecheck` | Confere os tipos dos quatro pacotes |
+
+## Arquitetura
+
+```
+ Employee (chat)                          Analyst (console)
+         |                                         |
+         v                                         v
+ +--------------------- apps/web (Next.js) ------------------------+
+ | auth, 30-message limit, agent-paused check,                     |
+ | draft confirmation, console routes                              |
+ +----------+----------------------------------------+-------------+
+            | import                                 | Drizzle
+            v                                        v
+ +--- packages/agent ---+                 +--- conversations DB ------+
+ | Mastra + Haiku 5.5   |---------------->| conversations, messages,  |
+ | tools,               |  memory         | decisions, drafts,        |
+ | recordDecision       |  (mastra_*)     | mastra_*                  |
+ +----------+-----------+                 +---------------------------+
+            | HTTP with service secret, retry, timeout, idempotency key
+            v
+ +--- apps/ticket-service (Hono) ---+     +--- tickets DB -----------+
+ | people, tickets, articles,       |---->| employees, analysts,     |
+ | SLA, reopen, transfer,           |     | tickets, ticket_updates, |
+ | simulated outages                |     | kb_articles, idempotency |
+ +----------------------------------+     +--------------------------+
+ packages/shared: Zod schemas, types, chat stream contract, SLA, HTTP client
+```
+
+- `apps/web` tem as telas e as rotas `/api`. A resposta do agent chega em partes, e o chat e o console buscam novidades a cada 3 segundos.
+- `packages/agent` tem o agent do Mastra, as ferramentas e as instruções. Ele roda dentro do web.
+- `apps/ticket-service` é o sistema de chamados simulado. Roda em outro processo, com banco próprio, e toda rota exige um segredo que só o web conhece.
+- `packages/shared` guarda o que os dois lados precisam entender igual: os contratos em Zod, as regras de prioridade e prazo e o cliente HTTP.
+
+Conversas, chamados e o estado de cada conversa ficam em banco (SQLite em arquivo no local), então sobrevivem a um reinício. O serviço de chamados cai de vez em quando, como o legado do PRD. O cliente tenta até 3 vezes, e as escritas só são repetidas com uma chave de idempotência, para uma nova tentativa não criar outro chamado.
+
+## Como o agent decide
+
+O modelo interpreta a conversa, e o código aplica as regras que não podem falhar.
+
+O modelo decide o que o funcionário quer, classifica o tipo e a categoria, identifica impacto e urgência, julga se um chamado parecido é o mesmo problema, pergunta o que falta e escreve a resposta. Para isso ele tem estas ferramentas:
+
+| Ferramenta | O que faz |
+|---|---|
+| `recordDecision` | Grava o que entendeu, a ação, a confiança de 0 a 1 e o motivo. É obrigatória no primeiro passo de toda resposta |
+| `searchArticles` | Procura na central de ajuda |
+| `listMyTickets`, `getTicket` | Consultam os chamados de quem está conversando |
+| `offerTicketChoice`, `offerReplies` | Mostram uma lista de chamados ou respostas rápidas e encerram a resposta |
+| `draftTicket` | Monta o rascunho para criar, complementar ou reabrir |
+| `transferToAnalyst` | Passa a conversa para um analista, com o resumo do caso |
+| `redirectOutOfScope` | Indica o canal de RH, financeiro ou facilities |
+
+Estas regras ficam no código:
+
+- A prioridade sai do impacto e da urgência, lidos na tabela do Anexo A de cima para baixo. Vale a primeira linha que bater.
+- O prazo conta da abertura ou da última resposta da TI, em horas úteis no fuso de São Paulo. O complemento do funcionário não reinicia o prazo. Passou sem estar resolvido, está vencido.
+- Antes de criar um chamado, o código busca os que podem ser o mesmo problema e exige que o rascunho diga por que não é duplicado.
+- Nada é criado antes do clique em Confirmar. A confirmação vai direto para o ticket-service, sem passar pelo modelo.
+- Só dá para reabrir até 7 dias depois da resolução.
+- O id do funcionário vem da sessão, nunca do modelo, e o ticket-service recusa chamado de outra pessoa.
+- Caso crítico ou chamado vencido vai para o N2. Pedido do funcionário ou dúvida do agent vai para o N1.
+- Confiança abaixo de 0,6 obriga a transferência no passo seguinte. Quando falta informação, o agent pergunta, e a confiança dele é sobre a pergunta.
+- Com a conversa fora de `with_agent`, a mensagem é gravada e o modelo não é chamado.
+- O limite de 30 mensagens também não passa pelo modelo. Com algo pendente, a conversa vai para um analista; sem nada pendente, ela encerra. O limite conta as mensagens do funcionário por conversa: é essa a "sessão" do PRD.
+
+### Como ver o que ele fez
+
+Acima de cada resposta aparece a linha de ações ("consultou seus chamados", "classificou a prioridade"). Ao expandir, aparecem o entendimento, a ação, a confiança e o motivo. O analista vê o mesmo detalhe no console, e a tela mostra o aviso quando a confiança está baixa.
+
+## Como garanti a qualidade das decisões
+
+Os 718 testes de unidade e de integração cobrem as regras do código: prioridade, prazo, reabertura, privacidade, idempotência, quedas do serviço e as ferramentas do agent. Como essas regras não dependem do modelo, os testes dão o mesmo resultado a cada execução.
+
+Os 56 testes em Playwright rodam as histórias do PRD de ponta a ponta com o modelo simulado: login, consulta, rascunho, confirmação, analista assumindo, limite e volta em outro dia.
+
+O que depende do modelo foi testado com o Haiku 5.5 de verdade. Cada feature a partir da 3 rodou seus caminhos, em geral três vezes cada, e o resultado está no relatório dela. Exemplos:
+
+| Caso | Resultado |
+|---|---|
+| Consulta sem número do chamado (12 rodadas) | Seguiu a regra nas 12 |
+| Abrir e complementar um chamado (9 rodadas) | Classificou certo nas 9 |
+| Pedido de analista | N1, 3 de 3 |
+| Chamado vencido | N2, 3 de 3 |
+| "O Excel fecha sozinho com macros" | N1 por dúvida do agent em 2 de 3. Na terceira, ele perguntou de onde veio a planilha |
+| Volta depois de três dias | Nas 3, consultou os chamados de novo antes de responder |
+
+Essas rodadas mudaram o código. Na da feature 5, por exemplo, o Haiku às vezes pedia a transferência duas vezes no mesmo passo, e agora a segunda chamada recebe a resposta da primeira, sem repetir nada.
+
+## O modelo e o custo
+
+Usei o Claude Haiku 5.5, o mais barato e o mais rápido da família. O PRD avalia custo por conversa, e os testes acima mostraram que ele dá conta da decisão. O Sonnet 5.5 ficou como reserva caso o Haiku falhasse nesses testes.
+
+Medido com preço de US$ 0,10 por milhão de tokens de entrada, US$ 0,01 de leitura de cache e US$ 0,50 de saída:
+
+| Fluxo | Tempo de cada resposta | Custo |
+|---|---|---|
+| Consultar um chamado | 3 a 5 s | US$ 0,0005 a 0,0009 por resposta |
+| Abrir um chamado do começo ao fim | 4 a 6 s | cerca de US$ 0,003 |
+| Complementar um chamado | 3 a 4 s | cerca de US$ 0,002 |
+| Transferir para um analista | 4 a 5 s | US$ 0,0008 a 0,0015 por resposta |
+
+As instruções e as ferramentas somam 3,5 mil tokens e ficam em cache, lidos a um décimo do preço. Cada resposta tem limite de 5 passos, 800 tokens de saída e 45 segundos.
+
+## Principais trade-offs
+
+| Escolha | Ganho | Custo |
+|---|---|---|
+| Mastra em vez de LangGraph | É a preferência do PRD e já traz ferramentas, memória e stream. O forte do LangGraph é fluxo com vários agents, e aqui só existe um | Menos controle explícito do fluxo, compensado com `prepareStep` |
+| Busca a cada 3 s em vez de conexão aberta | Funciona em serverless, sem infraestrutura a mais | A mensagem do analista pode levar até 3 s para aparecer |
+| Histórico em dois lugares | A tabela `messages` é a fonte oficial e atende buscas e console; a memória do Mastra dá contexto ao agent | Tudo o que acontece fora do agent precisa ser copiado para a memória |
+| Agent como pacote dentro do web | Menos um deploy e menos um segredo | Agent e web sobem e caem juntos |
+| Dois bancos | O serviço de chamados fica mesmo separado, como o PRD pede | Duas migrações e dois seeds |
+| Um modelo só | Simples de medir e barato | Sem um modelo mais forte para os casos difíceis; a dúvida vai para o analista |
+| Sessão em cookie assinado | Sem tabela de sessões | Não dá para derrubar uma sessão específica pelo servidor |
+
+## Limitações conhecidas
+
+- O selo "Resolvido pelo agent" e o número de resolvidos sem fila dependem do desfecho `resolved_by_agent`, que ainda não vem de uma confirmação do funcionário.
+- Os testes com o modelo real foram rodados à mão. Não existe um comando que os repita.
+- O limite por IP e o limite global por dia ainda não estão ligados. A tabela `usage_counters` existe, mas nada a usa.
+
+## Deploy
+
+O web e o ticket-service são dois projetos na Vercel, cada um com seu banco no Turso. As chaves ficam só no painel da Vercel, e o `apps/ticket-service/vercel.json` empacota o serviço junto com o `packages/shared`, porque o Node da Vercel não abre TypeScript dentro de `node_modules`.
+
+Link publicado: a preencher.
+
+## O que faria com mais tempo
+
+- Transformar as rodadas com o modelo real em um comando, com cada caso ligado a uma história ou regra do PRD, para repetir a cada mudança nas instruções.
+- Registrar a confirmação do funcionário de que o problema foi resolvido, para o número de resolvidos sem fila ficar exato.
+- Trocar a busca a cada 3 s por uma conexão aberta no chat e no console.
+- Testar um modelo feito só para decisões para dar a nota de confiança, deixando o Haiku com a conversa.
