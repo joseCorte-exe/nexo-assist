@@ -182,6 +182,9 @@ export function createTicketServiceClient(options: Options) {
     /** Puts the ticket in service with the analyst who assumed the conversation. The key is the note of it. */
     assignTicket: (ticketId: string, input: TicketAssignInput, idempotencyKey: string) =>
       request(ticketSchema, "POST", `/tickets/${encodeURIComponent(ticketId)}/assign`, { body: input, idempotencyKey }),
+    /** Notes what an analyst wrote as the answer of IT, which restarts the deadline. The key is the message, so a retry notes it once. */
+    answerTicket: (ticketId: string, input: TicketFollowUpInput, idempotencyKey: string) =>
+      request(ticketSchema, "POST", `/tickets/${encodeURIComponent(ticketId)}/answer`, { body: input, idempotencyKey }),
     /** Reopens a ticket of hers resolved up to 7 days ago. The key is the draft, so a retry reopens it once. */
     reopenTicket: (ticketId: string, input: TicketFollowUpInput, idempotencyKey: string) =>
       request(ticketSchema, "POST", `/tickets/${encodeURIComponent(ticketId)}/reopen`, { body: input, idempotencyKey }),
