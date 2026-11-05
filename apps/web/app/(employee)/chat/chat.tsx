@@ -4,8 +4,8 @@ import { useChat } from "@ai-sdk/react";
 import {
   apiError,
   type ChatNote,
-  closedAsResolved,
   isPaused,
+  markedResolved,
   type ConversationResponse,
   type ConversationView,
   clockTime,
@@ -126,7 +126,7 @@ export function Chat({
       const transferred = message.parts.some((one) => one.type === "tool-transferToAnalyst" && one.state === "output-available" && one.output.ok);
       // The message that reached the limit was answered: the server applied the limit before this stream ended.
       const atLimit = part?.type === "data-conversation" && reachedLimit(part.data.messageCount);
-      if (transferred || closedAsResolved(message.parts) || atLimit || (part?.type === "data-conversation" && part.data.state !== "with_agent")) void sync.refresh();
+      if (transferred || markedResolved(message.parts) || atLimit || (part?.type === "data-conversation" && part.data.state !== "with_agent")) void sync.refresh();
     },
   });
 

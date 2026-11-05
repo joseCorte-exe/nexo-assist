@@ -100,12 +100,15 @@ const viewOf = (row: DraftRow) => NextResponse.json<DraftView>(toDraftView(row))
 
 type Action = "confirm" | "cancel" | "edit";
 
+/** A draft still waiting for her, which a confirmation can move: nothing may end the conversation as if it were not there. */
+export const WAITING_DRAFT: DraftRow["status"][] = ["pending", "confirming"];
+
 /**
  * The states each action of the card moves a draft from. A confirmation also leaves confirming, since confirming again
  * cannot duplicate anything; once it started, nothing else can.
  */
 const MOVES_FROM: Record<Action, DraftRow["status"][]> = {
-  confirm: ["pending", "confirming"],
+  confirm: WAITING_DRAFT,
   cancel: ["pending"],
   edit: ["pending"],
 };

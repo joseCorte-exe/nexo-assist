@@ -262,7 +262,7 @@ export function testAgent(
     ticketService,
     drafts: createDraftStore(store),
     transfers: createTransferStore({ db: store, memory }),
-    resolutions: createResolutionStore({ db: store, memory }),
+    resolutions: createResolutionStore(store),
     now,
   });
 }

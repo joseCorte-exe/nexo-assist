@@ -1,18 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { scriptedModel } from "@nexo/agent/testing";
+import type { NexoUIMessage } from "@nexo/shared";
 import { and, eq, ne } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { conversations, decisions, drafts, messages } from "@/db/schema";
 import { chat } from "./chat";
 import { loadConversation } from "./conversation";
+import { applyMove, moves } from "./conversation-moves";
 import { createDraftStore } from "./drafts";
-import { createResolutionStore, undoResolution } from "./resolutions";
+import { closeIfResolved, createResolutionStore } from "./resolutions";
 import { getLoginStats } from "./stats";
-import { ana, conversationAt, NOW, readStream, request, sessionCookieFor, testDeps, type TestDeps } from "./test-deps";
-import { createTransferStore } from "./transfers";
+import { ana, conversationAt, NOW, rafael, readStream, request, sessionCookieFor, testDeps, type TestDeps } from "./test-deps";
 
-// The end of a conversation she said is solved: the agent calls markResolved, and the conversation closes in the
-// conversations database with the outcome the login screen and the console read.
+// The end of a conversation she said is solved: the agent calls markResolved, which only asks, and the conversation closes
+// once the reply is saved, with the outcome the login screen and the console read.
 
 const decision = { understanding: "Disse que resolveu", action: "Encerrar a conversa", confidence: 0.95, reason: "Ela confirmou." };
 const recorded = { toolCalls: [{ toolName: "recordDecision", input: decision }] };
@@ -57,12 +58,20 @@ const draft = (conversationId: string) => ({
   createdAt: NOW,
 });
 
-const record = (conversationId: string) => ({ conversationId, turnStartedAt: new Date(NOW.getTime() - 4_000), at: NOW });
+/** A saved reply that said it was solved, and when its turn started. */
+const solvedReply: NexoUIMessage = {
+  id: "r1",
+  role: "assistant",
+  parts: [{ type: "tool-markResolved", toolCallId: "c1", state: "output-available", input: {}, output: { ok: true } }, { type: "text", text: solved }],
+};
+const closing = (conversationId: string, reply = solvedReply) => ({ conversationId, turnStartedAt: new Date(NOW.getTime() - 4_000), reply });
+
+const withVpnAnswer = (deps: TestDeps, count = 3) => conversationAt(deps, { count, lastReply: [{ type: "text", text: "Reinstale o cliente de VPN." }] });
 
 describe("markResolved in the chat", () => {
   async function closedConversation() {
     const deps = await testDeps({ model: scriptedModel(closingScript()) });
-    await conversationAt(deps, { count: 3, lastReply: [{ type: "text", text: "Reinstale o cliente de VPN." }] });
+    await withVpnAnswer(deps);
     await say(deps, "resolveu, obrigado");
     return deps;
   }
@@ -99,7 +108,7 @@ describe("markResolved in the chat", () => {
 
   it("loads closed with its note, and her next message opens a new conversation", async () => {
     const deps = await testDeps({ model: scriptedModel([...closingScript(), recorded, { text: "Oi de novo." }]) });
-    await conversationAt(deps, { count: 3, lastReply: [{ type: "text", text: "Reinstale o cliente de VPN." }] });
+    await withVpnAnswer(deps);
     await say(deps, "resolveu, obrigado");
     const loaded = await loadConversation(deps, ana.id);
     expect(loaded.conversation).toMatchObject({ id: "conv-ana", state: "closed", limitReached: false });
@@ -121,8 +130,7 @@ describe("markResolved in the chat", () => {
   });
 
   it("does not close with a draft waiting, and the model hears why", async () => {
-    const refusedThenExplained = [recorded, close, { text: "Antes, confirme ou cancele o rascunho no card." }];
-    const model = scriptedModel(refusedThenExplained);
+    const model = scriptedModel([recorded, close, { text: "Antes, confirme ou cancele o rascunho no card." }]);
     const deps = await testDeps({ model });
     await conversationAt(deps, { count: 3, lastReply: [{ type: "text", text: "Confira antes de eu criar:" }] });
     await createDraftStore(deps.db).save(draft("conv-ana"));
@@ -132,12 +140,39 @@ describe("markResolved in the chat", () => {
     expect(JSON.stringify(model.calls[2]!.prompt)).toContain("draft_pending");
   });
 
-  describe("when the reply fails after closing", () => {
+  it("stays open with the card live when the same step drafts a ticket and says it was solved", async () => {
+    const request = {
+      operation: "create",
+      title: "Licença do Visio",
+      description: "Precisa de uma licença do Visio para o trabalho. Só ele, sem urgência.",
+      category: "software",
+      impact: "request",
+      urgency: "none",
+      affected: "only_me",
+    };
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const deps = await testDeps({
+      model: scriptedModel([
+        recorded,
+        { toolCalls: [{ toolName: "draftTicket", input: request }, { toolName: "markResolved", input: {} }] },
+        { text: "Confira antes de eu criar:" },
+      ]),
+    });
+    await withVpnAnswer(deps);
+    await say(deps, "resolveu, e preciso do Visio");
+    error.mockRestore();
+    expect(await rowOf(deps, "conv-ana")).toMatchObject({ state: "with_agent", outcome: null });
+    expect(await resolvedNotes(deps, "conv-ana")).toEqual([]);
+    const [shown] = await deps.db.select({ status: drafts.status }).from(drafts).where(eq(drafts.conversationId, "conv-ana"));
+    expect(shown?.status).toBe("pending");
+  });
+
+  describe("when the reply fails after the tool answered", () => {
     const failing = () => [recorded, close, new Error("overloaded"), recorded, close, { text: solved }];
 
-    it("gives the conversation back and leaves no note, so nothing counts a reply nobody read", async () => {
+    it("closes nothing and leaves no note: nothing counts a reply nobody read", async () => {
       const deps = await testDeps({ model: scriptedModel(failing()) });
-      await conversationAt(deps, { count: 3, lastReply: [{ type: "text", text: "Reinstale o cliente de VPN." }] });
+      await withVpnAnswer(deps);
       const chunks = await say(deps, "resolveu, obrigado", "msg-solved");
       expect(chunks.at(-1)).toEqual({ type: "finish", finishReason: "error" });
       expect(await rowOf(deps, "conv-ana")).toMatchObject({ state: "with_agent", outcome: null, closedAt: null });
@@ -146,7 +181,7 @@ describe("markResolved in the chat", () => {
 
     it("answers \"Tentar de novo\" in the same conversation, which then closes", async () => {
       const deps = await testDeps({ model: scriptedModel(failing()) });
-      await conversationAt(deps, { count: 3, lastReply: [{ type: "text", text: "Reinstale o cliente de VPN." }] });
+      await withVpnAnswer(deps);
       await say(deps, "resolveu, obrigado", "msg-solved");
       deps.now = () => new Date(NOW.getTime() + 1_000);
       const again = await chat(await post("msg-solved", "resolveu, obrigado"), deps);
@@ -158,87 +193,97 @@ describe("markResolved in the chat", () => {
       // No empty conversation was left behind by the retry.
       expect(await deps.db.select().from(conversations).where(and(eq(conversations.employeeId, ana.id), ne(conversations.state, "closed")))).toEqual([]);
     });
-
-    it("does nothing for a failed reply that closed nothing", async () => {
-      const deps = await testDeps();
-      const before = await rowOf(deps, "conv-elisa");
-      await undoResolution(deps.db, "conv-elisa", { id: "r1", role: "assistant", parts: [{ type: "text", text: "Oi" }] });
-      expect(await rowOf(deps, "conv-elisa")).toEqual(before);
-    });
-
-    it("stays closed when she opened another conversation meanwhile: one open per employee", async () => {
-      const deps = await testDeps();
-      const parts = [
-        { type: "tool-markResolved", toolCallId: "c1", state: "output-available", input: {}, output: { ok: true } },
-      ] as Parameters<typeof undoResolution>[2]["parts"];
-      // Elisa's last conversation ended solved; Bruno's is open. Give it to the same employee as an open one.
-      await deps.db.insert(conversations).values({ id: "conv-elisa-new", employeeId: "emp-elisa", state: "with_agent", messageCount: 1, createdAt: NOW });
-      await undoResolution(deps.db, "conv-elisa", { id: "r1", role: "assistant", parts });
-      expect(await rowOf(deps, "conv-elisa")).toMatchObject({ state: "closed", outcome: "resolved_by_agent" });
-    });
   });
 });
 
 describe("createResolutionStore", () => {
-  it("refuses while a draft waits, and closes once it no longer does", async () => {
+  it("answers whether the conversation can end, and moves nothing", async () => {
     const deps = await testDeps();
-    const store = createResolutionStore(deps);
     // Bruno's conversation is with the agent in the sample data.
+    const before = await rowOf(deps, "conv-bruno");
+    expect(await createResolutionStore(deps.db).check("conv-bruno")).toBeNull();
+    expect(await rowOf(deps, "conv-bruno")).toEqual(before);
+    expect(await resolvedNotes(deps, "conv-bruno")).toEqual([]);
+  });
+
+  it("refuses while a draft waits, its confirmation under way included, and not once it no longer does", async () => {
+    const deps = await testDeps();
+    const store = createResolutionStore(deps.db);
     const shown = await createDraftStore(deps.db).save(draft("conv-bruno"));
-    expect(await store.resolve(record("conv-bruno"))).toEqual({ resolved: false, reason: "draft_pending" });
+    expect(await store.check("conv-bruno")).toBe("draft_pending");
+
+    await deps.db.update(drafts).set({ status: "confirming" }).where(eq(drafts.id, shown.id));
+    expect(await store.check("conv-bruno")).toBe("draft_pending");
 
     await deps.db.update(drafts).set({ status: "cancelled" }).where(eq(drafts.id, shown.id));
-    expect(await store.resolve(record("conv-bruno"))).toEqual({ resolved: true });
-    expect(await rowOf(deps, "conv-bruno")).toMatchObject({ state: "closed", outcome: "resolved_by_agent", closedAt: NOW });
+    expect(await store.check("conv-bruno")).toBeNull();
   });
 
-  it("refuses a draft whose confirmation already started: the ticket may be on its way", async () => {
+  it("refuses a conversation an analyst has", async () => {
     const deps = await testDeps();
-    const shown = await createDraftStore(deps.db).save(draft("conv-bruno"));
-    await deps.db.update(drafts).set({ status: "confirming" }).where(eq(drafts.id, shown.id));
-    expect(await createResolutionStore(deps).resolve(record("conv-bruno"))).toEqual({ resolved: false, reason: "draft_pending" });
-  });
-
-  it("never closes a conversation an analyst has, or one waiting for an analyst", async () => {
-    const deps = await testDeps();
-    const store = createResolutionStore(deps);
     // Fábio's conversation is with Rafael in the sample data.
-    const before = await rowOf(deps, "conv-fabio");
-    expect(await store.resolve(record("conv-fabio"))).toEqual({ resolved: false, reason: "not_with_agent" });
-    expect(await rowOf(deps, "conv-fabio")).toEqual(before);
-    expect(await resolvedNotes(deps, "conv-fabio")).toEqual([]);
+    expect(await createResolutionStore(deps.db).check("conv-fabio")).toBe("not_with_agent");
   });
+});
 
-  it("leaves one note when the model asks twice at once", async () => {
+describe("closeIfResolved", () => {
+  it("closes the conversation of a reply that said it was solved", async () => {
     const deps = await testDeps();
-    const store = createResolutionStore(deps);
-    const answers = await Promise.all([store.resolve(record("conv-bruno")), store.resolve(record("conv-bruno"))]);
-    expect(answers).toEqual([{ resolved: true }, { resolved: true }]);
+    await closeIfResolved(deps, closing("conv-bruno"));
+    expect(await rowOf(deps, "conv-bruno")).toMatchObject({ state: "closed", outcome: "resolved_by_agent", closedAt: NOW });
     expect(await resolvedNotes(deps, "conv-bruno")).toHaveLength(1);
   });
 
-  it("loses to a transfer that got there first, by the version it read", async () => {
+  it("does nothing for a reply that did not say so", async () => {
     const deps = await testDeps();
-    const transfer = {
-      conversationId: "conv-bruno",
-      level: "N1" as const,
-      reason: "employee_request" as const,
-      summary: "Pediu para falar com um analista sobre a VPN.",
-      ticketId: null,
-      waitUntil: new Date(NOW.getTime() + 60 * 60 * 1000),
-      confidence: 0.9,
-      turnStartedAt: NOW,
-      at: NOW,
-    };
-    const [moved, resolved] = await Promise.all([createTransferStore(deps).transfer(transfer), createResolutionStore(deps).resolve(record("conv-bruno"))]);
-    const row = await rowOf(deps, "conv-bruno");
-    // Whichever won, the conversation is where that one took it and the other said it did not happen.
-    if (moved.transferred) {
-      expect(resolved).toEqual({ resolved: false, reason: "not_with_agent" });
-      expect(row.state).toBe("waiting_for_analyst");
-    } else {
-      expect(resolved).toEqual({ resolved: true });
-      expect(row).toMatchObject({ state: "closed", outcome: "resolved_by_agent" });
-    }
+    const before = await rowOf(deps, "conv-bruno");
+    await closeIfResolved(deps, closing("conv-bruno", { id: "r2", role: "assistant", parts: [{ type: "text", text: "Oi" }] }));
+    await closeIfResolved(
+      deps,
+      closing("conv-bruno", {
+        id: "r3",
+        role: "assistant",
+        parts: [{ type: "tool-markResolved", toolCallId: "c1", state: "output-available", input: {}, output: { ok: false, reason: "draft_pending", message: "?" } }],
+      }),
+    );
+    expect(await rowOf(deps, "conv-bruno")).toEqual(before);
+  });
+
+  it("sees a draft saved after the tool answered: the conversation stays open and the card live, and it logs why", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const deps = await testDeps();
+    await createDraftStore(deps.db).save(draft("conv-bruno"));
+    await closeIfResolved(deps, closing("conv-bruno"));
+    expect(error).toHaveBeenCalledWith("reply said solved but the conversation stays open", { conversationId: "conv-bruno", reason: "draft_pending" });
+    error.mockRestore();
+    expect(await rowOf(deps, "conv-bruno")).toMatchObject({ state: "with_agent", outcome: null });
+    const [shown] = await deps.db.select({ status: drafts.status }).from(drafts).where(eq(drafts.conversationId, "conv-bruno"));
+    expect(shown?.status).toBe("pending");
+  });
+
+  it("leaves it with an analyst who assumed after the tool answered, and logs it", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const deps = await testDeps();
+    await applyMove(deps, "conv-bruno", moves.assume(rafael), NOW);
+    const before = await rowOf(deps, "conv-bruno");
+    await closeIfResolved(deps, closing("conv-bruno"));
+    expect(error).toHaveBeenCalledWith("reply said solved but the conversation stays open", { conversationId: "conv-bruno", reason: "not_with_agent" });
+    error.mockRestore();
+    expect(await rowOf(deps, "conv-bruno")).toEqual(before);
+    expect(await resolvedNotes(deps, "conv-bruno")).toEqual([]);
+  });
+});
+
+describe("the sample data", () => {
+  it("ends Elisa's conversation as a real one ends: her words, the closing sentence, then the note", async () => {
+    const deps = await testDeps();
+    const rows = await saved(deps, "conv-elisa");
+    expect(rows.slice(-3).map(({ author, event }) => [author, event])).toEqual([
+      ["employee", null],
+      ["agent", null],
+      ["system", "resolved"],
+    ]);
+    const loaded = await loadConversation(deps, "emp-elisa");
+    expect(loaded.messages.at(-1)).toMatchObject({ role: "system", parts: [{ type: "data-note", data: { event: "resolved" } }] });
   });
 });

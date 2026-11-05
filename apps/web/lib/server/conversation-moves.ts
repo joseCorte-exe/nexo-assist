@@ -85,13 +85,10 @@ export const moves = {
 
   /**
    * She said it was solved, while the agent still has it: the end the login screen counts as resolved without a queue.
-   * The reply that says so closes it, and its note goes after that reply. Asked twice in one reply, it answers the same.
+   * It closes once the reply that says so is saved, and its note goes after that reply.
    */
   resolve: (turnStartedAt: Date): Move<AgentRefusal> => ({
-    decide: (row) => {
-      if (row.state === "closed" && row.outcome === "resolved_by_agent") return "already";
-      return row.state === "with_agent" ? "apply" : refuse("not_with_agent");
-    },
+    decide: (row) => (row.state === "with_agent" ? "apply" : refuse("not_with_agent")),
     set: (at) => ({ state: "closed", outcome: "resolved_by_agent", closedAt: at }),
     note: { authorId: null, note: { event: "resolved" }, text: "Resolvida pelo agent. Conversa encerrada.", memory: false },
     notePlace: (at) => afterReplyPlace(turnStartedAt, at),

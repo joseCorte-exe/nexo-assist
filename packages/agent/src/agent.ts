@@ -136,7 +136,7 @@ export function createNexoAgent({
   drafts: DraftStore;
   /** Where transferToAnalyst moves the conversation: the conversations database. */
   transfers: TransferStore;
-  /** Where markResolved ends the conversation: the conversations database. */
+  /** Where markResolved asks whether the conversation can end: the conversations database. */
   resolutions: ResolutionStore;
   /** The clock of the overdue (RN-02) and of "há N dias". */
   now?: () => Date;

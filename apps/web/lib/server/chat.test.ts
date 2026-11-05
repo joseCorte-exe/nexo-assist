@@ -481,7 +481,7 @@ describe("POST /api/chat under concurrent messages", () => {
         ticketService,
         drafts: createDraftStore(db),
         transfers: createTransferStore({ db, memory }),
-        resolutions: createResolutionStore({ db, memory }),
+        resolutions: createResolutionStore(db),
       }),
     });
     const employees = [

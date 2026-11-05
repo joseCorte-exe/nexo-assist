@@ -11,12 +11,12 @@ import {
   reachedLimit,
   routeTransfer,
   type Ticket,
-  WAITING_DRAFT,
 } from "@nexo/shared";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { conversations, drafts, messages } from "@/db/schema";
 import { applyMove, type Move, moves, type TransferFields } from "./conversation-moves";
 import type { Deps } from "./deps";
+import { WAITING_DRAFT } from "./drafts";
 
 // The limit of 30 messages (ARQUITETURA.md, sections 1 and 8), applied by the code right after the message that reaches
 // it is answered, or saved for an analyst. What is pending, the level and the summary come from code and from what was

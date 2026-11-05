@@ -2,7 +2,7 @@ import { type DecisionRecord, type KbArticle, slaText, type Ticket } from "@nexo
 import { describe, expect, it, vi } from "vitest";
 import { caseNotes, CONSOLE_NOTE, createNexoAgent, createMemory, resumeNote, saveNote } from "./agent";
 import { promptText, replyOf, scriptedModel } from "./testing";
-import type { DraftRecord, DraftStore, ResolutionRecord, ResolutionStore, TicketDesk, TransferRecord, TransferStore } from "./tools";
+import type { DraftRecord, DraftStore, ResolutionStore, TicketDesk, TransferRecord, TransferStore } from "./tools";
 
 const hours: KbArticle = {
   id: "kb-service-desk-hours",
@@ -55,12 +55,12 @@ const transfers: TransferStore = {
   },
 };
 
-/** The conversations the agent closed as solved, and what the store answers. */
-const savedResolutions: ResolutionRecord[] = [];
-let resolutionAnswer: Awaited<ReturnType<ResolutionStore["resolve"]>> = { resolved: true };
+/** The conversations the agent asked to end as solved, and what the store answers. */
+const askedResolutions: string[] = [];
+let resolutionAnswer: Awaited<ReturnType<ResolutionStore["check"]>> = null;
 const resolutions: ResolutionStore = {
-  resolve: async (record) => {
-    savedResolutions.push(record);
+  check: async (conversationId) => {
+    askedResolutions.push(conversationId);
     return resolutionAnswer;
   },
 };
@@ -406,26 +406,25 @@ describe("streamReply when she says it was solved", () => {
   const close = { toolCalls: [{ toolName: "markResolved", input: {} }] };
   const toolsOf = (model: ReturnType<typeof setup>["model"], call: number) => (model.calls[call]!.tools ?? []).map((tool) => tool.name);
 
-  it("closes with the turn it happens in, then only lets the model write its sentence", async () => {
-    savedResolutions.length = 0;
-    resolutionAnswer = { resolved: true };
-    const startedAt = new Date("2026-10-26T13:05:00Z");
+  it("asks about the conversation of the turn, then only lets the model write its sentence", async () => {
+    askedResolutions.length = 0;
+    resolutionAnswer = null;
     const { agent, model } = setup([recorded, close, { text: solved }]);
-    expect((await replyOf(agent, { ...turn, startedAt })).text).toBe(solved);
-    expect(savedResolutions).toEqual([{ conversationId: "conv-1", turnStartedAt: startedAt, at: expect.any(Date) }]);
+    expect((await replyOf(agent, turn)).text).toBe(solved);
+    expect(askedResolutions).toEqual(["conv-1"]);
     expect(model.calls).toHaveLength(3);
     for (const tool of ["markResolved", "transferToAnalyst", "draftTicket", "offerReplies"]) expect(toolsOf(model, 2)).not.toContain(tool);
   });
 
   it("ends the reply when the sentence came with the tool", async () => {
-    resolutionAnswer = { resolved: true };
+    resolutionAnswer = null;
     const { agent, model } = setup([recorded, { text: solved, ...close }]);
     await replyOf(agent, turn);
     expect(model.calls).toHaveLength(2);
   });
 
   it("tells the model a refusal and keeps its tools, since nothing closed", async () => {
-    resolutionAnswer = { resolved: false, reason: "draft_pending" };
+    resolutionAnswer = "draft_pending";
     const { agent, model } = setup([recorded, { text: "Fechado!", ...close }, { text: "Antes, confirme ou cancele o rascunho." }]);
     expect((await replyOf(agent, turn)).text).toContain("Antes, confirme ou cancele o rascunho.");
     expect(promptText(model.calls[2]!)).toContain("Há um rascunho esperando a confirmação do funcionário");
@@ -433,7 +432,7 @@ describe("streamReply when she says it was solved", () => {
   });
 
   it("says an analyst has the conversation when one took it during the reply", async () => {
-    resolutionAnswer = { resolved: false, reason: "not_with_agent" };
+    resolutionAnswer = "not_with_agent";
     const { agent, model } = setup([recorded, close, { text: "Um analista já está com você." }]);
     await replyOf(agent, turn);
     expect(promptText(model.calls[2]!)).toContain("Um analista já está com esta conversa");

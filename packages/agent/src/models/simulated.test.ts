@@ -102,8 +102,8 @@ const transfers: TransferStore = {
 };
 
 /** What the store answers to markResolved, as the web would. */
-let resolutionAnswer: Awaited<ReturnType<ResolutionStore["resolve"]>> = { resolved: true };
-const resolutions: ResolutionStore = { resolve: async () => resolutionAnswer };
+let resolutionAnswer: Awaited<ReturnType<ResolutionStore["check"]>> = null;
+const resolutions: ResolutionStore = { check: async () => resolutionAnswer };
 
 /** Every draft the agent saved, as the web would keep it. */
 const savedDrafts: DraftRecord[] = [];
@@ -243,18 +243,18 @@ describe("simulatedModel", () => {
   });
 
   it("ends the conversation when she says it was solved, with one sentence", async () => {
-    resolutionAnswer = { resolved: true };
+    resolutionAnswer = null;
     const result = await reply("resolveu, obrigado");
     expect(result.decision.toolsUsed).toEqual(["recordDecision", "markResolved"]);
     expect(result.text).toBe("Que bom que resolveu. Se precisar de mais alguma coisa, é só escrever.");
   });
 
   it("says what is missing when the code refuses to end it", async () => {
-    resolutionAnswer = { resolved: false, reason: "draft_pending" };
+    resolutionAnswer = "draft_pending";
     expect((await reply("deu certo, valeu")).text).toBe("Antes de encerrar, confirme ou cancele o rascunho no card.");
-    resolutionAnswer = { resolved: false, reason: "not_with_agent" };
+    resolutionAnswer = "not_with_agent";
     expect((await reply("funcionou!")).text).toBe("Um analista já está com a sua conversa e responde por aqui.");
-    resolutionAnswer = { resolved: true };
+    resolutionAnswer = null;
   });
 
   it("does not end it when she says it was not solved, or only thanks", async () => {

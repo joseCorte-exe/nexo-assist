@@ -70,22 +70,14 @@ export type TransferStore = {
   transfer: (transfer: TransferRecord) => Promise<{ transferred: true; noteId: string } | { transferred: false }>;
 };
 
-/** A conversation she said is solved, as the tool hands it to be closed. */
-export type ResolutionRecord = {
-  conversationId: string;
-  /** When the reply that closes it started: the note goes after that reply. */
-  turnStartedAt: Date;
-  at: Date;
-};
-
 type ResolutionRefusal = Extract<MarkResolvedOutput, { ok: false }>["reason"];
 
 /**
- * Where the conversation ends as solved: the conversations database, which the web owns. It only closes a conversation
- * still with the agent and without a draft waiting for her.
+ * Whether a conversation can end as solved, from the conversations database, which the web owns: why not, or null. It
+ * moves nothing: the route closes the conversation once the reply is saved, and checks again then.
  */
 export type ResolutionStore = {
-  resolve: (resolution: ResolutionRecord) => Promise<{ resolved: true } | { resolved: false; reason: ResolutionRefusal }>;
+  check: (conversationId: string) => Promise<ResolutionRefusal | null>;
 };
 
 /** Below this, the agent does not know what to do and an analyst takes the case (ARQUITETURA.md, section 2). */
@@ -474,20 +466,19 @@ export function createTools({
     };
   }
 
-  /** The model reads her words; whether the conversation may end is the store's to say. */
+  /**
+   * The model reads her words; whether the conversation may end is the store's to say. The tool only answers: a reply
+   * that fails closes nothing, since the route closes the conversation after saving the reply.
+   */
   const markResolved = createTool({
     id: "markResolved",
     description:
       "Encerra a conversa como resolvida, quando o funcionário disse que o problema foi resolvido. O código recusa se houver um rascunho esperando confirmação ou se um analista estiver com a conversa.",
     ...nexoToolSchemas.markResolved,
-    requestContextSchema: replyContext,
+    requestContextSchema: turnContext,
     execute: async (_input, context): Promise<MarkResolvedOutput> => {
-      const saved = await resolutions.resolve({
-        conversationId: context.requestContext.get("conversationId"),
-        turnStartedAt: context.requestContext.get("turn").startedAt,
-        at: now(),
-      });
-      return saved.resolved ? { ok: true } : { ok: false, reason: saved.reason, message: RESOLUTION_REFUSAL[saved.reason] };
+      const refusal = await resolutions.check(context.requestContext.get("conversationId"));
+      return refusal ? { ok: false, reason: refusal, message: RESOLUTION_REFUSAL[refusal] } : { ok: true };
     },
   });
 

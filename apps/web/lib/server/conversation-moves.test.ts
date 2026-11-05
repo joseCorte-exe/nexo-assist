@@ -82,13 +82,9 @@ describe("resolve", () => {
   const started = new Date(NOW.getTime() - 4_000);
   const resolve = moves.resolve(started);
 
-  it("only ends a conversation the agent attends: never one with an analyst, waiting for one, or closed by another", () => {
+  it("only ends a conversation the agent attends: never one with an analyst, waiting for one, or already closed", () => {
     expect(resolve.decide(withAgent)).toBe("apply");
-    for (const taken of [waiting, withRafael, closedByRafael]) expect(resolve.decide(taken)).toEqual({ refused: "not_with_agent" });
-  });
-
-  it("answers the same when the same reply already ended it", () => {
-    expect(resolve.decide(closedByHer)).toBe("already");
+    for (const taken of [waiting, withRafael, closedByRafael, closedByHer]) expect(resolve.decide(taken)).toEqual({ refused: "not_with_agent" });
   });
 
   it("records how it ended and when, with a note after the reply that said so", () => {

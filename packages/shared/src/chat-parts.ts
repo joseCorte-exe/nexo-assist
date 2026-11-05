@@ -47,8 +47,8 @@ export function shownDraft(part: Parts[number]): DraftView | null {
   return part.output.ok ? part.output.draft : null;
 }
 
-/** Whether a reply ended the conversation as solved: markResolved ran and the code let it. */
-export const closedAsResolved = (parts: Parts) =>
+/** Whether a reply says the conversation was solved: markResolved ran and the code let it. It closes once the reply is saved. */
+export const markedResolved = (parts: Parts) =>
   parts.some((part) => part.type === "tool-markResolved" && part.state === "output-available" && !isRefusedInput(part.output) && part.output.ok);
 
 /**
