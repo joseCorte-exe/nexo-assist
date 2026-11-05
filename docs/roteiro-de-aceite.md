@@ -16,7 +16,7 @@ Este roteiro serve para uma pessoa conferir o Nexo Assist à mão, no link publi
 | Bruno Tavares | bruno.tavares@nexo.com.br | Funcionário | Conversa com o agent. REQ-10450 |
 | Carla Mendes | carla.mendes@nexo.com.br | Funcionária | Conversa esperando o N1, "Agent pediu ajuda · confiança 41%" |
 | Diego Ramos | diego.ramos@nexo.com.br | Funcionário | Conversa esperando o N2. INC-20319 (crítico) |
-| Elisa Prado | elisa.prado@nexo.com.br | Funcionária | Última conversa encerrada, "Resolvido pelo agent" |
+| Elisa Prado | elisa.prado@nexo.com.br | Funcionária | Última conversa encerrada pelo agent: disse que resolveu, nota "Resolvida pelo Nexo", selo "Resolvido pelo agent" |
 | Fábio Nunes | fabio.nunes@nexo.com.br | Funcionário | Conversa com o Rafael. INC-20302 |
 | Gabriela Rocha | gabriela.rocha@nexo.com.br | Funcionária | Última conversa encerrada por analista. INC-20297 |
 | Rafael Lima | rafael.lima@nexo.com.br | Analista N2 | Atende o Fábio |
@@ -41,6 +41,9 @@ Este roteiro serve para uma pessoa conferir o Nexo Assist à mão, no link publi
 | F1.1 | Como Ana, escreva "Minha VPN está dando erro 809. Uso Windows 10, o que eu faço?" | A resposta chega em partes. Diz para reinstalar o cliente de VPN pelo portal de softwares e reiniciar. Nenhum rascunho aparece |
 | F1.2 | Olhe a linha acima da resposta e expanda | A linha diz que buscou na central de ajuda. O detalhe mostra o que entendeu, a ação, a confiança e o motivo |
 | F1.3 | Escreva "Qual o horário do service desk?" | De segunda a sexta, das 8h às 18h, com plantão 24 horas para críticos. Sem chamado |
+| F1.4 | Escreva só "Obrigado" | Responde numa frase e a conversa continua aberta, sem nota de encerramento |
+| F1.5 | Escreva "Resolveu, obrigada!" | Uma frase de encerramento, sem pergunta. Nota "Resolvida pelo Nexo · conversa encerrada", botão "Nova conversa" e, no campo, "Comece uma nova conversa…". A próxima mensagem começa outra conversa, e o passo seguinte parte dela |
+| F1.6 | Como Rafael, em "Todas", abra a conversa da Ana | Selo "Resolvido pelo agent" |
 
 ### Funcionário 2: saber como está um chamado sem lembrar o número
 
@@ -156,7 +159,7 @@ A volta em outro dia depende do calendário. Para conferir no mesmo dia, use a G
 | # | Passo | Resultado esperado |
 |---|---|---|
 | R5.1 | Pedido: F5.1 | N1, motivo pedido do funcionário |
-| R5.2 | Crítico: como Elisa, escreva "O sistema de pedidos caiu para toda a minha equipe, ninguém consegue trabalhar." | N2, motivo crítico, com espera de 1 hora. Veja o estado deste caso em [docs/evals/resultado.md](evals/resultado.md) antes de contar como falha do código |
+| R5.2 | Crítico: como Elisa, escreva "O sistema de pedidos caiu para toda a minha equipe, ninguém consegue trabalhar." | Sem perguntar mais nada, diz que o caso é crítico e que encaminhou para o Suporte N2, com espera de até 1 hora. Mostra o rascunho com prioridade Crítica e a nota "Transferida para Suporte N2". Como Rafael, a conversa aparece em "Para você", com o título e a descrição do rascunho como resumo. Como Elisa, clique em Confirmar: o chamado é criado e fica ligado à conversa |
 | R5.3 | Vencido: F5.3 | N2, motivo vencido |
 | R5.4 | Dúvida do agent: como Gabriela, escreva "Meu Excel fecha sozinho quando abro a planilha de campanhas, a que tem macros. Já reiniciei e testei em outro computador." | Se a confiança ficar abaixo de 0,6, vai para o N1 com "Agent pediu ajuda · confiança N%". O modelo pode variar: veja [docs/evals/resultado.md](evals/resultado.md) |
 | R5.5 | Em qualquer transferência, abra a conversa no console | O resumo do caso está lá |
@@ -196,9 +199,20 @@ Monte um rascunho para cada linha e cancele. A tabela é lida de cima para baixo
 | R8.7 | Peça o INC-20298 | No prazo: a TI respondeu ontem, e o prazo conta da última resposta |
 | R8.8 | Complemente o INC-20311 e peça o chamado de novo | Continua vencido: o complemento do funcionário não reinicia o prazo |
 | R8.9 | Reabra o INC-20150 e confira o prazo no card | Conta da reabertura |
+| R8.10 | Depois do A3.3, com o Rafael tendo respondido na conversa ligada ao INC-20311, e do A3.4, peça o INC-20311 como Ana | Não está mais vencido: a resposta do analista recomeça o prazo. O card mostra o que ele escreveu como a última resposta da TI |
+
+## Tetos de uso
+
+Só no local, porque muda a configuração. O `.env` define quantas mensagens podem chamar o modelo por dia de São Paulo.
+
+| # | Passo | Resultado esperado |
+|---|---|---|
+| T1 | Ponha `USAGE_LIMIT_GLOBAL_PER_DAY=1` no `.env`, suba de novo e, como Gabriela, mande duas mensagens em conversas com o agent | A segunda recebe "O Nexo não pode responder: a demo está indisponível hoje. Sua mensagem ficou salva." A mensagem fica na tela e o contador a conta |
+| T2 | Com o teto estourado, abra o console e assuma uma conversa | O console e o analista continuam funcionando: o teto só vale para a mensagem que chamaria o modelo |
+| T3 | Volte o `.env` ao valor anterior e suba de novo | O Nexo volta a responder |
 
 ## Falhas conhecidas
 
 Os resultados com o modelo real estão em [docs/evals/resultado.md](evals/resultado.md). Um caso abaixo de 3 de 3 lá pode variar aqui também.
 
-- A resposta do analista no console ainda não reinicia o prazo do chamado (README, "Limitações conhecidas").
+- Numa queda do ticket-service com a lista de analistas ainda válida no cache do web, a mensagem do analista fica gravada, mas o prazo só recomeça na próxima mensagem que passar (README, "Limitações conhecidas").
