@@ -56,7 +56,7 @@ Para entrar, qualquer senha serve. `ana.souza@nexo.com.br` entra como funcionár
  packages/shared: Zod schemas, types, chat stream contract, SLA, HTTP client
 ```
 
-- `apps/web` tem as telas e as rotas `/api`, e fala direto com o ticket-service no login, na confirmação do rascunho e no console. A resposta do agent chega em partes. O console busca novidades a cada 3 segundos. O chat só busca enquanto a conversa está com um analista ou esperando um, a cada 3 segundos com a aba aberta e a cada 15 com ela escondida.
+- `apps/web` tem as telas e as rotas `/api`, e fala direto com o ticket-service no login, no perfil, na confirmação do rascunho, no limite e no console. A resposta do agent chega em partes. O console busca novidades a cada 3 segundos. O chat só busca enquanto a conversa está com um analista ou esperando um, a cada 3 segundos com a aba aberta e a cada 15 com ela escondida.
 - `packages/agent` tem o agent do Mastra, as ferramentas e as instruções. Ele roda dentro do web.
 - `apps/ticket-service` é o sistema de chamados simulado. Roda em outro processo, com banco próprio, e toda rota exige um segredo que só o web conhece.
 - `packages/shared` guarda o que os dois lados precisam entender igual: os contratos em Zod, as regras de prioridade e prazo e o cliente HTTP.
@@ -67,7 +67,7 @@ Conversas, chamados e o estado de cada conversa ficam em banco (SQLite em arquiv
 
 O modelo interpreta a conversa, e o código aplica as regras que não podem falhar.
 
-O modelo decide o que o funcionário quer, classifica a categoria, identifica impacto e urgência, julga se um chamado parecido é o mesmo problema e escreve a resposta. Quando falta informação, as instruções mandam perguntar em vez de transferir, e a confiança dele passa a ser sobre a pergunta. Para isso ele tem estas ferramentas:
+O modelo decide o que o funcionário quer, classifica a categoria, identifica impacto, urgência e quem é afetado, julga se um chamado parecido é o mesmo problema e escreve a resposta. Quando falta informação, as instruções mandam perguntar em vez de transferir, e a confiança dele passa a ser sobre a pergunta. Para isso ele tem estas ferramentas:
 
 | Ferramenta | O que faz |
 |---|---|
@@ -83,16 +83,16 @@ Estas regras ficam no código:
 
 | Regra | Onde |
 |---|---|
-| O tipo e a prioridade saem do impacto e da urgência. A prioridade lê a tabela do Anexo A de cima para baixo, e vale a primeira linha que bater | `packages/shared/src/priority.ts`, `packages/agent/src/tools.ts` |
-| O prazo conta da abertura ou da última resposta da TI, em horas úteis no fuso de São Paulo. O crítico conta 24 horas por dia. A reabertura conta como nova abertura, e o complemento do funcionário não reinicia o prazo. Passou sem estar resolvido, está vencido | `packages/shared/src/sla.ts` |
+| O tipo sai do impacto. A prioridade sai do impacto, da urgência e de quem é afetado, lendo a tabela do Anexo A de cima para baixo, e vale a primeira linha que bater | `packages/shared/src/priority.ts`, `packages/agent/src/tools.ts` |
+| O prazo conta da abertura ou da última resposta da TI, em horas úteis no fuso de São Paulo. O crítico conta 24 horas por dia. A reabertura conta como nova abertura, e o complemento do funcionário não reinicia o prazo. Passou sem estar resolvido, está vencido | `packages/shared/src/sla.ts`, `packages/shared/src/ticket-change.ts`, `apps/ticket-service/src/routes/tickets.ts` |
 | Antes de criar um chamado, o código busca os que podem ser o mesmo problema. Se houver algum, exige que o rascunho diga por que não é duplicado | `packages/agent/src/tools.ts` |
 | Nada é criado antes do clique em Confirmar, e a confirmação vai direto para o ticket-service, sem passar pelo modelo | `apps/web/lib/server/drafts.ts` |
 | Só dá para reabrir até 7 dias depois da resolução | `packages/shared/src/ticket-change.ts` |
 | O id do funcionário vem da sessão, nunca do modelo, e o ticket-service recusa chamado de outra pessoa | `packages/agent/src/agent.ts`, `apps/ticket-service/src/routes/tickets.ts` |
 | Caso crítico ou chamado vencido vai para o N2. Pedido do funcionário ou dúvida do agent vai para o N1 | `packages/shared/src/transfer.ts` |
 | Confiança abaixo de 0,6 obriga a transferência no passo seguinte | `packages/agent/src/agent.ts` |
-| Com a conversa fora de `with_agent`, a mensagem é gravada e o modelo não é chamado | `apps/web/lib/server/chat.ts` |
-| O limite de 30 mensagens não passa pelo modelo. Com algo pendente, a conversa vai para um analista; sem nada pendente, ela encerra; se um analista já está com ela ou ela já espera um, nada muda. O limite conta as mensagens do funcionário por conversa: é essa a "sessão" do PRD | `apps/web/lib/server/limit.ts` |
+| Com a conversa com um analista ou esperando um, a mensagem é gravada e o modelo não é chamado | `apps/web/lib/server/chat.ts` |
+| O limite de 30 mensagens não passa pelo modelo. Com algo pendente, a conversa vai para um analista; sem nada pendente, ela encerra; se um analista já está com ela ou ela já espera um, nada muda. O limite conta as mensagens do funcionário por conversa: é essa a "sessão" do PRD | `apps/web/lib/server/limit.ts`, `apps/web/lib/server/chat.ts`, `packages/shared/src/continuity.ts` |
 
 ### Como ver o que ele fez
 
@@ -108,7 +108,7 @@ O que depende do modelo foi testado com o Haiku 5.5 de verdade. Cada feature a p
 
 | Caso | Resultado |
 |---|---|
-| Consulta sem número do chamado (12 rodadas) | Seguiu a regra nas 12 |
+| Consultar um chamado (12 rodadas) | Seguiu a regra nas 12 |
 | Abrir e complementar um chamado (9 rodadas) | Classificou certo nas 9 |
 | Pedido de analista | N1, 3 de 3 |
 | Chamado vencido | N2, 3 de 3 |
@@ -130,7 +130,7 @@ Medido com preço de US$ 0,10 por milhão de tokens de entrada, US$ 0,01 de leit
 | Complementar um chamado | 3 a 4 s | cerca de US$ 0,002 |
 | Transferir para um analista | 4 a 5 s | US$ 0,0008 a 0,0015 por resposta |
 
-As instruções e as ferramentas somam 3,5 mil tokens e ficam em cache por cerca de 5 minutos, lidos a um décimo do preço. Os relatórios não separam as respostas com e sem cache. Numa resposta sem cache, esses tokens custam cerca de US$ 0,00035 a mais pelo preço de entrada, fora a escrita no cache. Cada resposta tem limite de 5 passos, 800 tokens de saída e 45 segundos.
+As instruções e as ferramentas somam 3,5 mil tokens e ficam em cache por cerca de 5 minutos, lidos a um décimo do preço. Os relatórios não separam as respostas com e sem cache. Numa resposta sem cache, esses tokens custam cerca de US$ 0,0003 a mais do que a leitura do cache, fora a escrita nele. Cada resposta tem limite de 5 passos, 800 tokens de saída por passo e 45 segundos.
 
 ## Principais trade-offs
 
