@@ -24,6 +24,7 @@ import { jsonError, readBody, readEmployeeSession } from "./http";
 import { applyLimit } from "./limit";
 import { replyPlace } from "./messages";
 import { closeIfResolved } from "./resolutions";
+import { transferIfCritical } from "./transfers";
 import { claimModelCall, clientIp, releaseModelCall } from "./usage";
 
 const AGENT_FAILED = "O Nexo não conseguiu responder. Tente de novo.";
@@ -296,6 +297,7 @@ export async function chat(request: NextRequest, deps: Deps) {
         throw new Error("The agent reply was not saved");
       });
       await closeIfResolved(deps, { conversationId: conversation.id, turnStartedAt: startedAt, reply: responseMessage });
+      await transferIfCritical(deps, { conversationId: conversation.id, turnStartedAt: startedAt, reply: responseMessage });
       // The message that reached the limit is answered; the limit applies right after (ARQUITETURA.md, section 1).
       if (reachedLimit(conversation.messageCount)) await applyLimit(deps, conversation.id);
     },

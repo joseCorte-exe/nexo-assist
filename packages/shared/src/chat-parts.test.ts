@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { NexoUIMessage } from "./chat";
-import { decisionOf, isRefusedInput, markedResolved, replyText, shownDraft, summarizeTurn, textOf, withToolErrors } from "./chat-parts";
+import { criticalDraft, decisionOf, isCriticalCase, isRefusedInput, markedResolved, replyText, shownDraft, summarizeTurn, textOf, withToolErrors } from "./chat-parts";
 
 const decision = {
   understanding: "Quer saber o horário do service desk",
@@ -137,6 +137,24 @@ describe("shownDraft", () => {
     expect(shownDraft({ type: "tool-draftTicket", toolCallId: "c", state: "input-available", input: {} } as Part)).toBeNull();
     expect(shownDraft(tool("getTicket", {}, { ok: true, draft }))).toBeNull();
     expect(shownDraft(text("Oi"))).toBeNull();
+  });
+});
+
+describe("criticalDraft", () => {
+  const draft = { id: "draft-1", operation: "create", priority: "critical" };
+  const shown = (fields: object) => tool("draftTicket", {}, { ok: true, draft: { ...draft, ...fields }, dueText: "hoje, até 11:00" });
+
+  it("is a new ticket RN-01 read as critical", () => {
+    expect(criticalDraft([tool("recordDecision", decision), shown({}), text("Encaminhei.")])).toMatchObject({ id: "draft-1" });
+    expect(isCriticalCase({ operation: "create", priority: "critical" })).toBe(true);
+  });
+
+  it("is nothing for any other priority, for a ticket that already exists or for a draft not made", () => {
+    expect(criticalDraft([shown({ priority: "high" })])).toBeNull();
+    expect(criticalDraft([shown({ operation: "update" })])).toBeNull();
+    expect(criticalDraft([shown({ operation: "reopen" })])).toBeNull();
+    expect(criticalDraft([tool("draftTicket", {}, { ok: false, reason: "possible_duplicate", message: "Parecido." })])).toBeNull();
+    expect(criticalDraft([text("Oi.")])).toBeNull();
   });
 });
 

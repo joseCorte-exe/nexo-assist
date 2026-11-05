@@ -9,6 +9,7 @@ import {
   type ConversationResponse,
   type ConversationView,
   clockTime,
+  criticalDraft,
   type DraftView,
   employeeNoteLabel,
   reachedLimit,
@@ -129,7 +130,7 @@ export function Chat({
       const part = message.parts.find((one) => one.type === "data-conversation");
       const known = conversationRef.current;
       if (part?.type === "data-conversation" && (part.data.id !== known?.id || part.data.state !== known?.state)) setConversation(part.data);
-      const transferred = message.parts.some((one) => one.type === "tool-transferToAnalyst" && one.state === "output-available" && one.output.ok);
+      const transferred = criticalDraft(message.parts) !== null || message.parts.some((one) => one.type === "tool-transferToAnalyst" && one.state === "output-available" && one.output.ok);
       // The message that reached the limit was answered: the server applied the limit before this stream ended.
       // Unless the demo was unavailable: nobody answered, so it applies at her next message, and a read would take the notice away.
       const unavailable = message.parts.some((one) => one.type === "data-unavailable");

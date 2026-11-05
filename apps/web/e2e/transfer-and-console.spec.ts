@@ -170,6 +170,35 @@ test("an analyst marks himself unavailable and available again", async ({ browse
   await expect(rafael.getByRole("switch", { name: "Disponível" })).toHaveAttribute("aria-checked", "true");
 });
 
+test("something stopped for his team goes to N2 by itself: Bruno keeps the card, and Rafael gets the case with the summary", async ({ browser }) => {
+  const bruno = await (await browser.newContext()).newPage();
+  await signIn(bruno, "bruno.tavares@nexo.com.br", "/");
+  await ask(bruno, "O sistema de pedidos parou de funcionar desde cedo.");
+  await replies(bruno).last().getByRole("button", { name: "Minha equipe" }).click();
+  await idle(bruno);
+
+  await expect(replies(bruno).last()).toContainText("O caso é crítico porque está parado para mais gente. Encaminhei para o Suporte N2");
+  const draft = replies(bruno).last().getByRole("region").last();
+  await expect(draft).toContainText("Crítica");
+  await expect(bruno.getByRole("separator", { name: /Transferida para Suporte N2/ })).toBeVisible();
+  await expect(bruno.getByText("Suporte N2 · Pode escrever enquanto espera")).toBeVisible();
+  await expect(bruno.getByLabel("Mensagem para o analista")).toBeVisible();
+
+  const { rafael } = await people(browser);
+  await rafael.getByRole("button", { name: /^Para você/ }).click();
+  const line = row(rafael, "Bruno Tavares");
+  await expect(line).toContainText(/Transferida · contato em \d+ min/);
+  await line.click();
+  await conversation(rafael).getByRole("button", { name: "Ver o resumo do agent" }).click();
+  // The title of the draft opens the summary: only the summary writes it.
+  await expect(conversation(rafael)).toContainText("Sistema de pedidos parou de funcionar desde cedo.");
+
+  // The ticket is still hers to confirm, while the analyst is on the way.
+  await draft.getByRole("button", { name: "Confirmar" }).click();
+  await expect(draft).toContainText(/Chamado INC-\d{5} criado\./);
+  await expect(bruno.getByLabel("Mensagem para o analista")).toBeVisible();
+});
+
 test("an employee is kept out of the console", async ({ browser }) => {
   const { ana } = await people(browser);
   await ana.goto("/console");

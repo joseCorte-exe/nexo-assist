@@ -3,7 +3,7 @@ import { RequestContext } from "@mastra/core/request-context";
 import type { MastraModelConfig } from "@mastra/core/llm";
 import { LibSQLStore } from "@mastra/libsql";
 import { Memory } from "@mastra/memory";
-import { dayAndMonth, localDay, nexoToolSchemas } from "@nexo/shared";
+import { dayAndMonth, type DraftView, isCriticalCase, localDay, nexoToolSchemas } from "@nexo/shared";
 import { instructions, workingMemoryTemplate } from "./instructions";
 import { createTools, type DraftStore, MIN_CONFIDENCE, newReplyTurn, OFFER_TOOLS, type ResolutionStore, type TicketDesk, type TransferStore } from "./tools";
 
@@ -207,6 +207,15 @@ function replyDone(step: Step | undefined) {
 const ran = (steps: ReadonlyArray<Step>, toolName: string) =>
   steps.some((step) => step.toolResults.some((result) => result.toolName === toolName && answeredOk(result)));
 
+/** The model drafted a critical case: the route transfers it once the reply is saved. */
+const draftedCritical = (steps: ReadonlyArray<Step>) =>
+  steps.some((step) =>
+    step.toolResults.some((result) => {
+      if (result.toolName !== "draftTicket" || !answeredOk(result)) return false;
+      return isCriticalCase((result.output as { value: { draft: DraftView } }).value.draft);
+    }),
+  );
+
 /** The confidence recordDecision gave in the first step, if the input was a valid one. */
 function recordedConfidence(step: Step | undefined): number | null {
   const input = step?.toolResults.find((result) => result.toolName === "recordDecision")?.input as { confidence?: unknown } | undefined;
@@ -233,10 +242,11 @@ export function streamReply(agent: NexoAgent, { conversationId, employeeId, text
     // recordDecision is mandatory in the first step; afterwards the model chooses. Once a draft is shown, the offers go:
     // its card has Confirmar, Editar and Cancelar, and quick replies under it would only send those words as a message.
     // Below 0.6 the step after the decision transfers, as the doubt of the agent: the code says so, not the model. Once
-    // transferred, the model only says to whom and until when; once resolved, its closing sentence.
+    // transferred, or drafted as critical, which the route transfers, the model only says to whom and until when; once
+    // resolved, its closing sentence.
     prepareStep: ({ stepNumber, steps }) => {
       if (stepNumber === 0) return { toolChoice: { type: "tool", toolName: "recordDecision" } };
-      if (ran(steps, "transferToAnalyst") || ran(steps, "markResolved")) return { activeTools: [WORKING_MEMORY_TOOL] };
+      if (ran(steps, "transferToAnalyst") || ran(steps, "markResolved") || draftedCritical(steps)) return { activeTools: [WORKING_MEMORY_TOOL] };
       if (stepNumber === 1) {
         turn.confidence = recordedConfidence(steps[0]);
         if (turn.confidence !== null && turn.confidence < MIN_CONFIDENCE) return { toolChoice: { type: "tool", toolName: "transferToAnalyst" } };
