@@ -1,4 +1,4 @@
-import type { Affected, AnalystLevel, Impact, Priority, TicketStatus, TransferReason, Urgency } from "./domain";
+import { type Affected, type AnalystLevel, type Impact, MAX_TRANSFER_SUMMARY, type Priority, type TicketStatus, type TransferReason, type Urgency } from "./domain";
 import { priorityFor } from "./priority";
 import { dueAt, isOverdue } from "./sla";
 
@@ -6,6 +6,9 @@ import { dueAt, isOverdue } from "./sla";
 // says why it transfers; the level comes from the case, which the code reads.
 
 export const LEVEL_LABEL: Record<AnalystLevel, string> = { N1: "Suporte N1", N2: "Suporte N2" };
+
+/** A summary the code writes, cut to what the analyst's summary holds. */
+export const fitSummary = (summary: string) => (summary.length <= MAX_TRANSFER_SUMMARY ? summary : `${summary.slice(0, MAX_TRANSFER_SUMMARY - 1).trimEnd()}…`);
 
 /**
  * What the model may ask for, plus the limit of messages, which the code asks for. Critical and overdue are only ever

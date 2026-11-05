@@ -191,6 +191,29 @@ export async function applyMove<Refusal extends string>(
 }
 
 /**
+ * The transfer as statements of someone else's batch, for what must be one fact with it: the reply that announces it.
+ * The guard is the state, not a version read before: an analyst who assumed meanwhile keeps it, and no note is left.
+ */
+export function transferInBatch(db: Db, conversationId: string, fields: TransferFields, at: Date) {
+  const move = moves.transfer(fields);
+  const { authorId, note, text } = move.note;
+  return [
+    db
+      .update(conversations)
+      .set({ ...move.set(at), version: sql`${conversations.version} + 1` })
+      .where(and(eq(conversations.id, conversationId), eq(conversations.state, "with_agent"))),
+    noteIfMoved(db, {
+      noteId: `note-${conversationId}-${note.event}-${randomUUID()}`,
+      conversationId,
+      authorId,
+      text,
+      note: { ...note, at: at.toISOString() },
+      place: move.notePlace?.(at) ?? at,
+    }),
+  ] as const;
+}
+
+/**
  * The parts a note is saved with: what happened, the level and who, as they were then. The chat and the console draw
  * the note from them, so a later name or level never rewrites the history.
  */

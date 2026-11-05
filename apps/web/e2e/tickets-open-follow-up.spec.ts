@@ -233,7 +233,8 @@ test("past the 7 days she is told so, and a new ticket starts", async ({ page })
 
 test("when the ticket service falls at the confirmation, the draft waits and the retry creates it once", async ({ page, request }) => {
   await signInAsAna(page);
-  await replies(page).last().getByRole("button", { name: "Minha equipe" }).click();
+  // Only her, so that the Nexo stays with her: for the team it is a critical case, which goes to an analyst.
+  await replies(page).last().getByRole("button", { name: "Só eu" }).click();
   await idle(page);
   const draft = lastDraft(page);
   await expect(draft).toContainText("Aguardando confirmação");

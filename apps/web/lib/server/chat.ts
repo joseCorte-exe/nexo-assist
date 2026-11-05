@@ -19,11 +19,13 @@ import type { NextRequest } from "next/server";
 import type { Db } from "@/db";
 import { conversations, decisions, drafts, messages } from "@/db/schema";
 import { activeConversationOf, toConversationView, viewColumns } from "./conversation";
+import { transferInBatch } from "./conversation-moves";
 import type { Deps } from "./deps";
 import { jsonError, readBody, readEmployeeSession } from "./http";
 import { applyLimit } from "./limit";
 import { replyPlace } from "./messages";
 import { closeIfResolved } from "./resolutions";
+import { criticalTransfer } from "./transfers";
 import { claimModelCall, clientIp, releaseModelCall } from "./usage";
 
 const AGENT_FAILED = "O Nexo não conseguiu responder. Tente de novo.";
@@ -53,19 +55,22 @@ type StartedTurn =
  *
  * The message is saved under the id the chat gave it. Sent again ("Tentar de novo", or the network dropped the
  * response) with the same text and still unanswered, it is answered, not saved twice, and the counter, which counts
- * the saved messages, does not move. Already answered, the chat is told so, to load the reply instead. Any other use
- * of a taken id is refused. Outside with_agent the message is saved and counted all the same, and the turn is paused: the
- * agent is not called (ARQUITETURA.md, section 6). A message also says she is on the chat, for the console.
+ * the saved messages, does not move. Already answered, or of a conversation that ended since, the chat is told so, to
+ * load the conversation instead: the reply that closed it may be the one whose response was lost. Any other use of a taken
+ * id is refused, and a taken id never opens a conversation. Outside with_agent the message is saved and counted all the
+ * same, and the turn is paused: the agent is not called (ARQUITETURA.md, section 6). A message also says she is on the
+ * chat, for the console.
  */
 async function startTurn(deps: Pick<Deps, "db" | "directory">, { employeeId, id, text, now }: { employeeId: string; id: string; text: string; now: Date }) {
   const { db } = deps;
   const at = now.getTime();
-  const [, , , [conversation]] = await db.batch([
+  const [, , , [conversation], [ended]] = await db.batch([
     // The partial unique index (one conversation that is not closed per employee) makes this a no-op when it exists.
     // Written by hand: the conflict target of a partial index needs its WHERE before DO NOTHING.
     db.run(sql`
       insert into ${conversations} (id, employee_id, state, message_count, created_at)
-      values (${`conv-${randomUUID()}`}, ${employeeId}, 'with_agent', 0, ${at})
+      select ${`conv-${randomUUID()}`}, ${employeeId}, 'with_agent', 0, ${at}
+      where not exists (select 1 from ${messages} m where m.id = ${id})
       on conflict (employee_id) where state <> 'closed' do nothing`),
     db.run(sql`
       insert into ${messages} (id, conversation_id, author, text, parts, created_at)
@@ -103,8 +108,24 @@ async function startTurn(deps: Pick<Deps, "db" | "directory">, { employeeId, id,
       })
       .from(conversations)
       .where(activeConversationOf(employeeId)),
+    // The same message of hers, in a conversation that ended.
+    db
+      .select({ id: messages.id })
+      .from(messages)
+      .innerJoin(conversations, eq(conversations.id, messages.conversationId))
+      .where(
+        and(
+          eq(messages.id, id),
+          eq(messages.author, "employee"),
+          eq(messages.text, text),
+          eq(conversations.employeeId, employeeId),
+          eq(conversations.state, "closed"),
+        ),
+      ),
   ]);
-  if (!conversation) throw new Error("The active conversation is missing after it was ensured");
+  if (ended) return { ok: false, reason: "already_answered" } satisfies StartedTurn;
+  // The id is taken elsewhere, so nothing was opened for it.
+  if (!conversation) return { ok: false, reason: "message_conflict" } satisfies StartedTurn;
   const { mine, answered, previousAt, ...row } = conversation;
   if (!mine && row.state === "with_agent" && reachedLimit(row.messageCount)) return { ok: false, reason: "limit_due", conversationId: row.id } satisfies StartedTurn;
   // Anything but this employee's unanswered message would be answered without being saved or counted.
@@ -118,7 +139,8 @@ async function startTurn(deps: Pick<Deps, "db" | "directory">, { employeeId, id,
 /**
  * Saves the agent reply with the parts it streamed, its decision, and marks the first response of the conversation, in
  * one batch. The reply goes right after the message it answers, so whatever it did meanwhile (the note of a transfer)
- * comes after it, as nexo.pen draws them.
+ * comes after it, as nexo.pen draws them. A reply that drafted a critical case also transfers it in that batch: it says
+ * so, so either both happened or "Tentar de novo" asks for both.
  */
 async function saveReply(
   db: Db,
@@ -128,6 +150,7 @@ async function saveReply(
   // the agent refused is saved as the error it was, so the reply still matches the schemas when it is read back.
   const parts = withToolErrors(reply.parts.filter((part) => part.type !== "data-conversation"));
   const { record, toolsUsed } = summarizeTurn(parts);
+  const critical = criticalTransfer(reply, startedAt);
   await db.batch([
     // The text column is the reply as a person reads it outside the chat: the console and the list show it.
     db.insert(messages).values({ id: reply.id, conversationId, author: "agent", text: replyText(parts), parts, createdAt: replyPlace(startedAt) }),
@@ -136,6 +159,7 @@ async function saveReply(
       .update(conversations)
       .set({ firstResponseAt: sql`coalesce(${conversations.firstResponseAt}, ${now.getTime()})` })
       .where(eq(conversations.id, conversationId)),
+    ...(critical ? transferInBatch(db, conversationId, critical, now) : []),
   ]);
 }
 
@@ -147,6 +171,22 @@ async function discardDrafts(db: Db, reply: NexoUIMessage) {
   const ids = reply.parts.flatMap((part) => shownDraft(part)?.id ?? []);
   if (ids.length === 0) return;
   await db.update(drafts).set({ status: "cancelled" }).where(and(inArray(drafts.id, ids), eq(drafts.status, "pending")));
+}
+
+/**
+ * A reply that will not be saved never reaches her: the call goes back, so she may try again ("Tentar de novo"), and its
+ * drafts go. Why is logged first, and each step runs whatever happens to the other, so a second failure neither replaces
+ * the first nor leaves a draft pending. Never throws. Only the kind of an error: its details can quote what she wrote.
+ */
+async function abandonReply(
+  db: Db,
+  { conversationId, callKey, reply, why }: { conversationId: string; callKey: string; reply: NexoUIMessage; why: { finishReason: string | undefined } | { error: string } },
+) {
+  console.error("agent reply not saved", { conversationId, ...why });
+  const steps = await Promise.allSettled([releaseModelCall(db, callKey), discardDrafts(db, reply)]);
+  for (const step of steps) {
+    if (step.status === "rejected") console.error("agent reply not cleaned up", { conversationId, error: (step.reason as Error).name });
+  }
 }
 
 /**
@@ -251,16 +291,14 @@ export async function chat(request: NextRequest, deps: Deps) {
       // A reply that failed, or never finished, is not saved: "Tentar de novo" asks for it again. One cut by the
       // step or token limits did finish, and is saved as it is.
       if (finishReason === undefined || finishReason === "error") {
-        console.error("agent reply not saved", { conversationId: conversation.id, finishReason });
-        // Before anything else that can throw: she may try again ("Tentar de novo"), a few times.
-        await releaseModelCall(deps.db, callKey);
-        await discardDrafts(deps.db, responseMessage);
+        await abandonReply(deps.db, { conversationId: conversation.id, callKey, reply: responseMessage, why: { finishReason } });
         return;
       }
-      // A reply that could not be saved never reaches her either, so the call goes back too. One saved keeps it: never repeated.
+      // One that could not be saved is abandoned too, and breaks the stream, so the chat offers to try again. One saved
+      // keeps the call: never repeated. Nothing of the error goes on: the platform logs what breaks a stream.
       await saveReply(deps.db, { conversationId: conversation.id, startedAt, now: deps.now(), reply: responseMessage }).catch(async (error: unknown) => {
-        await releaseModelCall(deps.db, callKey);
-        throw error;
+        await abandonReply(deps.db, { conversationId: conversation.id, callKey, reply: responseMessage, why: { error: (error as Error).name } });
+        throw new Error("The agent reply was not saved");
       });
       await closeIfResolved(deps, { conversationId: conversation.id, turnStartedAt: startedAt, reply: responseMessage });
       // The message that reached the limit is answered; the limit applies right after (ARQUITETURA.md, section 1).

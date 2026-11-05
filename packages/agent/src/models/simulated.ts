@@ -439,9 +439,7 @@ function draftStep(intent: Extract<Intent, { kind: "draft" }>, answer: string, d
 
 /** Why RN-01 gave that priority, in the words of what the employee said. */
 function priorityReason(ticket: DraftTicketInput | undefined) {
-  if (ticket?.urgency === "same_day") return " por causa do compromisso de hoje";
-  if (ticket?.impact === "stopped" && ticket.affected !== "only_me") return " porque está parado para mais gente";
-  return "";
+  return ticket?.urgency === "same_day" ? " por causa do compromisso de hoje" : "";
 }
 
 /** The sentence above the card: what was decided and why, with the deadline the tool computed. */
@@ -455,6 +453,10 @@ function lineAboveTheCard(
     return afterDuplicate
       ? `Já existe o ${draft.ticketId} sobre isso, então vou acrescentar a informação a ele. Confira antes de eu enviar:`
       : `Confira o que vou acrescentar ao ${draft.ticketId} antes de eu enviar:`;
+  }
+  // The route transfers it once this reply is saved.
+  if (draft.priority === "critical") {
+    return `O caso é crítico porque está parado para mais gente. Encaminhei para o Suporte N2, e um analista vai falar com você ${dueText}. Confira o rascunho para registrar o chamado:`;
   }
   const priority = PRIORITY_LABEL[draft.priority].toLowerCase();
   return `Coloquei prioridade ${priority}${priorityReason(ticket)}: a resposta chega ${dueText}. Confira antes de eu criar:`;

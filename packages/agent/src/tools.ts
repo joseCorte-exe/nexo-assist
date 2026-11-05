@@ -255,7 +255,8 @@ export function createTools({
         overdue: summarize(ticket, at).overdue,
         daysSinceUpdate: Math.max(0, Math.floor((at.getTime() - new Date(ticket.updatedAt).getTime()) / DAY_MS)),
         deadline: slaText(ticket.priority),
-        lastItUpdate: updates.filter((update) => update.author !== "employee").at(-1)?.text ?? null,
+        // The analyst's words: the agent also writes on a ticket, the note of a transfer, which is not what IT said.
+        lastItUpdate: updates.filter((update) => update.author === "analyst").at(-1)?.text ?? null,
         checkedAt: at.toISOString(),
       };
       return { ok: true as const, ticket: card };
