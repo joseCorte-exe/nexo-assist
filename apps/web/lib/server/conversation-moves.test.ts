@@ -78,6 +78,26 @@ describe("transfer", () => {
   });
 });
 
+describe("resolve", () => {
+  const started = new Date(NOW.getTime() - 4_000);
+  const resolve = moves.resolve(started);
+
+  it("only ends a conversation the agent attends: never one with an analyst, waiting for one, or closed by another", () => {
+    expect(resolve.decide(withAgent)).toBe("apply");
+    for (const taken of [waiting, withRafael, closedByRafael]) expect(resolve.decide(taken)).toEqual({ refused: "not_with_agent" });
+  });
+
+  it("answers the same when the same reply already ended it", () => {
+    expect(resolve.decide(closedByHer)).toBe("already");
+  });
+
+  it("records how it ended and when, with a note after the reply that said so", () => {
+    expect(resolve.set(NOW)).toEqual({ state: "closed", outcome: "resolved_by_agent", closedAt: NOW });
+    expect(resolve.note).toEqual({ authorId: null, note: { event: "resolved" }, text: "Resolvida pelo agent. Conversa encerrada.", memory: false });
+    expect(resolve.notePlace?.(started)).toEqual(new Date(started.getTime() + 2));
+  });
+});
+
 describe("assume", () => {
   it("takes a conversation with the agent or waiting, at any level", () => {
     expect(moves.assume(juliana).decide(withAgent)).toBe("apply");
