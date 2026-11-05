@@ -308,6 +308,8 @@ export async function testDeps({ model, ...overrides }: TestOptions = {}): Promi
     sessionSecret: SECRET,
     secureCookies: false,
     now: () => NOW,
+    // No test reaches a ceiling by accident: the ones about the ceilings set their own.
+    usageLimits: { perIp: Number.MAX_SAFE_INTEGER, global: Number.MAX_SAFE_INTEGER },
     ...overrides,
     ticketService,
     notes,

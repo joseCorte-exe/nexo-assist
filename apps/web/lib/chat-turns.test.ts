@@ -512,6 +512,50 @@ describe("liveTurns, with an analyst (feature 5)", () => {
     };
     expect(liveTurns([user("u1", "Oi"), counter], "ready", { paused: true })).toEqual([{ kind: "employee", id: "u1", text: "Oi", unsent: false }]);
   });
+
+  describe("a message that may not be sent again today", () => {
+    const refused = { kind: "agent", id: "u1-reply", text: "", decision: null, steps: [], blocks: [], phase: "retry_refused" };
+
+    it("offers no retry: the message is not marked as not sent, whether or not the error was cleared", () => {
+      for (const status of ["error", "ready"] as const) {
+        expect(liveTurns([user("u1", "Oi")], status, { retryRefused: true })).toEqual([{ kind: "employee", id: "u1", text: "Oi", unsent: false }, refused]);
+      }
+    });
+
+    it("draws the reply instead, when the read found it saved", () => {
+      const turns = liveTurns([user("u1", "Oi"), agent([{ type: "text", text: "Oi, Ana." }])], "ready", { retryRefused: true });
+      expect(turns.at(-1)).toMatchObject({ text: "Oi, Ana.", phase: "done" });
+    });
+  });
+
+  describe("past a ceiling of the day", () => {
+    const refusal: NexoUIMessage = {
+      id: "a1",
+      role: "assistant",
+      parts: [
+        { type: "data-conversation", data: { id: "conv-1", state: "with_agent", messageCount: 1, targetLevel: null, waitUntil: null, analyst: null, limitReached: false } },
+        { type: "data-unavailable", data: null },
+      ],
+    };
+
+    it("says the demo is unavailable where the answer would be, with her message sent", () => {
+      expect(liveTurns([user("u1", "Oi"), refusal], "ready")).toEqual([
+        { kind: "employee", id: "u1", text: "Oi", unsent: false },
+        { kind: "agent", id: "a1", text: "", decision: null, steps: [], blocks: [], phase: "unavailable" },
+      ]);
+    });
+
+    it("keeps saying so above the next message, while it streams and after", () => {
+      expect(liveTurns([user("u1", "Oi"), refusal], "streaming").at(-1)).toMatchObject({ phase: "unavailable" });
+      for (const status of ["submitted", "ready"] as const) {
+        expect(liveTurns([user("u1", "Oi"), refusal, user("u2", "E agora?")], status)[1]).toMatchObject({ phase: "unavailable" });
+      }
+    });
+
+    it("counts the message the server saved", () => {
+      expect(messageCount([user("u1", "Oi"), refusal], "ready", 0)).toBe(1);
+    });
+  });
 });
 
 describe("withSaved", () => {

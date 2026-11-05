@@ -336,9 +336,10 @@ export type MessageMeta = z.infer<typeof messageMeta>;
 
 /**
  * A message of the chat: text, the parts of each tool and the data-conversation, data-note and data-analyst parts. An agent reply is saved
- * with these same parts, so the screen draws a reply the same way while it streams and after a reload.
+ * with these same parts, so the screen draws a reply the same way while it streams and after a reload. data-unavailable
+ * only streams: the model was not called because the demo reached a ceiling of the day, so there is no reply to save.
  */
-export type NexoUIMessage = UIMessage<MessageMeta, { conversation: ConversationView; note: ChatNote; analyst: AnalystPart }, NexoTools>;
+export type NexoUIMessage = UIMessage<MessageMeta, { conversation: ConversationView; note: ChatNote; analyst: AnalystPart; unavailable: null }, NexoTools>;
 
 /**
  * GET /api/conversation: the conversation by id; without one, her active one, or the last that ended, or none. With its

@@ -93,18 +93,23 @@ export function AgentReply({ turn, renderDraft, failures, onRetry, onChoose }: P
       })}
 
       {turn.phase === "failed" ? (
-        <div role="alert" className={`${bubble} mt-1.5 flex items-center gap-3`}>
-          <CircleAlert aria-hidden className="size-3.5 shrink-0 text-danger-text" />
-          <p className="flex-1 text-14.5 leading-[22px] text-pretty text-ink">
-            {failures > 1
+        <NoReply
+          text={
+            failures > 1
               ? "O Nexo não conseguiu responder de novo. Se continuar, ligue no ramal 4000."
-              : "O Nexo não conseguiu responder."}
-          </p>
+              : "O Nexo não conseguiu responder."
+          }
+        >
           <Button variant="secondary" onClick={onRetry} className="px-3.5">
             Tentar de novo
           </Button>
-        </div>
+        </NoReply>
       ) : null}
+
+      {/* No "Tentar de novo": the ceilings hold until tomorrow, and her message is already saved and known to the agent. */}
+      {turn.phase === "unavailable" ? <NoReply text="O Nexo não pode responder: a demo está indisponível hoje. Sua mensagem ficou salva." /> : null}
+
+      {turn.phase === "retry_refused" ? <NoReply text="Essa mensagem não pode ser reenviada agora. Envie outra." /> : null}
 
       {turn.phase === "interrupted" ? (
         <p role="alert" className="mt-1.5 flex items-center gap-1.5 text-12.5 text-ink-3">
@@ -116,6 +121,17 @@ export function AgentReply({ turn, renderDraft, failures, onRetry, onChoose }: P
         </p>
       ) : null}
     </article>
+  );
+}
+
+/** Where the answer would be, when there is none: the bubble with an alert, and what she can do about it. */
+function NoReply({ text, children }: { text: string; children?: ReactNode }) {
+  return (
+    <div role="alert" className={`${bubble} mt-1.5 flex items-center gap-3`}>
+      <CircleAlert aria-hidden className="size-3.5 shrink-0 text-danger-text" />
+      <p className="flex-1 text-14.5 leading-[22px] text-pretty text-ink">{text}</p>
+      {children}
+    </div>
   );
 }
 

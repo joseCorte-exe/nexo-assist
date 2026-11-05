@@ -53,15 +53,12 @@ const transport = new DefaultChatTransport<NexoUIMessage>({
 
 const newMessageId = () => `msg-${crypto.randomUUID()}`;
 
-/**
- * The route refused a message sent again because its reply was saved: the network only lost the response.
- * DefaultChatTransport puts the body of a refused request in the error message, so the code is read from there.
- */
-function wasAlreadyAnswered(error: Error) {
+/** Why the route refused a message. DefaultChatTransport puts the body of a refused request in the error message. */
+function refusalOf(error: Error) {
   try {
-    return apiError.safeParse(JSON.parse(error.message)).data?.error.code === "already_answered";
+    return apiError.safeParse(JSON.parse(error.message)).data?.error.code;
   } catch {
-    return false;
+    return undefined;
   }
 }
 
@@ -101,6 +98,8 @@ export function Chat({
   conversationRef.current = conversation;
   // How many replies in a row failed: the second one sends the employee to the phone.
   const [failures, setFailures] = useState(0);
+  // The last message came back refused for good today: "Tentar de novo" would only be refused again.
+  const [retryRefused, setRetryRefused] = useState(false);
   // The counter of the conversation as last loaded from the server; replies bring newer ones in the stream.
   const [savedCount, setSavedCount] = useState(initial.conversation?.messageCount ?? 0);
   // The drafts as last known: loaded with the conversation, then as each action of a card answered.
@@ -112,7 +111,14 @@ export function Chat({
     transport,
     generateId: newMessageId,
     onError: (error) => {
-      if (wasAlreadyAnswered(error)) return void showSavedReply();
+      const refusal = refusalOf(error);
+      // Its reply was saved: the network only lost the response.
+      if (refusal === "already_answered") return void showSavedReply();
+      // The message may not call the model again today. It is saved, so nothing says it was not sent, and a reply it may still have shows up.
+      if (refusal === "resend_refused") {
+        setRetryRefused(true);
+        return void showSavedReply();
+      }
       setFailures((count) => count + 1);
     },
     onFinish: ({ message, isError }) => {
@@ -125,7 +131,9 @@ export function Chat({
       if (part?.type === "data-conversation" && (part.data.id !== known?.id || part.data.state !== known?.state)) setConversation(part.data);
       const transferred = message.parts.some((one) => one.type === "tool-transferToAnalyst" && one.state === "output-available" && one.output.ok);
       // The message that reached the limit was answered: the server applied the limit before this stream ended.
-      const atLimit = part?.type === "data-conversation" && reachedLimit(part.data.messageCount);
+      // Unless the demo was unavailable: nobody answered, so it applies at her next message, and a read would take the notice away.
+      const unavailable = message.parts.some((one) => one.type === "data-unavailable");
+      const atLimit = !unavailable && part?.type === "data-conversation" && reachedLimit(part.data.messageCount);
       if (transferred || markedResolved(message.parts) || atLimit || (part?.type === "data-conversation" && part.data.state !== "with_agent")) void sync.refresh();
     },
   });
@@ -153,7 +161,7 @@ export function Chat({
     clearError();
   }
 
-  const turns = liveTurns(messages, status, { paused });
+  const turns = liveTurns(messages, status, { paused, retryRefused });
   const words = composerWords(conversation);
   const now = useNow();
   useTitleBadge(turns);
@@ -197,6 +205,7 @@ export function Chat({
   function send(text: string) {
     // Written after a conversation that ended, it opens a new one: the screen starts over with it.
     if (conversationRef.current?.state === "closed") startOver();
+    setRetryRefused(false);
     void sendMessage({ text });
   }
 
