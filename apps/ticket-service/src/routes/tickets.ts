@@ -7,7 +7,6 @@ import {
   LEVEL_LABEL,
   reopenedDueAt,
   type Ticket,
-  ticketAnswerInput,
   type TicketDetail,
   type TicketStatus,
   type TicketType,
@@ -171,7 +170,7 @@ export function ticketRoutes(deps: Deps) {
     .post("/:id/answer", async (c) => {
       const id = ticketId.safeParse(c.req.param("id"));
       if (!id.success) return c.json(errorBody("invalid_ticket", "Invalid ticket number"), 400);
-      const body = await parseWrite(c, ticketAnswerInput);
+      const body = await parseWrite(c, ticketFollowUpInput);
       if (!body.ok) return body.response;
       const { employeeId, text } = body.data;
       const scope = `POST /tickets/${id.data}/answer for ${employeeId}`;

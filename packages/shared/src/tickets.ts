@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { affected, analystLevel, category, MAX_TRANSFER_SUMMARY, priority, ticketStatus, ticketType, updateAuthor } from "./domain";
+import { affected, analystLevel, category, MAX_MESSAGE_TEXT, MAX_TRANSFER_SUMMARY, priority, ticketStatus, ticketType, updateAuthor } from "./domain";
 
 const TICKET_ID = /^(INC|REQ)-\d{5}$/;
 
@@ -74,10 +74,13 @@ export const ticketSummary = z.object({
 });
 export type TicketSummary = z.infer<typeof ticketSummary>;
 
-/** Body of PATCH /tickets/:id (a follow-up of the employee) and of POST /tickets/:id/reopen (what happened again). */
+/**
+ * Body of PATCH /tickets/:id (a follow-up of the employee), of POST /tickets/:id/reopen (what happened again) and of
+ * POST /tickets/:id/answer (what an analyst wrote in the conversation about the ticket).
+ */
 export const ticketFollowUpInput = z.object({
   employeeId: z.string().min(1),
-  text: z.string().trim().min(1).max(2000),
+  text: z.string().trim().min(1).max(MAX_MESSAGE_TEXT),
 });
 export type TicketFollowUpInput = z.infer<typeof ticketFollowUpInput>;
 
@@ -95,10 +98,6 @@ export type TicketTransferInput = z.infer<typeof ticketTransferInput>;
 /** Body of POST /tickets/:id/assign: an analyst assumed the conversation about the ticket. */
 export const ticketAssignInput = z.object({ employeeId: z.string().min(1), analystId: z.string().min(1) });
 export type TicketAssignInput = z.infer<typeof ticketAssignInput>;
-
-/** Body of POST /tickets/:id/answer: what an analyst wrote in the conversation about the ticket. Fits any message of the console. */
-export const ticketAnswerInput = z.object({ employeeId: z.string().min(1), text: z.string().trim().min(1).max(2000) });
-export type TicketAnswerInput = z.infer<typeof ticketAnswerInput>;
 
 /** How many people the console asks for at once: the employees of a page of the list. */
 export const MAX_EMPLOYEE_IDS = 200;

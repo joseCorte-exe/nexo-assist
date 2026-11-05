@@ -4,7 +4,6 @@ import { analystSchema, type Employee, employeeSchema, type Person } from "./peo
 import type { Category } from "./domain";
 import {
   type CreateTicketInput,
-  type TicketAnswerInput,
   type TicketAssignInput,
   type TicketTransferInput,
   type EmployeeTicketsStatus,
@@ -184,7 +183,7 @@ export function createTicketServiceClient(options: Options) {
     assignTicket: (ticketId: string, input: TicketAssignInput, idempotencyKey: string) =>
       request(ticketSchema, "POST", `/tickets/${encodeURIComponent(ticketId)}/assign`, { body: input, idempotencyKey }),
     /** Notes what an analyst wrote as the answer of IT, which restarts the deadline. The key is the message, so a retry notes it once. */
-    answerTicket: (ticketId: string, input: TicketAnswerInput, idempotencyKey: string) =>
+    answerTicket: (ticketId: string, input: TicketFollowUpInput, idempotencyKey: string) =>
       request(ticketSchema, "POST", `/tickets/${encodeURIComponent(ticketId)}/answer`, { body: input, idempotencyKey }),
     /** Reopens a ticket of hers resolved up to 7 days ago. The key is the draft, so a retry reopens it once. */
     reopenTicket: (ticketId: string, input: TicketFollowUpInput, idempotencyKey: string) =>

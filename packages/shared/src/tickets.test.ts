@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analystMessageInput } from "./console";
-import { findTicketIds, ticketAnswerInput, ticketDetailSchema, ticketFollowUpInput, ticketId } from "./tickets";
+import { findTicketIds, ticketDetailSchema, ticketFollowUpInput, ticketId } from "./tickets";
 
 describe("ticketId", () => {
   it("takes INC or REQ with 5 digits, uppercased and trimmed", () => {
@@ -81,25 +80,5 @@ describe("ticketFollowUpInput", () => {
     expect(ticketFollowUpInput.safeParse({ employeeId: "emp-ana", text: " " }).success).toBe(false);
     expect(ticketFollowUpInput.safeParse({ employeeId: "emp-ana", text: "x".repeat(2001) }).success).toBe(false);
     expect(ticketFollowUpInput.safeParse({ text: "Oi" }).success).toBe(false);
-  });
-});
-
-describe("ticketAnswerInput", () => {
-  it("takes the employee and the text, trimmed", () => {
-    expect(ticketAnswerInput.parse({ employeeId: "emp-ana", text: "  Pode deixar ligado? " })).toEqual({
-      employeeId: "emp-ana",
-      text: "Pode deixar ligado?",
-    });
-  });
-
-  it("refuses an empty text, a text too long and a missing employee", () => {
-    expect(ticketAnswerInput.safeParse({ employeeId: "emp-ana", text: " " }).success).toBe(false);
-    expect(ticketAnswerInput.safeParse({ employeeId: "emp-ana", text: "x".repeat(2001) }).success).toBe(false);
-    expect(ticketAnswerInput.safeParse({ text: "Oi" }).success).toBe(false);
-  });
-
-  it("takes the longest message the console lets an analyst send, so no answer is lost to the limit", () => {
-    const { text } = analystMessageInput.parse({ id: "msg-1", text: "x".repeat(2000) });
-    expect(ticketAnswerInput.safeParse({ employeeId: "emp-ana", text }).success).toBe(true);
   });
 });
