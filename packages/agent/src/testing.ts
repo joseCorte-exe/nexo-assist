@@ -21,10 +21,18 @@ export function promptText(options: { prompt: Array<{ content: unknown }> }) {
   return JSON.stringify(options.prompt.map((message) => message.content));
 }
 
-/** Runs one reply to the end: its text and the tools it called, in order. Rejects when the model failed. */
-export async function replyOf(agent: NexoAgent, { startedAt = new Date(), ...turn }: Omit<Turn, "startedAt"> & { startedAt?: Date }) {
+type TestTurn = Omit<Turn, "startedAt"> & { startedAt?: Date };
+
+/** Runs one reply to the end and gives all of it, with its steps and usage. Rejects when the model failed. */
+export async function fullReplyOf(agent: NexoAgent, { startedAt = new Date(), ...turn }: TestTurn) {
   const full = await (await streamReply(agent, { ...turn, startedAt })).getFullOutput();
   if (full.error) throw full.error;
+  return full;
+}
+
+/** Runs one reply to the end: its text and the tools it called, in order. Rejects when the model failed. */
+export async function replyOf(agent: NexoAgent, turn: TestTurn) {
+  const full = await fullReplyOf(agent, turn);
   const toolCalls = full.steps.flatMap((step) =>
     step.toolCalls.map(({ payload }) => ({ toolName: payload.toolName, args: payload.args })),
   );

@@ -52,7 +52,7 @@ Revisado pelo PO (fidelidade ao PRD e ao design) e pelo engineer (arquitetura) e
 | Serviço de chamados | Hono | 4.13 |
 | Banco | `@libsql/client` + Drizzle (com `tablesFilter` para não mexer nas tabelas `mastra_*`) | 0.18 / 0.45 |
 | Validação e contratos | Zod | 4.6 |
-| Testes | Vitest (fixo na 4, por causa do `@mastra/evals`), `@mastra/evals`, Playwright | 4.1 / 1.10 / 1.64 |
+| Testes | Vitest (fixo na 4) e Playwright. O `pnpm eval` roda no próprio Vitest, sem o `@mastra/evals`: os casos conferem o que o código registra (ferramentas, nível, rascunho, decisão), e isso não precisa de nota de um scorer | 4.1 / 1.64 |
 | Runtime | Node >= 22.13, pnpm workspaces (monorepo, sem Turborepo) | |
 
 Por que essas escolhas:
@@ -320,8 +320,8 @@ Cada feature entrega o back e a tela juntos, seguindo os contratos da seção 7.
 Estados de tela que precisam existir no chat: com o agent, aguardando atendente, analista respondendo, encerrada, limite atingido e serviço de chamados fora do ar.
 
 ### Testes de ponta a ponta
-- Roteiro de aceite escrito, com passo e resultado esperado para as 9 histórias e para cada regra do Anexo A. Ele passa inteiro no local.
-- Testes do agent com o modelo real (`pnpm eval`), cada um ligado a uma história ou regra: dúvida resolvida pela central sem abrir chamado; consulta sem número que encontra chamado vencido; complemento; falta informação e o agent pergunta; referência a algo dito antes; crítico vai para N2; vencido vai para N2; pedido do funcionário vai para N1; agent inseguro vai para N1; fora de escopo; tentativa de ver chamado alheio; duplicado; reabrir com 6 dias e com 8 dias. Esses testes também decidem se o Haiku fica.
+- Roteiro de aceite escrito ([docs/roteiro-de-aceite.md](docs/roteiro-de-aceite.md)), com passo e resultado esperado para as 9 histórias e para cada regra do Anexo A. O critério é ele passar inteiro no local.
+- Testes do agent com o modelo real (`pnpm eval`, em `packages/agent/src/evals`, com o resultado em [docs/evals/resultado.md](docs/evals/resultado.md)), cada um ligado a uma história ou regra e rodado 3 vezes: dúvida resolvida pela central sem abrir chamado; consulta sem número que encontra chamado vencido; complemento; falta informação e o agent pergunta; referência a algo dito antes; crítico vai para N2; vencido vai para N2; pedido do funcionário vai para N1; agent inseguro vai para N1; fora de escopo; tentativa de ver chamado alheio; duplicado; dizer que resolveu encerra a conversa; só agradecer não encerra; reabrir com 6 dias e com 8 dias. Esses testes também decidem se o Haiku fica.
 - Testes de integração: ticket-service com banco em memória; rota do chat com o LLM simulado (com o agent pausado, o LLM não é chamado).
 - Playwright com o LLM simulado: login, mensagem, rascunho, confirmar e analista assumindo.
 
