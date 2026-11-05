@@ -149,7 +149,7 @@ Status do chamado e o que muda cada um (só o que o design mostra):
 | messages | id, conversation_id, author (employee, agent, analyst, system), text, parts (as partes da resposta do agent como saíram no stream: decisão, ferramentas, texto e, depois, cards, opções e rascunho, com um resumo dos ids para o agent lembrar no turno seguinte), created_at |
 | decisions | id, message_id, understanding, action, tools_used, confidence, reason |
 | drafts | id, conversation_id, operation (create, update, reopen), title, description, type, category, subcategory, impact, urgency, priority, affected, ticket_id, status (pending, confirmed, cancelled) |
-| usage_counters | key (ip + dia, global + dia, ou mensagem + dia), count (atualizada de forma atômica; na linha da mensagem, as chamadas ao modelo que ela fez naquele dia, negativas depois de uma resposta que falhou) |
+| usage_counters | key (ip + dia, global + dia, ou mensagem + dia), count (atualizada de forma atômica; na linha da mensagem, as chamadas ao modelo que ela fez naquele dia, negativas depois de uma resposta que falhou ou não foi salva, o que libera nova tentativa). Por decisão do José, a nova tentativa depois de uma resposta que falhou não conta nos tetos de IP e global. Uma chamada sem fim conhecido (o processo caiu) fica recusada só naquele dia |
 | mastra_* | tabelas da memória do Mastra |
 
 A sessão fica num cookie HttpOnly assinado, sem tabela.
@@ -198,7 +198,7 @@ Os contratos ficam em `packages/shared` como schemas Zod, inclusive o formato da
 | POST /api/me/reset-password | só devolve o aviso (também usado por "Esqueci minha senha") |
 | GET /api/stats/login | os três números da tela de login |
 | GET /api/conversation | conversa ativa do funcionário, com mensagens, decisões e estado. O chat consulta a cada 3 s enquanto a conversa não está com o agent, e também ao reabrir a página |
-| POST /api/chat | mensagem do funcionário, com o id que o chat deu a ela (reenviada com o mesmo id depois de uma resposta que falhou, é respondida sem contar de novo, até três chamadas por dia; enquanto a chamada roda, é recusada); responde em partes |
+| POST /api/chat | mensagem do funcionário, com o id que o chat deu a ela. Reenviada com o mesmo id depois de uma resposta que falhou, é respondida sem contar de novo (por decisão do José, também não conta nos tetos de uso), até três chamadas por dia. Enquanto a chamada roda, ou depois de três falhas, é recusada com 409 `resend_refused`, e o chat avisa sem oferecer nova tentativa. Responde em partes |
 | PATCH /api/drafts/:id | salva o que foi editado no card (título, descrição, categoria) |
 | POST /api/drafts/:id/confirm | cria, atualiza ou reabre o chamado no ticket-service, sem passar pelo LLM |
 | POST /api/drafts/:id/cancel | descarta o rascunho |
