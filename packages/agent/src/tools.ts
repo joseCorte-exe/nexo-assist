@@ -27,6 +27,7 @@ import {
   slaText,
   type Ticket,
   type TicketCard,
+  noteTransferOnTicket,
   type TicketServiceClient,
   type TicketSummary,
   type TicketType,
@@ -132,20 +133,6 @@ const replyContext = turnContext.extend({
 });
 
 type DraftFailure = Extract<DraftTicketOutput, { ok: false }>;
-/**
- * The ticket keeps the line of the transfer, keyed by its note, whoever transferred. The conversation is with the analyst
- * either way; the history of the ticket only misses the line.
- */
-export async function noteTransferOnTicket(
-  ticketService: Pick<TicketDesk, "transferTicket">,
-  ticketId: string,
-  body: Parameters<TicketDesk["transferTicket"]>[1],
-  noteId: string,
-) {
-  const marked = await ticketService.transferTicket(ticketId, body, noteId);
-  if (!marked.ok) console.error("transfer not noted on the ticket", { ticketId, error: marked.error.code });
-}
-
 const failure = (reason: DraftFailure["reason"], message: string): DraftFailure => ({ ok: false, reason, message });
 
 export function createTools({

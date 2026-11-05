@@ -75,9 +75,9 @@ export type TakeoverBar =
   | { kind: "locked"; text: string };
 
 /** Who wrote the summary a note of transfer opens: the agent, or the code at the limit, from the case the agent kept. */
-export function transferSummaryLabel(note: NoteView): string | null {
-  if (note.event === "transferred") return "Resumo do agent";
-  return note.event === "limit_reached" && note.limit.then === "transferred" ? "Resumo do caso" : null;
+export function transferSummaryLabel(note: NoteView | null): string | null {
+  if (note?.event === "transferred") return "Resumo do agent";
+  return note?.event === "limit_reached" && note.limit.then === "transferred" ? "Resumo do caso" : null;
 }
 
 const LOCKED_PLACEHOLDER = "Assuma o atendimento para responder";
@@ -88,12 +88,13 @@ const LOCKED_PLACEHOLDER = "Assuma o atendimento para responder";
  */
 export function takeoverBar(conversation: ConsoleConversation, viewerId: string, now: Date): TakeoverBar {
   const name = firstName(conversation.employee.name);
+  const paused = conversation.limitReached ? "Limite de mensagens · agent pausado" : "Agent pausado";
   switch (conversation.state) {
     case "waiting_for_analyst":
       return {
         kind: "take",
         title: `${name} espera um atendente`,
-        body: `${conversation.limitReached ? "Limite de mensagens · agent pausado" : "Agent pausado"}${conversation.waitUntil ? ` · até ${untilText(conversation.waitUntil, now)}` : ""}`,
+        body: conversation.waitUntil ? `${paused} · até ${untilText(conversation.waitUntil, now)}` : paused,
         // Past the limit of messages it does not go back to the agent.
         release: !conversation.limitReached,
         placeholder: LOCKED_PLACEHOLDER,

@@ -32,10 +32,10 @@ O plano está em [plano.md](plano.md). Aqui ficam o que foi pedido, a prova de c
 
 | Suíte | Antes | Depois |
 |---|---|---|
-| Unidade e integração (Vitest) | 655 | 716 |
+| Unidade e integração (Vitest) | 655 | 718 |
 | Navegador (Playwright) | 52 | 56 |
 
-Todas passam e os tipos fecham nos quatro pacotes. Por pacote: shared 211, ticket-service 89, agent 107, web 309.
+Todas passam e os tipos fecham nos quatro pacotes. Por pacote: shared 211, ticket-service 89, agent 107, web 311.
 
 O arquivo [continuity-and-limit.spec.ts](../../../apps/web/e2e/continuity-and-limit.spec.ts) roda a história com duas pessoas. Gabriela volta a uma conversa de três dias atrás e vê os dois dias em pílulas. Depois, perto do limite, o contador conta o que falta; a 30ª é respondida e, sem nada pendente, a conversa fecha; ela recarrega, vê o fim, clica em "Nova conversa" e recomeça. Elisa abre e vê como a última conversa dela terminou. Escrevendo ali, a tela recomeça limpa. Depois ela bate o limite com uma pergunta aberta, a conversa vai para o N1, e o Rafael vê "Limite de mensagens" na lista, abre o resumo do caso pela nota, assume sem ter "Devolver ao agent", conversa com ela e encerra. O arquivo prepara as cenas de dias e de 29 mensagens direto no banco do teste e apaga o que escreveu ao terminar, para os números do login continuarem os mesmos.
 

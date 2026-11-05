@@ -3,14 +3,12 @@
 import { type KeyboardEvent, type RefObject, useEffect, useRef, useState } from "react";
 import { MESSAGE_LIMIT } from "@nexo/shared";
 import { ArrowUpIcon } from "@/components/design-icons";
-import { type Counter, counterWords } from "@/lib/counter";
+import { type Counter, counterAnnouncement, counterWords } from "@/lib/counter";
 import { createTypingSignal } from "@/lib/typing";
 
 type Props = {
   /** The line under the field: the count, what is left near the limit, or who stays with her past it. */
   counter: Counter;
-  /** Tell a screen reader the counter, once, when it starts counting down and at the last message. */
-  announceCounter?: boolean;
   /** While the agent answers she can keep writing; only sending waits. */
   busy: boolean;
   onSend: (text: string) => void;
@@ -25,7 +23,6 @@ type Props = {
 /** "Escreva para o Nexo…", Enviar and the counter. Enter sends, Shift+Enter breaks the line. */
 export function Composer({
   counter,
-  announceCounter = false,
   busy,
   onSend,
   inputRef,
@@ -100,7 +97,7 @@ export function Composer({
         <CounterText counter={counter} />
       </p>
       <p role="status" className="sr-only">
-        {announceCounter ? counterWords(counter) : ""}
+        {counterAnnouncement(counter)}
       </p>
     </form>
   );

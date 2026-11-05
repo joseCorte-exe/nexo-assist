@@ -56,10 +56,10 @@ describe("pendingAtLimit", () => {
 });
 
 describe("caseAtLimit", () => {
-  const classified = { operation: "create" as const, ticketId: null, impact: "stopped" as const, urgency: "same_day" as const, affected: "only_me" as const };
+  const classified = { ticketId: null, impact: "stopped" as const, urgency: "same_day" as const, affected: "only_me" as const };
 
   it("reads the ticket of a follow-up or reopening draft before anything the reply looked up", () => {
-    const draft = { operation: "update" as const, ticketId: "INC-20311", impact: null, urgency: null, affected: "only_me" as const };
+    const draft = { ticketId: "INC-20311", impact: null, urgency: null, affected: "only_me" as const };
     expect(caseAtLimit({ draft, lastReply: [lookedUp("INC-20298")] })).toEqual({ ticketId: "INC-20311", classification: null });
   });
 

@@ -174,6 +174,13 @@ describe("applyLimit", () => {
     expect(note?.parts?.[0]).toMatchObject({ data: { event: "limit_reached", limit: { then: "waiting", level: "N1" } } });
   });
 
+  it("refuses to invent a level for a waiting conversation without one", async () => {
+    const deps = await testDeps();
+    await deps.db.update(conversations).set({ messageCount: 30, targetLevel: null }).where(eq(conversations.id, "conv-carla"));
+    await expect(applyLimit(deps, "conv-carla")).rejects.toThrow("no target level");
+    expect(await notesOf(deps, "conv-carla")).toEqual([]);
+  });
+
   it("reads again when an analyst takes the conversation while the transfer is being prepared", async () => {
     const deps = await testDeps();
     const id = await conversationAt(deps, { count: 30, lastReply: askingReply });

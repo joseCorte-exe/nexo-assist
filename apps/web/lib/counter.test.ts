@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Counter, counterOf, counterWords } from "./counter";
+import { counterAnnouncement, counterOf, counterWords } from "./counter";
 
 const withAgent = { state: "with_agent" as const, limitReached: false, analystName: null };
 
@@ -29,13 +29,25 @@ describe("counterOf", () => {
 });
 
 describe("counterWords", () => {
-  it.each<[Counter, string]>([
-    [{ kind: "count", count: 12 }, "12/30 mensagens nesta sessão"],
+  it.each<[Parameters<typeof counterWords>[0], string]>([
     [{ kind: "left", left: 5 }, "Restam 5 mensagens nesta sessão"],
     [{ kind: "left", left: 1 }, "Resta 1 mensagem nesta sessão"],
     [{ kind: "analyst", name: "Rafael Lima" }, "Limite do Nexo atingido · Rafael Lima continua com você"],
     [{ kind: "analyst", name: null }, "Limite do Nexo atingido · um analista continua com você"],
   ])("%j", (counter, words) => {
     expect(counterWords(counter)).toBe(words);
+  });
+});
+
+describe("counterAnnouncement", () => {
+  it("speaks when the countdown starts and at the last message", () => {
+    expect(counterAnnouncement({ kind: "left", left: 5 })).toBe("Restam 5 mensagens nesta sessão");
+    expect(counterAnnouncement({ kind: "left", left: 1 })).toBe("Resta 1 mensagem nesta sessão");
+  });
+
+  it("stays quiet otherwise", () => {
+    expect(counterAnnouncement({ kind: "left", left: 3 })).toBe("");
+    expect(counterAnnouncement({ kind: "count", count: 12 })).toBe("");
+    expect(counterAnnouncement({ kind: "analyst", name: null })).toBe("");
   });
 });

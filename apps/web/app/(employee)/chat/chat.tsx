@@ -10,7 +10,7 @@ import {
   clockTime,
   type DraftView,
   employeeNoteLabel,
-  MESSAGE_LIMIT,
+  reachedLimit,
   type NexoUIMessage,
   textOf,
 } from "@nexo/shared";
@@ -18,7 +18,7 @@ import { DefaultChatTransport } from "ai";
 import { CircleAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { SystemNote } from "@/components/system-note";
-import { counterOf, LIMIT_WARNING_FROM } from "@/lib/counter";
+import { counterOf } from "@/lib/counter";
 import { THINKING_LABEL } from "@/lib/agent-actions";
 import { currentDraft, dayBreaks, lastDraftId, liveTurns, messageCount, type Turn, withSaved } from "@/lib/chat-turns";
 import { firstName } from "@/lib/format";
@@ -124,7 +124,7 @@ export function Chat({
       if (part?.type === "data-conversation" && (part.data.id !== known?.id || part.data.state !== known?.state)) setConversation(part.data);
       const transferred = message.parts.some((one) => one.type === "tool-transferToAnalyst" && one.state === "output-available" && one.output.ok);
       // The message that reached the limit was answered: the server applied the limit before this stream ended.
-      const atLimit = part?.type === "data-conversation" && part.data.messageCount >= MESSAGE_LIMIT;
+      const atLimit = part?.type === "data-conversation" && reachedLimit(part.data.messageCount);
       if (transferred || atLimit || (part?.type === "data-conversation" && part.data.state !== "with_agent")) void sync.refresh();
     },
   });
@@ -249,7 +249,6 @@ export function Chat({
         {conversation?.state === "waiting_for_analyst" ? <WaitingRow conversation={conversation} now={now} /> : null}
         <Composer
           counter={counter}
-          announceCounter={counter.kind === "left" && (count === LIMIT_WARNING_FROM || counter.left === 1)}
           busy={busy}
           onSend={send}
           inputRef={inputRef}

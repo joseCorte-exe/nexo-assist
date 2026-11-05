@@ -337,8 +337,8 @@ function HistoryEntry({
   const { message, grouped } = item;
   if (message.author === "system") {
     const text = message.note ? `${noteLabel(message.note)} · ${clockTime(new Date(message.at))}` : message.text;
-    const summaryLabel = message.note && summary ? transferSummaryLabel(message.note) : null;
-    if (message.note && summary && summaryLabel) return <TransferNote note={message.note} text={text} summary={summary} label={summaryLabel} />;
+    const summaryLabel = transferSummaryLabel(message.note);
+    if (summary && summaryLabel) return <TransferNote note={message.note} text={text} summary={summary} label={summaryLabel} />;
     return <SystemNote note={message.note} text={text} className="pt-[18px] pb-1" />;
   }
   if (message.author === "employee") {
@@ -466,7 +466,7 @@ function DecisionTag({ message }: { message: ConsoleMessage }) {
 }
 
 /** The note of the transfer opens the summary for the analyst: the agent's, or the one the code wrote at the limit. */
-function TransferNote({ note, text, summary, label }: { note: NoteView; text: string; summary: string; label: string }) {
+function TransferNote({ note, text, summary, label }: { note: NoteView | null; text: string; summary: string; label: string }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="flex flex-col items-center gap-2 pt-[18px] pb-1">

@@ -1,11 +1,11 @@
 import { MESSAGE_LIMIT, type NexoUIMessage } from "./chat";
 import { textOf } from "./chat-parts";
-import { type Affected, type DraftOperation, type Impact, MAX_TRANSFER_SUMMARY, type Urgency } from "./domain";
+import { type Affected, type Impact, MAX_TRANSFER_SUMMARY, type Urgency } from "./domain";
 
 // The limit (feature 6, ARQUITETURA.md, sections 1 and 8): what is still pending when a conversation reaches 30 messages
 // and the case the code transfers then. The model decides nothing here.
 
-/** Whether a conversation counts the messages that reach the limit. */
+/** From her 30th message on, the limit applies: the one word for it, wherever it is read. */
 export const reachedLimit = (messageCount: number) => messageCount >= MESSAGE_LIMIT;
 
 type Parts = NexoUIMessage["parts"];
@@ -35,7 +35,6 @@ export function pendingAtLimit({ pendingDraft, lastMessage }: { pendingDraft: bo
 
 /** The draft as the limit reads it: its ticket, or what RN-01 read for a new one. */
 export type LimitDraft = {
-  operation: DraftOperation;
   ticketId: string | null;
   impact: Impact | null;
   urgency: Urgency | null;

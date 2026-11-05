@@ -1,4 +1,4 @@
-import { caseNotes, noteTransferOnTicket } from "@nexo/agent";
+import { caseNotes } from "@nexo/agent";
 import {
   caseAtLimit,
   type LastMessage,
@@ -6,6 +6,7 @@ import {
   limitSummary,
   MESSAGE_LIMIT,
   type NoteView,
+  noteTransferOnTicket,
   pendingAtLimit,
   reachedLimit,
   routeTransfer,
@@ -96,8 +97,8 @@ async function outcomeOf(deps: LimitDeps, { row, draft, lastMessage, herLastAt }
   }
   if (row.state === "waiting_for_analyst") {
     // Only a transfer makes a conversation wait, and it always says for which level.
-    const level = row.targetLevel ?? "N1";
-    return stays(limitNote({ then: "waiting", level }, `espera o ${LEVEL_LABEL[level]}.`));
+    if (!row.targetLevel) throw new Error("A waiting conversation has no target level");
+    return stays(limitNote({ then: "waiting", level: row.targetLevel }, `espera o ${LEVEL_LABEL[row.targetLevel]}.`));
   }
 
   const pending = pendingAtLimit({ pendingDraft: draft !== null, lastMessage });

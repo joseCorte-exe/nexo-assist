@@ -198,3 +198,17 @@ function serviceError(json: unknown): { serviceCode?: string; message: string } 
     message: typeof message === "string" ? message : "Ticket service rejected the request",
   };
 }
+
+/**
+ * The ticket keeps the line of the transfer, keyed by its note, whoever transferred. The conversation is with the analyst
+ * either way; the history of the ticket only misses the line.
+ */
+export async function noteTransferOnTicket(
+  ticketService: Pick<TicketServiceClient, "transferTicket">,
+  ticketId: string,
+  body: Parameters<TicketServiceClient["transferTicket"]>[1],
+  noteId: string,
+) {
+  const marked = await ticketService.transferTicket(ticketId, body, noteId);
+  if (!marked.ok) console.error("transfer not noted on the ticket", { ticketId, error: marked.error.code });
+}

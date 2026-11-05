@@ -15,7 +15,6 @@ export {
   streamReply,
   type Turn,
 } from "./agent";
-export { noteTransferOnTicket } from "./tools";
 export type { DraftRecord, DraftStore, TicketDesk, TransferRecord, TransferStore } from "./tools";
 export { simulatedModel } from "./models/simulated";
 
