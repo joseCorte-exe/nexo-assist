@@ -198,7 +198,7 @@ Os contratos ficam em `packages/shared` como schemas Zod, inclusive o formato da
 | POST /api/me/reset-password | só devolve o aviso (também usado por "Esqueci minha senha") |
 | GET /api/stats/login | os três números da tela de login |
 | GET /api/conversation | conversa ativa do funcionário, com mensagens, decisões e estado. O chat consulta a cada 3 s enquanto a conversa não está com o agent, e também ao reabrir a página |
-| POST /api/chat | mensagem do funcionário, com o id que o chat deu a ela. Reenviada com o mesmo id depois de uma resposta que falhou, é respondida sem contar de novo (por decisão do José, também não conta nos tetos de uso), até três chamadas por dia. Enquanto a chamada roda, ou depois de três falhas, é recusada com 409 `resend_refused`, e o chat avisa sem oferecer nova tentativa. Responde em partes |
+| POST /api/chat | mensagem do funcionário, com o id que o chat deu a ela. Reenviada com o mesmo id depois de uma resposta que falhou, é respondida sem contar de novo (por decisão do José, também não conta nos tetos de uso), até três chamadas por dia. Enquanto a chamada roda, ou depois de três falhas, é recusada com 409 `resend_refused`, e o chat avisa sem oferecer nova tentativa. Reenviada depois de respondida, ou com a conversa já encerrada, é recusada com 409 `already_answered` sem abrir conversa nenhuma, e o chat lê a conversa como ficou. Responde em partes |
 | PATCH /api/drafts/:id | salva o que foi editado no card (título, descrição, categoria) |
 | POST /api/drafts/:id/confirm | cria, atualiza ou reabre o chamado no ticket-service, sem passar pelo LLM |
 | POST /api/drafts/:id/cancel | descarta o rascunho |
@@ -260,8 +260,11 @@ Como o registro de decisão aparece em toda resposta: no primeiro passo, o `prep
 
 Memória: cada conversa é uma thread do Mastra (`thread` = id da conversa, `resource` = id do funcionário), configurada com as últimas mensagens e com a memória de trabalho. Cinco coisas acontecem fora do agent e precisam ser copiadas para a thread pela API de memória: mensagem do analista, mensagem do funcionário enquanto o agent está pausado ou a demo está indisponível, confirmação de rascunho (com id e prazo do chamado criado), aviso de limite e notas de sistema (transferido, assumido, devolvido). Elas são gravadas primeiro na nossa tabela, depois na memória. A mensagem do agent é gravada no fim da resposta, mesmo que a aba seja fechada.
 
+Caso crítico: quando o `draftTicket` de um chamado novo sai com prioridade crítica, o modelo só escreve a frase dele, e o código transfere a conversa para o N2 logo depois de gravar a resposta, com o título e a descrição do rascunho como resumo e a espera que a resposta informou. O card continua na tela e ela pode confirmar enquanto o analista não chega; o chamado só existe depois disso. Chamado vencido continua com a oferta de chamar um analista (tela 3).
+
 Regras que ficam em código e não no prompt:
 - a prioridade a partir do impacto e da urgência (RN-01);
+- a transferência do caso crítico novo;
 - o prazo e o vencido (RN-02);
 - a busca de candidatos a duplicado;
 - a janela de 7 dias para reabrir;
