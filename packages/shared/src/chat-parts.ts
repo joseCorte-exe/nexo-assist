@@ -47,6 +47,10 @@ export function shownDraft(part: Parts[number]): DraftView | null {
   return part.output.ok ? part.output.draft : null;
 }
 
+/** Whether a reply says the conversation was solved: markResolved ran and the code let it. It closes once the reply is saved. */
+export const markedResolved = (parts: Parts) =>
+  parts.some((part) => part.type === "tool-markResolved" && part.state === "output-available" && !isRefusedInput(part.output) && part.output.ok);
+
 /**
  * A tool input the agent refused streams as a normal result with { error: true }, which matches no output schema: the
  * saved reply would no longer read back. It is saved as what it is, an error of that tool, with the message the model got.

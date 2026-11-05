@@ -2,7 +2,7 @@ import { type DecisionRecord, type KbArticle, slaText, type Ticket } from "@nexo
 import { describe, expect, it, vi } from "vitest";
 import { caseNotes, CONSOLE_NOTE, createNexoAgent, createMemory, resumeNote, saveNote } from "./agent";
 import { promptText, replyOf, scriptedModel } from "./testing";
-import type { DraftRecord, DraftStore, TicketDesk, TransferRecord, TransferStore } from "./tools";
+import type { DraftRecord, DraftStore, ResolutionStore, TicketDesk, TransferRecord, TransferStore } from "./tools";
 
 const hours: KbArticle = {
   id: "kb-service-desk-hours",
@@ -55,6 +55,16 @@ const transfers: TransferStore = {
   },
 };
 
+/** The conversations the agent asked to end as solved, and what the store answers. */
+const askedResolutions: string[] = [];
+let resolutionAnswer: Awaited<ReturnType<ResolutionStore["check"]>> = null;
+const resolutions: ResolutionStore = {
+  check: async (conversationId) => {
+    askedResolutions.push(conversationId);
+    return resolutionAnswer;
+  },
+};
+
 /** The drafts saved by the agent, as the web would keep them. */
 const savedDrafts: DraftRecord[] = [];
 const drafts: DraftStore = {
@@ -91,7 +101,7 @@ const hoursScript = () => [
 function setup(steps: Parameters<typeof scriptedModel>[0]) {
   const model = scriptedModel(steps);
   const memory = createMemory({ url: ":memory:" });
-  const agent = createNexoAgent({ model, memory, ticketService, drafts, transfers });
+  const agent = createNexoAgent({ model, memory, ticketService, drafts, transfers, resolutions });
   return { model, memory, agent };
 }
 
@@ -128,7 +138,7 @@ describe("streamReply", () => {
       { toolCalls: [{ toolName: "recordDecision", input: { ...decision, understanding: "Pergunta de seguimento" } }] },
       { text: "Sim, de segunda a sexta." },
     ]);
-    const agent = createNexoAgent({ model, memory: createMemory({ url: ":memory:" }), ticketService, drafts, transfers });
+    const agent = createNexoAgent({ model, memory: createMemory({ url: ":memory:" }), ticketService, drafts, transfers, resolutions });
     await replyOf(agent, turn);
     await replyOf(agent, { ...turn, text: "E no sábado?" });
 
@@ -144,7 +154,7 @@ describe("streamReply", () => {
       { toolCalls: [{ toolName: "recordDecision", input: decision }] },
       { text: "Oi!" },
     ]);
-    const agent = createNexoAgent({ model, memory: createMemory({ url: ":memory:" }), ticketService, drafts, transfers });
+    const agent = createNexoAgent({ model, memory: createMemory({ url: ":memory:" }), ticketService, drafts, transfers, resolutions });
     await replyOf(agent, turn);
     await replyOf(agent, { conversationId: "conv-2", employeeId: "emp-bruno", text: "Oi" });
     expect(promptText(model.calls[3]!)).not.toContain("Qual o horário do service desk?");
@@ -387,6 +397,45 @@ describe("the transfer to an analyst", () => {
     ]);
     await replyOf(agent, turn);
     expect(model.calls).toHaveLength(2);
+  });
+});
+
+describe("streamReply when she says it was solved", () => {
+  const solved = "Que bom que resolveu. Se precisar, é só escrever.";
+  const recorded = { toolCalls: [{ toolName: "recordDecision", input: decision }] };
+  const close = { toolCalls: [{ toolName: "markResolved", input: {} }] };
+  const toolsOf = (model: ReturnType<typeof setup>["model"], call: number) => (model.calls[call]!.tools ?? []).map((tool) => tool.name);
+
+  it("asks about the conversation of the turn, then only lets the model write its sentence", async () => {
+    askedResolutions.length = 0;
+    resolutionAnswer = null;
+    const { agent, model } = setup([recorded, close, { text: solved }]);
+    expect((await replyOf(agent, turn)).text).toBe(solved);
+    expect(askedResolutions).toEqual(["conv-1"]);
+    expect(model.calls).toHaveLength(3);
+    for (const tool of ["markResolved", "transferToAnalyst", "draftTicket", "offerReplies"]) expect(toolsOf(model, 2)).not.toContain(tool);
+  });
+
+  it("ends the reply when the sentence came with the tool", async () => {
+    resolutionAnswer = null;
+    const { agent, model } = setup([recorded, { text: solved, ...close }]);
+    await replyOf(agent, turn);
+    expect(model.calls).toHaveLength(2);
+  });
+
+  it("tells the model a refusal and keeps its tools, since nothing closed", async () => {
+    resolutionAnswer = "draft_pending";
+    const { agent, model } = setup([recorded, { text: "Fechado!", ...close }, { text: "Antes, confirme ou cancele o rascunho." }]);
+    expect((await replyOf(agent, turn)).text).toContain("Antes, confirme ou cancele o rascunho.");
+    expect(promptText(model.calls[2]!)).toContain("Há um rascunho esperando a confirmação do funcionário");
+    expect(toolsOf(model, 2)).toContain("transferToAnalyst");
+  });
+
+  it("says an analyst has the conversation when one took it during the reply", async () => {
+    resolutionAnswer = "not_with_agent";
+    const { agent, model } = setup([recorded, close, { text: "Um analista já está com você." }]);
+    await replyOf(agent, turn);
+    expect(promptText(model.calls[2]!)).toContain("Um analista já está com esta conversa");
   });
 });
 

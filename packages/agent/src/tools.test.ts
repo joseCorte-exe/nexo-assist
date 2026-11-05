@@ -78,7 +78,7 @@ function draftStore(): DraftStore & { saved: DraftRecord[] } {
   };
 }
 
-const tools = (desk: TicketDesk, drafts: DraftStore = draftStore()) => createTools({ ticketService: desk, drafts, transfers: { transfer: unexpected }, now: () => NOW });
+const tools = (desk: TicketDesk, drafts: DraftStore = draftStore()) => createTools({ ticketService: desk, drafts, transfers: { transfer: unexpected }, resolutions: { check: unexpected }, now: () => NOW });
 
 // The tools run outside an agent here. Those of the tickets read the employee from the request context, which
 // the route fills with the session; the others need no context.

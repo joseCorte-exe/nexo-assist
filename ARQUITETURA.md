@@ -166,7 +166,7 @@ A sessão fica num cookie HttpOnly assinado, sem tabela.
 
 O agent só responde em `with_agent`. Nos outros estados, a mensagem do funcionário é gravada e o LLM não é chamado. A checagem fica no código da rota. Se o analista assumir enquanto o agent ainda responde, a resposta é gravada, mas os efeitos dela só valem se a conversa continuar `with_agent` (`UPDATE ... WHERE state = 'with_agent'`).
 
-`outcome` registra como a conversa terminou: `resolved_by_agent` (o funcionário confirmou que resolveu), `closed_by_analyst` ou `limit_reached`. É daí que sai o selo "Resolvido pelo agent" do console.
+`outcome` registra como a conversa terminou: `resolved_by_agent` (o funcionário confirmou que resolveu), `closed_by_analyst` ou `limit_reached`. É daí que sai o selo "Resolvido pelo agent" do console. `resolved_by_agent` vem da ferramenta `markResolved`, que só confere se a conversa pode terminar. O código encerra logo depois de gravar a resposta, como no limite, e confere de novo: só em `with_agent` e sem rascunho esperando confirmação.
 
 Números da tela de login:
 - Tempo médio da primeira resposta: média de `first_response_at - created_at`, nas conversas dos últimos 30 dias.
@@ -251,6 +251,7 @@ Ferramentas:
 | getTicket | Detalhe e situação do prazo (vencido ou não) |
 | draftTicket | Monta o rascunho para criar, atualizar ou reabrir. Antes de criar, o código busca os chamados que podem ser o mesmo problema (abertos e resolvidos há até 7 dias) e exige que o rascunho diga por que não é duplicado. Depois de um rascunho, as ofertas saem da resposta: o card tem os próprios botões |
 | transferToAnalyst | Muda o estado da conversa, escolhe N1 ou N2 pela regra, calcula a espera e grava o resumo do caso |
+| markResolved | Para quando o funcionário disse que resolveu. Confere se a conversa pode terminar e recusa se um analista estiver com ela ou se houver rascunho esperando confirmação. Depois dela, o modelo só escreve a frase de encerramento. A conversa fecha com `outcome = resolved_by_agent` quando a resposta é gravada |
 | redirectOutOfScope | Responde a assuntos de RH, financeiro e facilities indicando o canal |
 | offerTicketChoice | Mostra a pergunta e a lista dos chamados do funcionário para ele escolher um. Encerra a resposta |
 | offerReplies | Mostra a pergunta e de 2 a 4 respostas rápidas. Encerra a resposta |
@@ -267,6 +268,7 @@ Regras que ficam em código e não no prompt:
 - a privacidade (o id do funcionário vem da sessão);
 - a criação do chamado só depois do clique em Confirmar;
 - a escolha entre N1 e N2 e a espera da transferência;
+- encerrar como resolvida só em `with_agent` e sem rascunho esperando;
 - o limite de 30 mensagens e a pausa do agent.
 
 O modelo decide o que o funcionário quer, classifica o tipo e a categoria, identifica impacto e urgência, julga se um chamado parecido é o mesmo problema, pergunta o que falta e escreve a resposta.

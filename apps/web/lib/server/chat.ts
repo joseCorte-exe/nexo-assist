@@ -23,6 +23,7 @@ import type { Deps } from "./deps";
 import { jsonError, readBody, readEmployeeSession } from "./http";
 import { applyLimit } from "./limit";
 import { replyPlace } from "./messages";
+import { closeIfResolved } from "./resolutions";
 
 const AGENT_FAILED = "O Nexo não conseguiu responder. Tente de novo.";
 
@@ -227,6 +228,7 @@ export async function chat(request: NextRequest, deps: Deps) {
         return;
       }
       await saveReply(deps.db, { conversationId: conversation.id, startedAt, now: deps.now(), reply: responseMessage });
+      await closeIfResolved(deps, { conversationId: conversation.id, turnStartedAt: startedAt, reply: responseMessage });
       // The message that reached the limit is answered; the limit applies right after (ARQUITETURA.md, section 1).
       if (reachedLimit(conversation.messageCount)) await applyLimit(deps, conversation.id);
     },

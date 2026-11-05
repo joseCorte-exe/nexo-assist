@@ -26,6 +26,11 @@ const LABELS = {
     done: "consultou seus chamados",
     failed: "não acessou seus chamados",
   },
+  markResolved: {
+    running: "encerrando a conversa",
+    done: "encerrou a conversa",
+    failed: "não encerrou a conversa",
+  },
 } as const;
 
 /** Shown while the agent records its decision, before any tool runs. */
@@ -43,7 +48,8 @@ export function stepsOf(part: Part): Step[] {
   switch (part.type) {
     case "tool-searchArticles":
     case "tool-redirectOutOfScope":
-    case "tool-listMyTickets": {
+    case "tool-listMyTickets":
+    case "tool-markResolved": {
       const tool = part.type.slice("tool-".length) as keyof typeof LABELS;
       const state = stateOf(part, part.state !== "output-available" || part.output.ok);
       return [{ key: part.toolCallId, label: LABELS[tool][state], state }];

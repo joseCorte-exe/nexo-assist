@@ -16,6 +16,7 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { conversations, drafts, messages } from "@/db/schema";
 import { applyMove, type Move, moves, type TransferFields } from "./conversation-moves";
 import type { Deps } from "./deps";
+import { WAITING_DRAFT } from "./drafts";
 
 // The limit of 30 messages (ARQUITETURA.md, sections 1 and 8), applied by the code right after the message that reaches
 // it is answered, or saved for an analyst. What is pending, the level and the summary come from code and from what was
@@ -41,7 +42,7 @@ async function readCase(db: Deps["db"], conversationId: string) {
     db
       .select()
       .from(drafts)
-      .where(and(eq(drafts.conversationId, conversationId), inArray(drafts.status, ["pending", "confirming"])))
+      .where(and(eq(drafts.conversationId, conversationId), inArray(drafts.status, WAITING_DRAFT)))
       .orderBy(desc(drafts.createdAt))
       .limit(1),
     db
