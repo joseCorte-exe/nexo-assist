@@ -72,17 +72,17 @@ Por que essas escolhas:
          v                                         v
  +--------------------- apps/web (Next.js) ------------------------+
  | auth, 30-message limit, agent-paused check,                     |
- | draft confirmation, console routes, usage limits                |
- +----------+----------------------------------------+-------------+
-            | import                                 | Drizzle
-            v                                        v
- +--- packages/agent ---+                 +--- conversations DB ------+
- | Mastra + Haiku 5.5   |---------------->| conversations, messages,  |
- | tools,               |  memory         | decisions, drafts,        |
- | recordDecision       |  (mastra_*)     | usage_counters, mastra_*  |
- +----------+-----------+                 +---------------------------+
-            | HTTP with service secret, retry, timeout, idempotency key
-            v
+ | draft confirmation, console routes                              |
+ +--+-------+----------------------------------------+-------------+
+    |       | import                                 | Drizzle
+    |       v                                        v
+    |  +--- packages/agent ---+           +--- conversations DB ------+
+    |  | Mastra + Haiku 5.5   |---------->| conversations, messages,  |
+    |  | tools,               |  memory   | decisions, drafts,        |
+    |  | recordDecision       | (mastra_*)| usage_counters, mastra_*  |
+    |  +----------+-----------+           +---------------------------+
+    |             |
+    v             v  HTTP with service secret, retry, timeout, idempotency key
  +--- apps/ticket-service (Hono) ---+     +--- tickets DB -----------+
  | people, tickets, articles,       |---->| employees, analysts,     |
  | SLA, reopen, transfer,           |     | tickets, ticket_updates, |
@@ -283,7 +283,7 @@ RN-02, prazo: conta da abertura ou da última resposta da TI, o que for mais rec
 - A chave do LLM só existe no servidor, em variável de ambiente. Nada fica em `NEXT_PUBLIC_*`.
 - Sessão em cookie HttpOnly assinado. Toda rota confere o papel e, no caso do funcionário, só devolve os dados dele.
 - O ticket-service exige um segredo em toda rota, e as rotas de admin exigem outra chave.
-- Contra abuso no deploy: o limite de 30 mensagens por conversa, um teto por IP por dia e um teto global por dia em `usage_counters` (ao estourar, aparece "demo indisponível"), além de `maxSteps`, `maxDuration` e limite de tokens explícitos, e um limite de gasto mensal num workspace da Anthropic separado para o projeto.
+- Contra abuso no deploy (planejado, o teto por IP e o global ainda não estão ligados): o limite de 30 mensagens por conversa, um teto por IP por dia e um teto global por dia em `usage_counters` (ao estourar, aparece "demo indisponível"), além de `maxSteps`, `maxDuration` e limite de tokens explícitos, e um limite de gasto mensal num workspace da Anthropic separado para o projeto.
 
 ## 10. Fases e critérios de pronto
 
