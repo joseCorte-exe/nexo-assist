@@ -4,6 +4,7 @@ import { useChat } from "@ai-sdk/react";
 import {
   apiError,
   type ChatNote,
+  closedAsResolved,
   isPaused,
   type ConversationResponse,
   type ConversationView,
@@ -117,15 +118,15 @@ export function Chat({
     onFinish: ({ message, isError }) => {
       if (isError) return;
       setFailures(0);
-      // The first part says where the message went: a new conversation, or one an analyst has now. A transfer in this
-      // reply moved it after that part: the conversation is read again, with the note it left.
+      // The first part says where the message went: a new conversation, or one an analyst has now. A transfer or an end
+      // in this reply moved it after that part: the conversation is read again, with the note it left.
       const part = message.parts.find((one) => one.type === "data-conversation");
       const known = conversationRef.current;
       if (part?.type === "data-conversation" && (part.data.id !== known?.id || part.data.state !== known?.state)) setConversation(part.data);
       const transferred = message.parts.some((one) => one.type === "tool-transferToAnalyst" && one.state === "output-available" && one.output.ok);
       // The message that reached the limit was answered: the server applied the limit before this stream ended.
       const atLimit = part?.type === "data-conversation" && reachedLimit(part.data.messageCount);
-      if (transferred || atLimit || (part?.type === "data-conversation" && part.data.state !== "with_agent")) void sync.refresh();
+      if (transferred || closedAsResolved(message.parts) || atLimit || (part?.type === "data-conversation" && part.data.state !== "with_agent")) void sync.refresh();
     },
   });
 

@@ -188,6 +188,14 @@ describe("liveTurns, looking up tickets", () => {
     expect(steps({ ok: false, message: "fora" })).toEqual([{ key: "c2", label: "não acessou seus chamados", state: "failed" }]);
   });
 
+  it("names the end of the conversation, and says so when the code refused it", () => {
+    const steps = (output?: unknown) =>
+      (liveTurns([user("u1", "Resolveu"), agent([tool("markResolved", "c2", {}, output)])], "streaming").at(-1) as { steps: unknown }).steps;
+    expect(steps()).toEqual([{ key: "c2", label: "encerrando a conversa", state: "running" }]);
+    expect(steps({ ok: true })).toEqual([{ key: "c2", label: "encerrou a conversa", state: "done" }]);
+    expect(steps({ ok: false, reason: "draft_pending", message: "?" })).toEqual([{ key: "c2", label: "não encerrou a conversa", state: "failed" }]);
+  });
+
   it("names the ticket it looks up, and the deadline it worked out once the ticket came", () => {
     const steps = (output?: unknown) =>
       (liveTurns([user("u1", "INC-20311"), agent([tool("getTicket", "c2", { ticketId: "INC-20311" }, output)])], "streaming").at(-1) as { steps: unknown })
