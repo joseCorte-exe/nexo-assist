@@ -176,7 +176,9 @@ describe("claimModelCall with a message that comes back", () => {
 });
 
 describe("claimModelCall under concurrency", () => {
-  it("loses no count and passes no ceiling with messages at once from two clients of a file", async () => {
+  it("loses no count and passes no ceiling with messages at once, as long as a claim is not split across awaits", async () => {
+    // The libSQL file client runs a batch synchronously, so two batches never interleave here, and this says nothing of
+    // two processes: it only catches a claim that reads and writes in separate awaits.
     const { url, db: one } = await fileDb();
     const other = createDb(url);
     const claim = (db: Db, index: number) => claimModelCall(limited(db, { perIp: 15, global: 20 }), { messageId: `m${index}`, ip: `1.1.1.${index % 2}` });
