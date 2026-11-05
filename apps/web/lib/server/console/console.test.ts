@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 import type { ConsoleDetail, ConsoleListResponse, EmployeeTicketsPanel } from "@nexo/shared";
 import { and, eq, ne } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { conversations, messages } from "@/db/schema";
 import { chat } from "../chat";
 import { conversationHandler, loadConversation } from "../conversation";
 import { presenceHandler } from "../presence";
 import { createTransferStore } from "../transfers";
-import { ana, NOW, rafael, readStream, request, roundTrips, sessionCookieFor, testDeps, type TestDeps } from "../test-deps";
+import { ana, conversationAt, fakeTicketService, NOW, rafael, readStream, request, roundTrips, sessionCookieFor, testDeps, type TestDeps } from "../test-deps";
 import { assumeHandler, closeHandler, messageHandler, readHandler, releaseHandler } from "./actions";
 import { availabilityHandler } from "./availability";
 import { detailHandler } from "./detail";
@@ -432,6 +432,94 @@ describe("POST /api/console/conversations/:id/messages", () => {
   it("refuses an empty message", async () => {
     const deps = await testDeps();
     expect((await write(deps, "conv-fabio", "   ")).status).toBe(400);
+  });
+});
+
+describe("the message of the analyst on the linked ticket (RN-02)", () => {
+  /** The answers the ticket-service received, once the work left for after the response ended. */
+  async function answers(deps: TestDeps) {
+    await deps.settled();
+    return deps.ticketService.writes.filter((one) => one.path.endsWith("/answer"));
+  }
+
+  it("notes the answer on the ticket of the conversation, with the message as the key", async () => {
+    const deps = await testDeps();
+    const conversation = await anaTransferred(deps);
+    await act(deps, assumeHandler, conversation.id);
+    await write(deps, conversation.id, "Pode deixar o notebook ligado agora?", "msg-rafael-1");
+    expect(await answers(deps)).toEqual([
+      {
+        method: "POST",
+        path: "/tickets/INC-20311/answer",
+        body: { employeeId: ana.id, text: "Pode deixar o notebook ligado agora?" },
+        key: "msg-rafael-1",
+      },
+    ]);
+  });
+
+  it("notes a message sent again once", async () => {
+    const deps = await testDeps();
+    await write(deps, "conv-fabio", "Consegue testar agora?", "msg-rafael-2");
+    await write(deps, "conv-fabio", "Consegue testar agora?", "msg-rafael-2");
+    expect(await answers(deps)).toHaveLength(1);
+  });
+
+  it("makes no call for a conversation without a linked ticket", async () => {
+    const deps = await testDeps();
+    const id = await conversationAt(deps, { count: 1, lastReply: null, state: "with_analyst" });
+    expect((await write(deps, id, "Oi, Ana.")).status).toBe(201);
+    expect(await answers(deps)).toEqual([]);
+  });
+
+  it("does not count assuming, releasing, closing, her message or a refused one", async () => {
+    const deps = await testDeps();
+    const conversation = await anaTransferred(deps);
+    expect((await write(deps, conversation.id, "Ainda não assumi.")).status).toBe(409);
+    await act(deps, assumeHandler, conversation.id);
+    await anaSays(deps, "Está ligado.");
+    await act(deps, releaseHandler, conversation.id);
+    await act(deps, assumeHandler, conversation.id);
+    await act(deps, closeHandler, conversation.id);
+    expect(await answers(deps)).toEqual([]);
+  });
+
+  it("keeps the message and logs without its text when the ticket-service is down for writes; the next one gets through", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const deps = await testDeps({ ticketService: fakeTicketService({ writesDown: true }) });
+      const secret = "A senha temporária é Nexo1234";
+      const sent = await write(deps, "conv-fabio", secret, "msg-rafael-4");
+      expect(sent.status).toBe(201);
+      expect(await answers(deps)).toEqual([]);
+      expect(await deps.db.select().from(messages).where(eq(messages.id, "msg-rafael-4"))).toHaveLength(1);
+      expect(deps.notes.at(-1)).toContain(secret);
+      expect(errors).toHaveBeenCalledWith("analyst answer not noted on the ticket", {
+        ticketId: "INC-20302",
+        messageId: "msg-rafael-4",
+        error: "unavailable",
+      });
+      expect(JSON.stringify(errors.mock.calls)).not.toContain(secret);
+
+      deps.ticketService.setWritesDown(false);
+      await write(deps, "conv-fabio", "Consegue testar agora?", "msg-rafael-5");
+      expect((await answers(deps)).map((one) => one.key)).toEqual(["msg-rafael-5"]);
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
+  it("does not restart a resolved ticket, and it is no failure", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const deps = await testDeps();
+      const id = await conversationAt(deps, { count: 1, lastReply: null, state: "with_analyst" });
+      await deps.db.update(conversations).set({ ticketId: "INC-20150" }).where(eq(conversations.id, id));
+      expect((await write(deps, id, "Vi que já foi resolvido.")).status).toBe(201);
+      expect((await answers(deps)).map((one) => one.path)).toEqual(["/tickets/INC-20150/answer"]);
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      errors.mockRestore();
+    }
   });
 });
 
