@@ -169,6 +169,22 @@ async function discardDrafts(db: Db, reply: NexoUIMessage) {
 }
 
 /**
+ * A reply that will not be saved never reaches her: the call goes back, so she may try again ("Tentar de novo"), and its
+ * drafts go. Why is logged first, and each step runs whatever happens to the other, so a second failure neither replaces
+ * the first nor leaves a draft pending. Never throws. Only the kind of an error: its details can quote what she wrote.
+ */
+async function abandonReply(
+  db: Db,
+  { conversationId, callKey, reply, why }: { conversationId: string; callKey: string; reply: NexoUIMessage; why: { finishReason: string | undefined } | { error: string } },
+) {
+  console.error("agent reply not saved", { conversationId, ...why });
+  const steps = await Promise.allSettled([releaseModelCall(db, callKey), discardDrafts(db, reply)]);
+  for (const step of steps) {
+    if (step.status === "rejected") console.error("agent reply not cleaned up", { conversationId, error: (step.reason as Error).name });
+  }
+}
+
+/**
  * A message while an analyst has the conversation: saved, and copied to the agent memory as she wrote it, so the agent
  * knows it if the conversation comes back. The answer is the conversation alone: nobody answers until the analyst does.
  */
@@ -270,16 +286,14 @@ export async function chat(request: NextRequest, deps: Deps) {
       // A reply that failed, or never finished, is not saved: "Tentar de novo" asks for it again. One cut by the
       // step or token limits did finish, and is saved as it is.
       if (finishReason === undefined || finishReason === "error") {
-        console.error("agent reply not saved", { conversationId: conversation.id, finishReason });
-        // Before anything else that can throw: she may try again ("Tentar de novo"), a few times.
-        await releaseModelCall(deps.db, callKey);
-        await discardDrafts(deps.db, responseMessage);
+        await abandonReply(deps.db, { conversationId: conversation.id, callKey, reply: responseMessage, why: { finishReason } });
         return;
       }
-      // A reply that could not be saved never reaches her either, so the call goes back too. One saved keeps it: never repeated.
+      // One that could not be saved is abandoned too, and breaks the stream, so the chat offers to try again. One saved
+      // keeps the call: never repeated. Nothing of the error goes on: the platform logs what breaks a stream.
       await saveReply(deps.db, { conversationId: conversation.id, startedAt, now: deps.now(), reply: responseMessage }).catch(async (error: unknown) => {
-        await releaseModelCall(deps.db, callKey);
-        throw error;
+        await abandonReply(deps.db, { conversationId: conversation.id, callKey, reply: responseMessage, why: { error: (error as Error).name } });
+        throw new Error("The agent reply was not saved");
       });
       await closeIfResolved(deps, { conversationId: conversation.id, turnStartedAt: startedAt, reply: responseMessage });
       // The message that reached the limit is answered; the limit applies right after (ARQUITETURA.md, section 1).

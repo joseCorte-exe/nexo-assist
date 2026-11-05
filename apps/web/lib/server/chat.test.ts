@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createMemory, createNexoAgent, simulatedModel } from "@nexo/agent";
 import { scriptedModel } from "@nexo/agent/testing";
 import { localDay } from "@nexo/shared";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { describe, expect, it, vi } from "vitest";
 import { createDb } from "@/db";
 import { migrateDb } from "@/db/migrate";
@@ -858,6 +858,79 @@ describe("POST /api/chat and the ceilings of the day", () => {
 
     expect(again.map((chunk) => chunk.type)).toContain("text-delta");
     expect((await usage(deps))[today]).toBe(1);
+  });
+
+  describe("when the reply cannot be saved", () => {
+    const vpnDraft = {
+      operation: "create",
+      title: "VPN não conecta no notebook — erro 809",
+      description: "Desde ontem o notebook (Windows 11) não conecta na VPN e mostra o erro 809. Precisa dela para a reunião das 14h.",
+      category: "network_vpn",
+      subcategory: "VPN",
+      impact: "stopped",
+      urgency: "same_day",
+      affected: "only_me",
+    };
+    const draftScript = () => [
+      { toolCalls: [{ toolName: "recordDecision", input: decision }] },
+      { toolCalls: [{ toolName: "draftTicket", input: vpnDraft }] },
+      { text: "Coloquei prioridade alta por causa da reunião. Confira antes de eu criar:" },
+    ];
+    const message = { id: "msg-ana-1", text: "Só eu. Tenho reunião às 14h." };
+    const callKey = `message:${localDay(NOW)}:${message.id}`;
+    /** The real database refuses the row: the decision of the reply goes in its batch, and nothing else writes it. */
+    const replyWontSave = (deps: TestDeps) =>
+      deps.db.run(sql`create trigger reply_wont_save before insert on decisions begin select raise(abort, 'database down'); end`);
+    const failedSave = async (deps: TestDeps) => {
+      await readStream(await chat(await post(message), deps)).catch(() => []);
+      await Promise.allSettled([deps.settled()]);
+    };
+    const draftStatuses = async (deps: TestDeps) => (await deps.db.select({ status: drafts.status }).from(drafts)).map(({ status }) => status);
+
+    it("gives the call back and discards the draft no card will show, so a retry starts clean", async () => {
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      const deps = await testDeps({ model: scriptedModel([...draftScript(), ...draftScript()]) });
+      await replyWontSave(deps);
+      await failedSave(deps);
+
+      expect((await usage(deps))[callKey]).toBe(-1);
+      expect(await draftStatuses(deps)).toEqual(["cancelled"]);
+
+      await deps.db.run(sql`drop trigger reply_wont_save`);
+      const again = await readStream(await chat(await post(message), deps));
+      await deps.settled();
+      expect(again.map((chunk) => chunk.type)).toContain("text-delta");
+      expect((await draftStatuses(deps)).sort()).toEqual(["cancelled", "pending"]);
+      log.mockRestore();
+    });
+
+    it("says why first, without what she wrote, and still does the rest when giving the call back fails too", async () => {
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      const deps = await testDeps({ model: scriptedModel(draftScript()) });
+      await replyWontSave(deps);
+      await deps.db.run(sql`create trigger release_fails before update on usage_counters when new.count < 0 begin select raise(abort, 'counters down'); end`);
+      await failedSave(deps);
+
+      const [first, ...rest] = log.mock.calls;
+      expect(first).toEqual(["agent reply not saved", { conversationId: (await anaConversation(deps))!.id, error: expect.any(String) }]);
+      expect(rest).toHaveLength(1);
+      expect(rest[0]?.[0]).toBe("agent reply not cleaned up");
+      expect(JSON.stringify(log.mock.calls)).not.toContain(message.text);
+      expect(await draftStatuses(deps)).toEqual(["cancelled"]);
+      log.mockRestore();
+    });
+
+    it("breaks the stream with an error that carries nothing of hers, so the chat offers the retry", async () => {
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      const deps = await testDeps({ model: scriptedModel(draftScript()) });
+      await replyWontSave(deps);
+
+      const response = await chat(await post(message), deps);
+
+      await expect(readStream(response)).rejects.toThrow("The agent reply was not saved");
+      await deps.settled();
+      log.mockRestore();
+    });
   });
 
   it("does not count a message for an analyst, and takes it past the ceilings as always", async () => {
