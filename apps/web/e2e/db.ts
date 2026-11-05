@@ -68,6 +68,11 @@ export async function setDayUsedUp(usedUp: boolean) {
   );
 }
 
+/** A call of this message that never told how it ended, as a server that died leaves it. */
+export async function leaveCallWithNoEnd(messageId: string) {
+  await db.execute({ sql: "insert into usage_counters (key, count) values (?, 1)", args: [`message:${localDay(new Date())}:${messageId}`] });
+}
+
 /**
  * Removes the conversations this file wrote for these employees (the scenes set here, and what the app opened from
  * `since` on), with their messages, decisions, drafts and reads, so the files after it (the numbers of the login) find

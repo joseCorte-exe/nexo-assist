@@ -513,6 +513,21 @@ describe("liveTurns, with an analyst (feature 5)", () => {
     expect(liveTurns([user("u1", "Oi"), counter], "ready", { paused: true })).toEqual([{ kind: "employee", id: "u1", text: "Oi", unsent: false }]);
   });
 
+  describe("a message that may not be sent again today", () => {
+    const refused = { kind: "agent", id: "u1-reply", text: "", decision: null, steps: [], blocks: [], phase: "retry_refused" };
+
+    it("offers no retry: the message is not marked as not sent, whether or not the error was cleared", () => {
+      for (const status of ["error", "ready"] as const) {
+        expect(liveTurns([user("u1", "Oi")], status, { retryRefused: true })).toEqual([{ kind: "employee", id: "u1", text: "Oi", unsent: false }, refused]);
+      }
+    });
+
+    it("draws the reply instead, when the read found it saved", () => {
+      const turns = liveTurns([user("u1", "Oi"), agent([{ type: "text", text: "Oi, Ana." }])], "ready", { retryRefused: true });
+      expect(turns.at(-1)).toMatchObject({ text: "Oi, Ana.", phase: "done" });
+    });
+  });
+
   describe("past a ceiling of the day", () => {
     const refusal: NexoUIMessage = {
       id: "a1",

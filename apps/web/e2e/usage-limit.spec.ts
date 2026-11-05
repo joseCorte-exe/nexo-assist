@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { forgetSince, setDayUsedUp } from "./db";
+import { forgetSince, leaveCallWithNoEnd, setDayUsedUp } from "./db";
 
 // The ceilings of the day, with the whole stack running: the day is used up, Gabriela's message stays with her and the
 // chat says the demo is unavailable; the day given back, the Nexo answers.
@@ -42,4 +42,22 @@ test("past the ceiling the chat says the demo is unavailable and keeps the messa
   await expect(replies.last()).toContainText("8h");
   await expect(replies.getByRole("alert")).toHaveCount(0);
   await expect(page.locator("#chat-counter")).toContainText("2/30");
+
+  // A message whose call never told how it ended is refused for today: no retry on offer, and she can write another.
+  await page.route("**/api/chat", async (route) => {
+    await leaveCallWithNoEnd((route.request().postDataJSON() as { id: string }).id);
+    await route.continue();
+  });
+  await composer.fill("Ainda está aí?");
+  await composer.press("Enter");
+  await expect(replies.last().getByRole("alert")).toHaveText("Essa mensagem não pode ser reenviada agora. Envie outra.");
+  await expect(mine.last()).toHaveText("Ainda está aí?");
+  await expect(page.getByText("Não enviada.")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Tentar de novo" })).toHaveCount(0);
+
+  await page.unroute("**/api/chat");
+  await composer.fill("Qual o horário do service desk?");
+  await composer.press("Enter");
+  await expect(replies.last()).toContainText("8h", { timeout: 20_000 });
+  await expect(replies.getByRole("alert")).toHaveCount(0);
 });

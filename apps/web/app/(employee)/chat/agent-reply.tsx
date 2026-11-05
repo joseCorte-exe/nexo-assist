@@ -109,6 +109,8 @@ export function AgentReply({ turn, renderDraft, failures, onRetry, onChoose }: P
       {/* No "Tentar de novo": the ceilings hold until tomorrow, and her message is already saved and known to the agent. */}
       {turn.phase === "unavailable" ? <NoReply text="O Nexo não pode responder: a demo está indisponível hoje. Sua mensagem ficou salva." /> : null}
 
+      {turn.phase === "retry_refused" ? <NoReply text="Essa mensagem não pode ser reenviada agora. Envie outra." /> : null}
+
       {turn.phase === "interrupted" ? (
         <p role="alert" className="mt-1.5 flex items-center gap-1.5 text-12.5 text-ink-3">
           <CircleAlert aria-hidden className="size-3 text-danger-text" />

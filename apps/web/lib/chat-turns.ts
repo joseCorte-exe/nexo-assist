@@ -22,9 +22,9 @@ export type { Step };
 /**
  * thinking: nothing to show yet; working: decision recorded, tools running; writing: text arriving;
  * done; failed: no answer at all; interrupted: the answer stopped in the middle; unavailable: the demo reached a
- * ceiling of the day, so the model was not called.
+ * ceiling of the day, so the model was not called; retry_refused: this message may not call the model again today.
  */
-export type Phase = "thinking" | "working" | "writing" | "done" | "failed" | "interrupted" | "unavailable";
+export type Phase = "thinking" | "working" | "writing" | "done" | "failed" | "interrupted" | "unavailable" | "retry_refused";
 
 /**
  * How an offer takes a click. open: each item is a button that sends the choice; busy: the agent is still answering,
@@ -149,7 +149,11 @@ function settle(turn: AgentTurn, status: ChatStatus): AgentTurn {
  * reply came back, the message is marked as not sent instead. The employee message after a reply is its answer,
  * so what was chosen is the same live and after a reload.
  */
-export function liveTurns(all: readonly NexoUIMessage[], status: ChatStatus, { paused = false }: { paused?: boolean } = {}): Turn[] {
+export function liveTurns(
+  all: readonly NexoUIMessage[],
+  status: ChatStatus,
+  { paused = false, retryRefused = false }: { paused?: boolean; retryRefused?: boolean } = {},
+): Turn[] {
   // A message sent while an analyst had the conversation streams back only its counter: there is nothing to draw.
   const messages = all.filter((message) => !message.parts.every((part) => part.type === "data-conversation"));
   const answerTo = (index: number) => {
@@ -178,6 +182,10 @@ export function liveTurns(all: readonly NexoUIMessage[], status: ChatStatus, { p
   const last = turns.at(-1);
   const lastMessage = messages.at(-1);
   if (last?.kind === "agent" && lastMessage) return [...turns.slice(0, -1), settle(agentTurn(lastMessage, null, busy), status)];
+  // Saved, and with no way to ask again: it is not marked as not sent, and the notice goes where the answer would be.
+  if (last?.kind === "employee" && retryRefused) {
+    return [...turns, { kind: "agent", id: `${last.id}-reply`, text: "", decision: null, steps: [], blocks: [], phase: "retry_refused" }];
+  }
   if (last?.kind === "employee" && status === "error") return [...turns.slice(0, -1), { ...last, unsent: true }];
   // Nobody answers while an analyst has the conversation: no Nexo thinking under her message.
   if (last?.kind === "employee" && status !== "ready" && !paused) {
