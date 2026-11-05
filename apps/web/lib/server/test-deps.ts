@@ -27,6 +27,7 @@ import { seed } from "@/db/seed";
 import type { Deps } from "./deps";
 import { createDirectory } from "./directory";
 import { createDraftStore } from "./drafts";
+import { createResolutionStore } from "./resolutions";
 import { createTransferStore } from "./transfers";
 import { createSession, SESSION_COOKIE, type SessionPerson, signSession } from "./session";
 
@@ -252,6 +253,7 @@ export function testAgent(
     ticketService,
     drafts: createDraftStore(store),
     transfers: createTransferStore({ db: store, memory }),
+    resolutions: createResolutionStore({ db: store, memory }),
     now,
   });
 }

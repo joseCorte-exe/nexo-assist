@@ -5,7 +5,7 @@ import { LibSQLStore } from "@mastra/libsql";
 import { Memory } from "@mastra/memory";
 import { dayAndMonth, localDay, nexoToolSchemas } from "@nexo/shared";
 import { instructions, workingMemoryTemplate } from "./instructions";
-import { createTools, type DraftStore, MIN_CONFIDENCE, newReplyTurn, OFFER_TOOLS, type TicketDesk, type TransferStore } from "./tools";
+import { createTools, type DraftStore, MIN_CONFIDENCE, newReplyTurn, OFFER_TOOLS, type ResolutionStore, type TicketDesk, type TransferStore } from "./tools";
 
 // Explicit limits, so one reply never runs away with time or cost (ARQUITETURA.md, section 9).
 const MAX_STEPS = 5;
@@ -126,6 +126,7 @@ export function createNexoAgent({
   ticketService,
   drafts,
   transfers,
+  resolutions,
   now = () => new Date(),
 }: {
   model: AgentModel;
@@ -135,6 +136,8 @@ export function createNexoAgent({
   drafts: DraftStore;
   /** Where transferToAnalyst moves the conversation: the conversations database. */
   transfers: TransferStore;
+  /** Where markResolved ends the conversation: the conversations database. */
+  resolutions: ResolutionStore;
   /** The clock of the overdue (RN-02) and of "há N dias". */
   now?: () => Date;
 }) {
@@ -150,7 +153,7 @@ export function createNexoAgent({
     },
     model,
     memory,
-    tools: createTools({ ticketService, drafts, transfers, now }),
+    tools: createTools({ ticketService, drafts, transfers, resolutions, now }),
   });
 }
 
@@ -176,7 +179,7 @@ const WORKING_MEMORY_TOOL = "updateWorkingMemory";
 const AFTER_DRAFT_TOOLS = [...Object.keys(nexoToolSchemas).filter((tool) => !OFFER_TOOLS.has(tool)), WORKING_MEMORY_TOOL];
 
 /** Tools that close a reply once the model wrote its sentence about them: the screen draws the rest. */
-const CLOSING_TOOLS = new Set(["draftTicket", "transferToAnalyst"]);
+const CLOSING_TOOLS = new Set(["draftTicket", "transferToAnalyst", "markResolved"]);
 
 /** A tool that ran and answered ok. The model gets the output wrapped as { type: "json", value }. */
 function answeredOk({ output }: ToolResult) {
@@ -230,10 +233,10 @@ export function streamReply(agent: NexoAgent, { conversationId, employeeId, text
     // recordDecision is mandatory in the first step; afterwards the model chooses. Once a draft is shown, the offers go:
     // its card has Confirmar, Editar and Cancelar, and quick replies under it would only send those words as a message.
     // Below 0.6 the step after the decision transfers, as the doubt of the agent: the code says so, not the model. Once
-    // transferred, the model only says to whom and until when.
+    // transferred, the model only says to whom and until when; once resolved, its closing sentence.
     prepareStep: ({ stepNumber, steps }) => {
       if (stepNumber === 0) return { toolChoice: { type: "tool", toolName: "recordDecision" } };
-      if (ran(steps, "transferToAnalyst")) return { activeTools: [WORKING_MEMORY_TOOL] };
+      if (ran(steps, "transferToAnalyst") || ran(steps, "markResolved")) return { activeTools: [WORKING_MEMORY_TOOL] };
       if (stepNumber === 1) {
         turn.confidence = recordedConfidence(steps[0]);
         if (turn.confidence !== null && turn.confidence < MIN_CONFIDENCE) return { toolChoice: { type: "tool", toolName: "transferToAnalyst" } };

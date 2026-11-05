@@ -23,6 +23,7 @@ import type { Deps } from "./deps";
 import { jsonError, readBody, readEmployeeSession } from "./http";
 import { applyLimit } from "./limit";
 import { replyPlace } from "./messages";
+import { undoResolution } from "./resolutions";
 
 const AGENT_FAILED = "O Nexo não conseguiu responder. Tente de novo.";
 
@@ -224,6 +225,7 @@ export async function chat(request: NextRequest, deps: Deps) {
       if (finishReason === undefined || finishReason === "error") {
         console.error("agent reply not saved", { conversationId: conversation.id, finishReason });
         await discardDrafts(deps.db, responseMessage);
+        await undoResolution(deps.db, conversation.id, responseMessage);
         return;
       }
       await saveReply(deps.db, { conversationId: conversation.id, startedAt, now: deps.now(), reply: responseMessage });

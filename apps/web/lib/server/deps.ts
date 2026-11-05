@@ -5,6 +5,7 @@ import { z } from "zod";
 import { createDb, type Db } from "@/db";
 import { createDirectory, type Directory } from "./directory";
 import { createDraftStore } from "./drafts";
+import { createResolutionStore } from "./resolutions";
 import { createTransferStore } from "./transfers";
 import { getSessionSecret } from "./session";
 
@@ -74,6 +75,7 @@ export function getDeps(): Deps {
         ticketService,
         drafts: createDraftStore(db),
         transfers: createTransferStore({ db, memory }),
+        resolutions: createResolutionStore({ db, memory }),
       }),
       memory,
       directory: createDirectory(ticketService),

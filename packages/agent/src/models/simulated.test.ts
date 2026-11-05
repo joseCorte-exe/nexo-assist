@@ -2,7 +2,7 @@ import { dueAt, type KbArticle, slaText, summarizeTurn, type Ticket, type Ticket
 import { describe, expect, it } from "vitest";
 import { createMemory, createNexoAgent, RESUME_NOTE, saveNote } from "../agent";
 import { replyOf } from "../testing";
-import type { DraftRecord, DraftStore, TicketDesk, TransferRecord, TransferStore } from "../tools";
+import type { DraftRecord, DraftStore, ResolutionStore, TicketDesk, TransferRecord, TransferStore } from "../tools";
 import { simulatedModel } from "./simulated";
 
 const vpn: KbArticle = {
@@ -101,6 +101,10 @@ const transfers: TransferStore = {
   },
 };
 
+/** What the store answers to markResolved, as the web would. */
+let resolutionAnswer: Awaited<ReturnType<ResolutionStore["resolve"]>> = { resolved: true };
+const resolutions: ResolutionStore = { resolve: async () => resolutionAnswer };
+
 /** Every draft the agent saved, as the web would keep it. */
 const savedDrafts: DraftRecord[] = [];
 const drafts: DraftStore = {
@@ -121,7 +125,7 @@ const drafts: DraftStore = {
 };
 
 const newAgent = (center: TicketDesk) =>
-  createNexoAgent({ model: simulatedModel(), memory: createMemory({ url: ":memory:" }), ticketService: center, drafts, transfers, now: () => NOW });
+  createNexoAgent({ model: simulatedModel(), memory: createMemory({ url: ":memory:" }), ticketService: center, drafts, transfers, resolutions, now: () => NOW });
 
 async function reply(text: string, center = helpCenter(), agent = newAgent(center)) {
   const { text: answer, toolCalls } = await replyOf(agent, { conversationId: "conv-1", employeeId: "emp-ana", text });
@@ -291,7 +295,7 @@ describe("simulatedModel coming back another day (feature 6)", () => {
     savedTransfers.length = 0;
     const memory = createMemory({ url: ":memory:" });
     const center = helpCenter();
-    const agent = createNexoAgent({ model: simulatedModel(), memory, ticketService: center, drafts, transfers, now: () => NOW });
+    const agent = createNexoAgent({ model: simulatedModel(), memory, ticketService: center, drafts, transfers, resolutions, now: () => NOW });
     await reply("INC-20311 · Notebook lento após atualização do Windows", center, agent);
     await saveNote(memory, {
       id: "resume-1",

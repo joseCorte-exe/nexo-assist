@@ -19,6 +19,7 @@ import {
   type Impact,
   isOverdue,
   isReopenable,
+  type MarkResolvedOutput,
   nexoToolSchemas,
   type OutOfScopeArea,
   type Priority,
@@ -67,6 +68,24 @@ export type TransferRecord = {
  */
 export type TransferStore = {
   transfer: (transfer: TransferRecord) => Promise<{ transferred: true; noteId: string } | { transferred: false }>;
+};
+
+/** A conversation she said is solved, as the tool hands it to be closed. */
+export type ResolutionRecord = {
+  conversationId: string;
+  /** When the reply that closes it started: the note goes after that reply. */
+  turnStartedAt: Date;
+  at: Date;
+};
+
+type ResolutionRefusal = Extract<MarkResolvedOutput, { ok: false }>["reason"];
+
+/**
+ * Where the conversation ends as solved: the conversations database, which the web owns. It only closes a conversation
+ * still with the agent and without a draft waiting for her.
+ */
+export type ResolutionStore = {
+  resolve: (resolution: ResolutionRecord) => Promise<{ resolved: true } | { resolved: false; reason: ResolutionRefusal }>;
 };
 
 /** Below this, the agent does not know what to do and an analyst takes the case (ARQUITETURA.md, section 2). */
@@ -139,11 +158,13 @@ export function createTools({
   ticketService,
   drafts,
   transfers,
+  resolutions,
   now,
 }: {
   ticketService: TicketDesk;
   drafts: DraftStore;
   transfers: TransferStore;
+  resolutions: ResolutionStore;
   now: () => Date;
 }) {
   const summarize = (ticket: Ticket, at: Date): TicketSummary => ({
@@ -453,6 +474,23 @@ export function createTools({
     };
   }
 
+  /** The model reads her words; whether the conversation may end is the store's to say. */
+  const markResolved = createTool({
+    id: "markResolved",
+    description:
+      "Encerra a conversa como resolvida, quando o funcionário disse que o problema foi resolvido. O código recusa se houver um rascunho esperando confirmação ou se um analista estiver com a conversa.",
+    ...nexoToolSchemas.markResolved,
+    requestContextSchema: replyContext,
+    execute: async (_input, context): Promise<MarkResolvedOutput> => {
+      const saved = await resolutions.resolve({
+        conversationId: context.requestContext.get("conversationId"),
+        turnStartedAt: context.requestContext.get("turn").startedAt,
+        at: now(),
+      });
+      return saved.resolved ? { ok: true } : { ok: false, reason: saved.reason, message: RESOLUTION_REFUSAL[saved.reason] };
+    },
+  });
+
   return {
     recordDecision,
     searchArticles,
@@ -463,8 +501,15 @@ export function createTools({
     offerReplies,
     draftTicket,
     transferToAnalyst,
+    markResolved,
   };
 }
+
+/** What the model is told when the conversation cannot end now, so it says what is missing instead. */
+const RESOLUTION_REFUSAL: Record<ResolutionRefusal, string> = {
+  draft_pending: "Há um rascunho esperando a confirmação do funcionário e a conversa continua aberta. Peça para ele confirmar ou cancelar no card.",
+  not_with_agent: "Um analista já está com esta conversa e ela continua aberta.",
+};
 
 /** What the model is told when the ticket cannot take the change, so it knows what to draft instead. */
 const REFUSAL_TO_MODEL: Record<DraftRejection, (ticketId: string) => string> = {
