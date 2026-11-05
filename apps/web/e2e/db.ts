@@ -7,7 +7,8 @@ import { localDay } from "@nexo/shared";
 // messages to happen: a conversation left yesterday, or one a couple of messages from the limit. Everything after that
 // goes through the app.
 
-const db = createClient({ url: `file:${fileURLToPath(new URL("../.e2e/conversations.db", import.meta.url))}` });
+// A write waits for the server's lock on the file, as the server waits for this one (db/index.ts).
+const db = createClient({ url: `file:${fileURLToPath(new URL("../.e2e/conversations.db", import.meta.url))}`, timeout: 5_000 });
 
 const MINUTE = 60 * 1000;
 
