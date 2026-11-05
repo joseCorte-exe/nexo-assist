@@ -10,4 +10,7 @@ export const e2eEnv = {
   OUTAGE_RATE: "0",
   // The real agent with fixed rules instead of the LLM: no key, same reply every run.
   NEXO_AGENT_MODEL: "simulated",
+  // Every browser here is one visitor: the spec about the ceilings sets its own scene.
+  USAGE_LIMIT_PER_IP_PER_DAY: "1000000",
+  USAGE_LIMIT_GLOBAL_PER_DAY: "1000000",
 };
