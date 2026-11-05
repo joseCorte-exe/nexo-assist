@@ -35,8 +35,10 @@ export async function conversationWith(employeeId: string, { count, lastAt, topi
       args: [start - MINUTE, employeeId],
     },
     {
-      sql: "insert into conversations (id, employee_id, state, message_count, created_at, first_response_at) values (?, ?, 'with_agent', ?, ?, ?)",
-      args: [id, employeeId, count, start, start + 8_000],
+      // A conversation is only born with none active, so it is her newest, even in a scene set in the past.
+      sql: `insert into conversations (id, employee_id, state, message_count, created_at, first_response_at)
+            values (?, ?, 'with_agent', ?, max(?, (select coalesce(max(created_at) + 1, 0) from conversations where employee_id = ?)), ?)`,
+      args: [id, employeeId, count, start, employeeId, start + 8_000],
     },
   ];
   for (let index = 0; index < count; index++) {

@@ -9,11 +9,13 @@ export {
   type NexoAgent,
   rememberNote,
   RESUME_NOTE,
+  resumeNote,
   SCREEN_NOTE,
   saveNote,
   streamReply,
   type Turn,
 } from "./agent";
+export { noteTransferOnTicket } from "./tools";
 export type { DraftRecord, DraftStore, TicketDesk, TransferRecord, TransferStore } from "./tools";
 export { simulatedModel } from "./models/simulated";
 

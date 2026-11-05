@@ -117,14 +117,14 @@ describe("noteLabel", () => {
   });
 
   it("writes the limit with what happened to the conversation", () => {
-    expect(noteLabel({ event: "limit_reached", then: "closed", level: null, analystName: null })).toBe("Limite de 30 mensagens atingido · conversa encerrada");
-    expect(noteLabel({ event: "limit_reached", then: "transferred", level: "N1", analystName: null })).toBe(
+    expect(noteLabel({ event: "limit_reached", limit: { then: "closed" } })).toBe("Limite de 30 mensagens atingido · conversa encerrada");
+    expect(noteLabel({ event: "limit_reached", limit: { then: "transferred", level: "N1" } })).toBe(
       "Limite de 30 mensagens atingido · transferida para Suporte N1",
     );
-    expect(noteLabel({ event: "limit_reached", then: "analyst", level: null, analystName: "Rafael Lima" })).toBe(
+    expect(noteLabel({ event: "limit_reached", limit: { then: "with_analyst", analystName: "Rafael Lima" } })).toBe(
       "Limite de 30 mensagens atingido · com Rafael Lima",
     );
-    expect(noteLabel({ event: "limit_reached", then: "analyst", level: "N2", analystName: null })).toBe(
+    expect(noteLabel({ event: "limit_reached", limit: { then: "waiting", level: "N2" } })).toBe(
       "Limite de 30 mensagens atingido · esperando o Suporte N2",
     );
   });
@@ -181,13 +181,13 @@ describe("employeeNoteLabel", () => {
   });
 
   it("tells her who stays with her when the limit comes while an analyst has her", () => {
-    expect(employeeNoteLabel({ event: "limit_reached", then: "analyst", level: null, analystName: "Rafael Lima" })).toBe(
+    expect(employeeNoteLabel({ event: "limit_reached", limit: { then: "with_analyst", analystName: "Rafael Lima" } })).toBe(
       "Limite de 30 mensagens atingido · Rafael Lima continua com você",
     );
-    expect(employeeNoteLabel({ event: "limit_reached", then: "analyst", level: "N1", analystName: null })).toBe(
+    expect(employeeNoteLabel({ event: "limit_reached", limit: { then: "with_analyst", analystName: null } })).toBe(
       "Limite de 30 mensagens atingido · o analista continua com você",
     );
-    expect(employeeNoteLabel({ event: "limit_reached", then: "closed", level: null, analystName: null })).toBe(
+    expect(employeeNoteLabel({ event: "limit_reached", limit: { then: "closed" } })).toBe(
       "Limite de 30 mensagens atingido · conversa encerrada",
     );
   });

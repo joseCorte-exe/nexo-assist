@@ -59,5 +59,8 @@ export const draftRejection = z.enum(["ticket_not_found", "ticket_resolved", "ti
 export type DraftRejection = z.infer<typeof draftRejection>;
 
 /** What happened in a conversation outside the messages, as the system notes tell it (feature 5). */
+/** The longest summary a transfer keeps, from the model, the code or the ticket-service. */
+export const MAX_TRANSFER_SUMMARY = 600;
+
 export const conversationEvent = z.enum(["transferred", "assumed", "released", "closed", "limit_reached"]);
 export type ConversationEvent = z.infer<typeof conversationEvent>;

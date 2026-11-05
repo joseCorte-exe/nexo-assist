@@ -3,7 +3,7 @@ import { RequestContext } from "@mastra/core/request-context";
 import type { MastraModelConfig } from "@mastra/core/llm";
 import { LibSQLStore } from "@mastra/libsql";
 import { Memory } from "@mastra/memory";
-import { nexoToolSchemas } from "@nexo/shared";
+import { dayAndMonth, localDay, nexoToolSchemas } from "@nexo/shared";
 import { instructions, workingMemoryTemplate } from "./instructions";
 import { createTools, type DraftStore, MIN_CONFIDENCE, newReplyTurn, OFFER_TOOLS, type TicketDesk, type TransferStore } from "./tools";
 
@@ -79,15 +79,41 @@ export async function rememberNote(memory: Pick<AgentMemory, "saveMessages">, no
 }
 
 /**
- * The summary of the case the agent kept in its working memory for the conversation, for the analyst the code transfers
- * to at the limit. A memory that cannot be read only costs the summary: null, logged.
+ * What the agent reads before her message when she comes back on another São Paulo day: since when, and that what the
+ * tools said then may have changed. Null on the same day, or with nothing before.
+ */
+export function resumeNote(previousAt: Date | null, now: Date): string | null {
+  if (!previousAt || localDay(now) <= localDay(previousAt)) return null;
+  return (
+    `A conversa continua hoje, ${dayAndMonth(now)}, depois de uma pausa: a mensagem anterior é de ${dayAndMonth(previousAt)}. ` +
+    "O que as ferramentas disseram antes pode ter mudado; consulte de novo antes de falar da situação de um chamado."
+  );
+}
+
+/**
+ * The lines the agent filled in its working memory ("- Problema: notebook lento"), as sentences, without the title and
+ * the fields it left empty.
+ */
+function caseLines(notes: string | null): string[] {
+  if (!notes) return [];
+  return notes.split("\n").flatMap((line) => {
+    const filled = line.match(/^\s*-\s*([^:]+):\s*(\S.*)$/);
+    if (!filled) return [];
+    const sentence = `${filled[1]!.trim()}: ${filled[2]!.trim()}`;
+    return [/[.!?]$/.test(sentence) ? sentence : `${sentence}.`];
+  });
+}
+
+/**
+ * The case as the agent kept it in its working memory, as sentences, for the analyst the code transfers to at the limit.
+ * A memory that cannot be read only costs the summary: nothing, logged.
  */
 export async function caseNotes(memory: Pick<AgentMemory, "getWorkingMemory">, { conversationId, employeeId }: { conversationId: string; employeeId: string }) {
   try {
-    return await memory.getWorkingMemory({ threadId: conversationId, resourceId: employeeId });
+    return caseLines(await memory.getWorkingMemory({ threadId: conversationId, resourceId: employeeId }));
   } catch (error) {
     console.error("working memory not read", { conversationId, error: (error as Error).name });
-    return null;
+    return [];
   }
 }
 

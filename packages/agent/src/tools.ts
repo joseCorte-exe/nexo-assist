@@ -132,6 +132,20 @@ const replyContext = turnContext.extend({
 });
 
 type DraftFailure = Extract<DraftTicketOutput, { ok: false }>;
+/**
+ * The ticket keeps the line of the transfer, keyed by its note, whoever transferred. The conversation is with the analyst
+ * either way; the history of the ticket only misses the line.
+ */
+export async function noteTransferOnTicket(
+  ticketService: Pick<TicketDesk, "transferTicket">,
+  ticketId: string,
+  body: Parameters<TicketDesk["transferTicket"]>[1],
+  noteId: string,
+) {
+  const marked = await ticketService.transferTicket(ticketId, body, noteId);
+  if (!marked.ok) console.error("transfer not noted on the ticket", { ticketId, error: marked.error.code });
+}
+
 const failure = (reason: DraftFailure["reason"], message: string): DraftFailure => ({ ok: false, reason, message });
 
 export function createTools({
@@ -420,7 +434,7 @@ export function createTools({
     const unsure = confidence !== null && confidence < MIN_CONFIDENCE;
     const route = routeTransfer({
       requested: unsure ? "agent_unsure" : input.reason,
-      ticket: ticket && { priority: ticket.priority, status: ticket.status, dueAt: new Date(ticket.dueAt) },
+      ticket,
       classification: impact && urgency && affected ? { impact, urgency, affected } : null,
       at,
     });
@@ -439,10 +453,7 @@ export function createTools({
       return { ok: false as const, reason: "not_with_agent" as const, message: "Um analista já está com esta conversa." };
     }
     if (ticket) {
-      const body = { employeeId, level: route.level, summary: input.summary };
-      const marked = await ticketService.transferTicket(ticket.id, body, saved.noteId);
-      // The conversation is with the analyst either way; the history of the ticket only misses the line.
-      if (!marked.ok) console.error("transfer not noted on the ticket", { ticketId: ticket.id, error: marked.error.code });
+      await noteTransferOnTicket(ticketService, ticket.id, { employeeId, level: route.level, summary: input.summary }, saved.noteId);
     }
     return {
       ok: true as const,

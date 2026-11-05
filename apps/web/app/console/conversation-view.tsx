@@ -8,6 +8,7 @@ import {
   type DraftView,
   draftLabel,
   noteLabel,
+  type NoteView,
   PRIORITY_LABEL,
 } from "@nexo/shared";
 import { ChevronLeft, CircleAlert } from "lucide-react";
@@ -22,8 +23,8 @@ import {
   SearchIcon,
   SendHorizontalIcon,
 } from "@/components/console-icons";
-import { noteIcon, SystemNote } from "@/components/system-note";
-import { avatarTone, conversationMeta, type HistoryItem, headerMode, historyItems, takeoverBar } from "@/lib/console-view";
+import { SystemNote } from "@/components/system-note";
+import { avatarTone, conversationMeta, type HistoryItem, headerMode, historyItems, takeoverBar, transferSummaryLabel } from "@/lib/console-view";
 import { firstName, formatConfidence, initials } from "@/lib/format";
 import { usePinnedScroll } from "@/lib/use-pinned-scroll";
 import { useWholePixelRef } from "@/lib/use-whole-pixel-width";
@@ -336,12 +337,9 @@ function HistoryEntry({
   const { message, grouped } = item;
   if (message.author === "system") {
     const text = message.note ? `${noteLabel(message.note)} · ${clockTime(new Date(message.at))}` : message.text;
-    if (message.note?.event === "transferred" && summary) return <TransferNote text={text} summary={summary} by="agent" />;
-    // At the limit the code wrote the summary, from the case the agent kept.
-    if (message.note?.event === "limit_reached" && message.note.then === "transferred" && summary) {
-      return <TransferNote text={text} summary={summary} by="limit" />;
-    }
-    return <SystemNote event={message.note ? noteIcon(message.note) : null} text={text} className="pt-[18px] pb-1" />;
+    const summaryLabel = message.note && summary ? transferSummaryLabel(message.note) : null;
+    if (message.note && summary && summaryLabel) return <TransferNote note={message.note} text={text} summary={summary} label={summaryLabel} />;
+    return <SystemNote note={message.note} text={text} className="pt-[18px] pb-1" />;
   }
   if (message.author === "employee") {
     return (
@@ -468,14 +466,13 @@ function DecisionTag({ message }: { message: ConsoleMessage }) {
 }
 
 /** The note of the transfer opens the summary for the analyst: the agent's, or the one the code wrote at the limit. */
-function TransferNote({ text, summary, by }: { text: string; summary: string; by: "agent" | "limit" }) {
-  const label = by === "agent" ? "Resumo do agent" : "Resumo do caso";
+function TransferNote({ note, text, summary, label }: { note: NoteView; text: string; summary: string; label: string }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="flex flex-col items-center gap-2 pt-[18px] pb-1">
       {/* The note stays a separator for a screen reader; a button over it opens the summary. */}
       <div className="relative w-full">
-        <SystemNote event="transferred" text={text} />
+        <SystemNote note={note} text={text} />
         <button
           type="button"
           aria-expanded={open}

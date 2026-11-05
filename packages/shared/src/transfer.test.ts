@@ -9,7 +9,7 @@ const NOW = at("2026-10-26T10:05");
 const ticket = (priority: "critical" | "high" | "medium" | "low", dueAt: Date, status: "waiting_for_analyst" | "resolved" = "waiting_for_analyst") => ({
   priority,
   status,
-  dueAt,
+  dueAt: dueAt.toISOString(),
 });
 
 describe("routeTransfer", () => {

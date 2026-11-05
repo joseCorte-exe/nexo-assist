@@ -1,5 +1,5 @@
 import type { ConversationResponse, ConversationView } from "@nexo/shared";
-import { and, asc, desc, eq, isNotNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, ne, or } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { conversations, messages } from "@/db/schema";
 import type { Deps } from "./deps";
@@ -41,12 +41,6 @@ export async function toConversationView(
   };
 }
 
-/** The conversation as the chat shows it, by id, after something changed it. */
-export async function conversationViewOf(deps: Pick<Deps, "db" | "directory">, conversationId: string): Promise<ConversationView | null> {
-  const [row] = await deps.db.select(viewColumns).from(conversations).where(eq(conversations.id, conversationId)).limit(1);
-  return row ? toConversationView(deps, row) : null;
-}
-
 /**
  * The conversation of the employee with its messages and drafts, in two round trips: the one the chat shows, by id, even
  * closed, so the chat sees the analyst close it; otherwise her active one, or, with none, the last one that ended, so she
@@ -63,8 +57,8 @@ export async function loadConversation(
     .select(viewColumns)
     .from(conversations)
     .where(conversationId ? and(eq(conversations.id, conversationId), eq(conversations.employeeId, employeeId)) : eq(conversations.employeeId, employeeId))
-    // The active one first, then the newest: on the index of her conversations by creation.
-    .orderBy(sql`${conversations.state} = 'closed'`, desc(conversations.createdAt))
+    // The newest, on the index of her conversations by creation: one is only born when she has no active one.
+    .orderBy(desc(conversations.createdAt))
     .limit(1);
   if (!conversation) return { conversation: null, messages: [], drafts: [] };
 

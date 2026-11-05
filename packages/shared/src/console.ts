@@ -228,18 +228,24 @@ export function noteLabel(note: NoteView): string {
     case "closed":
       return `${note.analystName} encerrou o atendimento`;
     case "limit_reached":
-      return `${LIMIT_LEAD} · ${limitThen(note)}`;
+      return `${LIMIT_LEAD} · ${limitThen(note.limit)}`;
   }
 }
 
 const LIMIT_LEAD = `Limite de ${MESSAGE_LIMIT} mensagens atingido`;
 
 /** What the limit did, as the console reads it. */
-function limitThen(note: Extract<NoteView, { event: "limit_reached" }>): string {
-  if (note.then === "closed") return "conversa encerrada";
-  if (note.then === "transferred") return `transferida para ${note.level ? LEVEL_LABEL[note.level] : "um analista"}`;
-  if (note.analystName) return `com ${note.analystName}`;
-  return note.level ? `esperando o ${LEVEL_LABEL[note.level]}` : "esperando um analista";
+function limitThen(limit: Extract<NoteView, { event: "limit_reached" }>["limit"]): string {
+  switch (limit.then) {
+    case "closed":
+      return "conversa encerrada";
+    case "transferred":
+      return `transferida para ${LEVEL_LABEL[limit.level]}`;
+    case "with_analyst":
+      return limit.analystName ? `com ${limit.analystName}` : "com o analista";
+    case "waiting":
+      return `esperando o ${LEVEL_LABEL[limit.level]}`;
+  }
 }
 
 /** The second line of a ticket in the panel: "INC-20298 · Em andamento", "INC-19877 · Resolvido em 02 set". */
@@ -259,7 +265,8 @@ export function employeeNoteLabel(note: NoteView): string {
     case "released":
       return `${note.analystName} devolveu a conversa ao Nexo`;
     case "limit_reached":
-      return note.then === "analyst" ? `${LIMIT_LEAD} · ${note.analystName ?? "o analista"} continua com você` : noteLabel(note);
+      if (note.limit.then === "with_analyst") return `${LIMIT_LEAD} · ${note.limit.analystName ?? "o analista"} continua com você`;
+      return note.limit.then === "waiting" ? `${LIMIT_LEAD} · o analista continua com você` : noteLabel(note);
     default:
       return noteLabel(note);
   }

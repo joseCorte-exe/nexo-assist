@@ -1,21 +1,30 @@
-import type { ConversationEvent, NoteView } from "@nexo/shared";
+import type { NoteView } from "@nexo/shared";
 import type { ComponentType, SVGProps } from "react";
 import { ArrowRightLeftIcon, BotIcon, CircleCheckBigIcon, HeadsetIcon } from "./console-icons";
 
-/** The icon of a note: the limit takes the icon of what it did. */
-type NoteIcon = Exclude<ConversationEvent, "limit_reached">;
-
-const ICONS: Record<NoteIcon, ComponentType<SVGProps<SVGSVGElement>>> = {
-  transferred: ArrowRightLeftIcon,
-  assumed: HeadsetIcon,
-  released: BotIcon,
-  closed: CircleCheckBigIcon,
-};
+type NoteIcon = ComponentType<SVGProps<SVGSVGElement>>;
 
 /** The limit draws what it did: closed, transferred, or an analyst who stays (the headset of "assumiu"). */
-export function noteIcon(note: NoteView): NoteIcon {
-  if (note.event !== "limit_reached") return note.event;
-  return note.then === "analyst" ? "assumed" : note.then;
+const LIMIT_ICONS: Record<Extract<NoteView, { event: "limit_reached" }>["limit"]["then"], NoteIcon> = {
+  closed: CircleCheckBigIcon,
+  transferred: ArrowRightLeftIcon,
+  with_analyst: HeadsetIcon,
+  waiting: HeadsetIcon,
+};
+
+function iconOf(note: NoteView): NoteIcon {
+  switch (note.event) {
+    case "transferred":
+      return ArrowRightLeftIcon;
+    case "assumed":
+      return HeadsetIcon;
+    case "released":
+      return BotIcon;
+    case "closed":
+      return CircleCheckBigIcon;
+    case "limit_reached":
+      return LIMIT_ICONS[note.limit.then];
+  }
 }
 
 /**
@@ -23,8 +32,8 @@ export function noteIcon(note: NoteView): NoteIcon {
  * "Transferida para Suporte N2 · 10:05". The console and the chat of the employee draw the same one; each gives its
  * own spacing. A screen reader reads it as a separator with its text.
  */
-export function SystemNote({ event, text, className = "" }: { event: NoteIcon | null; text: string; className?: string }) {
-  const Icon = event ? ICONS[event] : null;
+export function SystemNote({ note, text, className = "" }: { note: NoteView | null; text: string; className?: string }) {
+  const Icon = note ? iconOf(note) : null;
   return (
     <div role="separator" aria-label={text} className={`message-enter flex w-full items-center justify-center gap-3 ${className}`}>
       <span aria-hidden className="h-px min-w-4 flex-1 bg-note-line" />

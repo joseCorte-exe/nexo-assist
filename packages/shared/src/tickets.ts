@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { affected, analystLevel, category, priority, ticketStatus, ticketType, updateAuthor } from "./domain";
+import { affected, analystLevel, category, MAX_TRANSFER_SUMMARY, priority, ticketStatus, ticketType, updateAuthor } from "./domain";
 
 const TICKET_ID = /^(INC|REQ)-\d{5}$/;
 
@@ -88,7 +88,7 @@ export const candidatesQuery = z.object({ category });
 export const ticketTransferInput = z.object({
   employeeId: z.string().min(1),
   level: analystLevel,
-  summary: z.string().trim().min(1).max(600),
+  summary: z.string().trim().min(1).max(MAX_TRANSFER_SUMMARY),
 });
 export type TicketTransferInput = z.infer<typeof ticketTransferInput>;
 

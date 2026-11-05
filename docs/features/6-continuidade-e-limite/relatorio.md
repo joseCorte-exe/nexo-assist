@@ -6,11 +6,11 @@ O plano está em [plano.md](plano.md). Aqui ficam o que foi pedido, a prova de c
 
 | Pedido | Prova |
 |---|---|
-| Front e back | No back, `applyLimit`, o movimento `reachLimit`, a recusa do devolver depois do limite, a 31ª mensagem que aplica o limite antes, a nota de retomada para o agent e a leitura da última conversa encerrada. Na tela, o contador, a nota do limite, "Nova conversa", as pílulas de dia, o "Devolver ao agent" que some e o resumo do caso no console. |
+| Front e back | No back, `applyLimit`, a recusa do devolver depois do limite, a 31ª mensagem que aplica o limite antes, a nota de retomada para o agent e a leitura da última conversa encerrada. Na tela, o contador, a nota do limite, "Nova conversa", as pílulas de dia, o "Devolver ao agent" que some e o resumo do caso no console. |
 | Fiel ao design | As 8 telas que o nexo.pen desenha (login, chat vazio, com o agent, esperando, com o analista, e o console na lista, esperando e assumido) ficaram iguais ao `main` pixel a pixel: 0 pixel de diferença, e o `main` já foi medido contra o nexo.pen nas features 3 a 5. Os estados novos, que o nexo.pen não desenha, saem das peças que já existem, decididas com o design-engineer, e as medidas batem com as peças originais. |
-| Lógica do back | O que é pendente, o nível, a espera e o resumo saem do código e do que está salvo. O modelo não decide nada no limite. A mudança e a nota vão no mesmo batch, sobre a versão lida. Quem perde a corrida planeja de novo. |
-| Desempenho | `applyLimit` lê tudo numa ida ao banco e escreve em outra. A última conversa da pessoa sai de um índice novo, `(employee_id, created_at)`. |
-| Padrão do contrato | Tudo novo do contrato fica em `packages/shared`: `continuity.ts`, o motivo `message_limit`, a nota `limit_reached`, `limitReached` na conversa e no console e `messageMeta` com a hora de cada mensagem. Nenhuma rota nova. |
+| Lógica do back | O que é pendente, o nível, a espera e o resumo saem do código e do que está salvo. O modelo não decide nada no limite. A mudança e a nota vão no mesmo batch, sobre a versão lida. Se a conversa mudou nesse meio tempo, o limite lê tudo de novo e decide de novo. |
+| Desempenho | `applyLimit` lê o caso numa ida ao banco e depois segue como qualquer movimento: uma ida para reler a linha e outra para escrever. A última conversa da pessoa sai de um índice novo, `(employee_id, created_at)`. |
+| Padrão do contrato | Tudo novo do contrato fica em `packages/shared`: `continuity.ts` (o pendente, o caso e o resumo no limite), o motivo `message_limit`, a nota `limit_reached`, `limitReached` na conversa e no console e `messageMeta` com a hora de cada mensagem. Nenhuma rota nova. |
 | Testes primeiro | Cada regra, movimento, rota e tela começou por um teste que falhou pelo motivo certo. |
 | Ponta a ponta | Playwright com build de produção e o modelo simulado, com duas pessoas ao mesmo tempo, e a suíte antiga inteira rodando junto. |
 
@@ -21,21 +21,21 @@ O plano está em [plano.md](plano.md). Aqui ficam o que foi pedido, a prova de c
 | A 30ª mensagem é respondida. O limite vale logo depois, no fim da resposta | `chat.ts`, no `onEnd` |
 | Pendente é: rascunho esperando confirmação, a última mensagem dela sem resposta, ou o Nexo esperando a dela (respostas rápidas, lista de chamados ou pergunta no texto) | `pendingAtLimit`, `packages/shared/src/continuity.ts` |
 | Com algo pendente, vai para o analista pela regra de sempre: crítico ou vencido no N2, o resto no N1 com o motivo "limite de mensagens". O chamado é o do rascunho ou o último que o Nexo consultou; o serviço confirma que é dela | `caseAtLimit`, `routeTransfer` e `applyLimit` |
-| Sem nada pendente, a conversa fecha com `limit_reached` | `moves.reachLimit` |
-| Com um analista, a conversa fica com ele, ela continua escrevendo sem o modelo, e o analista só pode encerrar | `moves.reachLimit` e `moves.release` |
+| Sem nada pendente, a conversa fecha com `limit_reached` | `applyLimit`, `apps/web/lib/server/limit.ts` |
+| Com um analista, a conversa fica com ele, ela continua escrevendo sem o modelo, e o analista só pode encerrar | `applyLimit` e `moves.release` |
 | Uma nota só por conversa, no mesmo batch da mudança, copiada para a memória do agent | `conversation-moves.ts` |
 | A 31ª numa conversa com o agent que bateu o limite sem aplicar (a 30ª ficou sem resposta) aplica o limite antes e segue para onde a conversa foi | `chat.ts`, motivo `limit_due` |
-| Se a mensagem anterior é de outro dia em São Paulo, o agent lê antes uma nota "(retomada)" para consultar de novo o que pode ter mudado | `resumeNote` e `rememberResume` |
+| Se a mensagem anterior é de outro dia em São Paulo, o agent lê antes uma nota "(retomada)" para consultar de novo o que pode ter mudado | `resumeNote`, em `packages/agent`, e `rememberResume` |
 | Sem conversa ativa, o chat abre a última que terminou, até ela começar outra | `loadConversation` |
 
 ## Testes
 
 | Suíte | Antes | Depois |
 |---|---|---|
-| Unidade e integração (Vitest) | 655 | 712 |
+| Unidade e integração (Vitest) | 655 | 716 |
 | Navegador (Playwright) | 52 | 56 |
 
-Todas passam e os tipos fecham nos quatro pacotes. Por pacote: shared 217, ticket-service 89, agent 103, web 303.
+Todas passam e os tipos fecham nos quatro pacotes. Por pacote: shared 211, ticket-service 89, agent 107, web 309.
 
 O arquivo [continuity-and-limit.spec.ts](../../../apps/web/e2e/continuity-and-limit.spec.ts) roda a história com duas pessoas. Gabriela volta a uma conversa de três dias atrás e vê os dois dias em pílulas. Depois, perto do limite, o contador conta o que falta; a 30ª é respondida e, sem nada pendente, a conversa fecha; ela recarrega, vê o fim, clica em "Nova conversa" e recomeça. Elisa abre e vê como a última conversa dela terminou. Escrevendo ali, a tela recomeça limpa. Depois ela bate o limite com uma pergunta aberta, a conversa vai para o N1, e o Rafael vê "Limite de mensagens" na lista, abre o resumo do caso pela nota, assume sem ter "Devolver ao agent", conversa com ela e encerra. O arquivo prepara as cenas de dias e de 29 mensagens direto no banco do teste e apaga o que escreveu ao terminar, para os números do login continuarem os mesmos.
 
@@ -77,16 +77,16 @@ No celular, a nota quebra em duas linhas. O "·" fica no fim da linha de cima, n
 
 ## Desempenho
 
-`applyLimit` chamado direto, num banco em arquivo com 1.000 outras conversas e 20.000 mensagens, 300 vezes cada caminho:
+`applyLimit` chamado direto, medido de novo depois da revisão do PR, num banco em arquivo com 1.000 outras conversas e 20.000 mensagens, 300 vezes cada caminho:
 
 | Operação | p50 | p95 | Idas ao banco |
 |---|---|---|---|
-| Limite que encerra | 1,55 ms | 2,91 ms | 2 |
-| Limite que transfere | 1,72 ms | 2,85 ms | 2 |
-| Limite com o analista | 1,46 ms | 2,83 ms | 2 |
-| Abrir o chat (última conversa da pessoa) | 0,52 ms | 1,06 ms | 2 |
+| Limite que encerra | 1,55 ms | 2,11 ms | 3 |
+| Limite que transfere | 1,54 ms | 1,96 ms | 3 |
+| Limite com o analista | 1,39 ms | 1,83 ms | 3 |
+| Abrir o chat (última conversa da pessoa) | 0,38 ms | 0,45 ms | 2 |
 
-O plano da consulta da última conversa é `SEARCH conversations USING INDEX conversations_employee_created (employee_id=?)`. A ordenação ativa primeiro usa uma árvore temporária sobre as poucas conversas daquela pessoa. A ativa é sempre a mais nova, mas a ordenação não depende disso.
+O plano da consulta da última conversa é `SEARCH conversations USING INDEX conversations_employee_created (employee_id=?)`. A ordenação sai do próprio índice: uma conversa só nasce quando a pessoa não tem outra ativa, então a ativa é sempre a mais nova.
 
 JavaScript que cada tela pode carregar, lido dos dois builds de produção (os mesmos arquivos, comprimidos com gzip):
 
@@ -96,6 +96,12 @@ JavaScript que cada tela pode carregar, lido dos dois builds de produção (os m
 | Console | 199,9 KB | 200,4 KB |
 
 A medida pela rede variava até 15 KB entre rodadas, por isso ficou a do build. A primeira versão puxava o código do console para o chat por causa do rótulo do dia; ele foi para `format.ts`.
+
+## O que a revisão do PR mudou
+
+A revisão reprovou a primeira versão pela estrutura, e achou um defeito: se a 30ª resposta falhasse, o chat ficava consultando o servidor a cada 3 s até ela reenviar. O chat não precisava dessa consulta: o servidor aplica o limite antes de o stream terminar, e a leitura do fim da resposta já o encontra. A rodada no navegador passou sem ela.
+
+O limite saiu do núcleo de `conversation-moves.ts` para `limit.ts` e virou um movimento comum, que confere a versão da conversa. Isso custa uma leitura a mais, uma vez por conversa. A nota do limite ganhou um formato que não admite estados impossíveis, como transferida sem nível. A leitura da memória do agent e a nota de retomada foram para `packages/agent`, e o contador foi para o web.
 
 ## Considerações
 

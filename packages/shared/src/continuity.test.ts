@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { NexoUIMessage } from "./chat";
-import { caseAtLimit, counterText, limitSummary, pendingAtLimit, resumeNote } from "./continuity";
+import { caseAtLimit, limitSummary, pendingAtLimit, reachedLimit } from "./continuity";
 
 // 2026-10-26 is a Monday. Times are São Paulo local (-03:00).
 const at = (local: string) => new Date(`${local}-03:00`);
@@ -79,82 +79,40 @@ describe("caseAtLimit", () => {
   });
 });
 
-describe("limitSummary", () => {
-  const notes = `# Caso
-- Problema: notebook lento desde a atualização
-- Equipamento e sistema: Dell, Windows 11
-- O que já foi tentado:
-- Situação: espera o analista`;
+describe("reachedLimit", () => {
+  it("counts from the 30th message of hers", () => {
+    expect(reachedLimit(29)).toBe(false);
+    expect(reachedLimit(30)).toBe(true);
+    expect(reachedLimit(31)).toBe(true);
+  });
+});
 
-  it("says why it came and the case the agent kept, without the empty lines of the template", () => {
-    expect(limitSummary({ pending: "draft", draftTitle: "Notebook lento", caseNotes: notes })).toBe(
+describe("limitSummary", () => {
+  it("says why it came and the case the agent kept", () => {
+    expect(
+      limitSummary({
+        pending: "draft",
+        draftTitle: "Notebook lento",
+        caseLines: ["Problema: notebook lento desde a atualização.", "Equipamento e sistema: Dell, Windows 11.", "Situação: espera o analista."],
+      }),
+    ).toBe(
       'A conversa chegou ao limite de 30 mensagens com o rascunho "Notebook lento" esperando confirmação. ' +
         "Problema: notebook lento desde a atualização. Equipamento e sistema: Dell, Windows 11. Situação: espera o analista.",
     );
   });
 
   it("names the question or the message left without an answer", () => {
-    expect(limitSummary({ pending: "question", draftTitle: null, caseNotes: null })).toBe(
+    expect(limitSummary({ pending: "question", draftTitle: null, caseLines: [] })).toBe(
       "A conversa chegou ao limite de 30 mensagens com uma pergunta do Nexo sem resposta. Leia a conversa para o contexto.",
     );
-    expect(limitSummary({ pending: "unanswered", draftTitle: null, caseNotes: "# Caso\n- Problema:" })).toBe(
+    expect(limitSummary({ pending: "unanswered", draftTitle: null, caseLines: [] })).toBe(
       "A conversa chegou ao limite de 30 mensagens com a última mensagem do funcionário sem resposta. Leia a conversa para o contexto.",
     );
   });
 
   it("fits the 600 characters of a transfer summary", () => {
-    const summary = limitSummary({ pending: "question", draftTitle: null, caseNotes: `- Problema: ${"lento ".repeat(200)}` });
+    const summary = limitSummary({ pending: "question", draftTitle: null, caseLines: [`Problema: ${"lento ".repeat(200)}.`] });
     expect(summary.length).toBe(600);
     expect(summary.endsWith("…")).toBe(true);
-  });
-});
-
-describe("resumeNote", () => {
-  it("says nothing on the same São Paulo day, however long the pause", () => {
-    expect(resumeNote(at("2026-10-26T00:10"), at("2026-10-26T23:50"))).toBeNull();
-    expect(resumeNote(null, NOW)).toBeNull();
-  });
-
-  it("tells the agent the conversation comes back on another day, and to look again", () => {
-    // 01:00 UTC on the 27th is still the 26th in São Paulo.
-    expect(resumeNote(new Date("2026-10-27T01:00:00Z"), at("2026-10-27T09:00"))).toBe(
-      "A conversa continua hoje, 27 out, depois de uma pausa: a mensagem anterior é de 26 out. O que as ferramentas disseram antes pode ter mudado; consulte de novo antes de falar da situação de um chamado.",
-    );
-  });
-});
-
-describe("counterText", () => {
-  const withAgent = { state: "with_agent" as const, limitReached: false, analystName: null };
-
-  it("counts the conversation until the last five", () => {
-    expect(counterText(0, withAgent)).toEqual({ text: "0/30 mensagens nesta sessão", tone: "muted" });
-    expect(counterText(24, withAgent)).toEqual({ text: "24/30 mensagens nesta sessão", tone: "muted" });
-  });
-
-  it("tells what is left from 25 on, while the Nexo answers", () => {
-    expect(counterText(25, withAgent)).toEqual({ text: "Restam 5 mensagens nesta sessão", tone: "warning" });
-    expect(counterText(29, withAgent)).toEqual({ text: "Resta 1 mensagem nesta sessão", tone: "warning" });
-  });
-
-  it("does not warn while an analyst has her: nothing changes for her at 30", () => {
-    expect(counterText(27, { state: "with_analyst", limitReached: false, analystName: "Rafael Lima" })).toEqual({
-      text: "27/30 mensagens nesta sessão",
-      tone: "muted",
-    });
-  });
-
-  it("past the limit with an analyst, says who stays instead of counting past 30", () => {
-    expect(counterText(31, { state: "with_analyst", limitReached: true, analystName: "Rafael Lima" })).toEqual({
-      text: "Limite do Nexo atingido · Rafael Lima continua com você",
-      tone: "muted",
-    });
-    expect(counterText(30, { state: "waiting_for_analyst", limitReached: true, analystName: null })).toEqual({
-      text: "Limite do Nexo atingido · um analista continua com você",
-      tone: "muted",
-    });
-  });
-
-  it("a conversation closed by the limit counts 30 of 30", () => {
-    expect(counterText(30, { state: "closed", limitReached: true, analystName: null })).toEqual({ text: "30/30 mensagens nesta sessão", tone: "muted" });
   });
 });

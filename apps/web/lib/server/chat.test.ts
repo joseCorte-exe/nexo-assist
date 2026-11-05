@@ -604,7 +604,8 @@ describe("POST /api/chat at the limit of 30 messages (feature 6)", () => {
     const thirtieth = await readStream(await chat(await say("Obrigada, Rafael"), deps));
     const thirtyFirst = await readStream(await chat(await say("Mais uma coisa"), deps));
 
-    expect(thirtieth[1]).toMatchObject({ data: { state: "with_analyst", messageCount: 30, limitReached: true } });
+    // The message that reached it is answered with the conversation as it came; a paused chat reads it again right after.
+    expect(thirtieth[1]).toMatchObject({ data: { state: "with_analyst", messageCount: 30 } });
     expect(thirtyFirst[1]).toMatchObject({ data: { state: "with_analyst", messageCount: 31, limitReached: true } });
     expect(model.calls).toHaveLength(0);
     expect(await limitNotes(deps, "conv-ana")).toHaveLength(1);

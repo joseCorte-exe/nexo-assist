@@ -1,6 +1,6 @@
 import { type DecisionRecord, type KbArticle, slaText, type Ticket } from "@nexo/shared";
-import { describe, expect, it } from "vitest";
-import { CONSOLE_NOTE, createNexoAgent, createMemory, saveNote } from "./agent";
+import { describe, expect, it, vi } from "vitest";
+import { caseNotes, CONSOLE_NOTE, createNexoAgent, createMemory, resumeNote, saveNote } from "./agent";
 import { promptText, replyOf, scriptedModel } from "./testing";
 import type { DraftRecord, DraftStore, TicketDesk, TransferRecord, TransferStore } from "./tools";
 
@@ -425,5 +425,43 @@ describe("saveNote", () => {
     await saveNote(memory, note);
     await replyOf(agent, { ...turn, text: "E agora?" });
     expect(promptText(model.calls[3]!).split("Descartei o rascunho D-381.")).toHaveLength(2);
+  });
+});
+
+describe("resumeNote", () => {
+  // Times are São Paulo local (-03:00).
+  const at = (local: string) => new Date(`${local}-03:00`);
+
+  it("says nothing on the same São Paulo day, however long the pause", () => {
+    expect(resumeNote(at("2026-10-26T00:10"), at("2026-10-26T23:50"))).toBeNull();
+    expect(resumeNote(null, at("2026-10-26T10:05"))).toBeNull();
+  });
+
+  it("tells the agent the conversation comes back on another day, and to look again", () => {
+    // 01:00 UTC on the 27th is still the 26th in São Paulo.
+    expect(resumeNote(new Date("2026-10-27T01:00:00Z"), at("2026-10-27T09:00"))).toBe(
+      "A conversa continua hoje, 27 out, depois de uma pausa: a mensagem anterior é de 26 out. O que as ferramentas disseram antes pode ter mudado; consulte de novo antes de falar da situação de um chamado.",
+    );
+  });
+});
+
+describe("caseNotes", () => {
+  const ids = { conversationId: "conv-1", employeeId: "emp-1" };
+  const memoryWith = (notes: string | null) => ({ getWorkingMemory: async () => notes });
+
+  it("reads the lines the agent filled as sentences, without the title and the empty fields", async () => {
+    const notes = "# Caso\n- Problema: notebook lento desde a atualização\n- Equipamento e sistema: Dell, Windows 11\n- O que já foi tentado:\n- Situação: espera o analista.";
+    expect(await caseNotes(memoryWith(notes), ids)).toEqual([
+      "Problema: notebook lento desde a atualização.",
+      "Equipamento e sistema: Dell, Windows 11.",
+      "Situação: espera o analista.",
+    ]);
+  });
+
+  it("is nothing when the agent kept nothing or the memory cannot be read", async () => {
+    expect(await caseNotes(memoryWith(null), ids)).toEqual([]);
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await caseNotes({ getWorkingMemory: async () => { throw new Error("down"); } }, ids)).toEqual([]);
+    log.mockRestore();
   });
 });

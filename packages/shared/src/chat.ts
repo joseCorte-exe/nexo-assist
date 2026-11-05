@@ -8,6 +8,7 @@ import {
   conversationState,
   type ConversationState,
   impact,
+  MAX_TRANSFER_SUMMARY,
   priority,
   ticketStatus,
   ticketType,
@@ -197,7 +198,7 @@ export const transferToAnalystInput = z
       .string()
       .trim()
       .min(MIN_TRANSFER_SUMMARY)
-      .max(600)
+      .max(MAX_TRANSFER_SUMMARY)
       .describe(
         "O caso para o analista não precisar perguntar de novo: o que acontece, desde quando, o que já foi tentado, o impacto e o que o funcionário quer.",
       ),
@@ -274,13 +275,16 @@ const releasedNote = z.object({ event: z.literal("released"), analystName: z.str
 const closedNote = z.object({ event: z.literal("closed"), analystName: z.string() });
 /**
  * The limit of messages, and what it did: closed the conversation, transferred it to a level, or left it with the analyst
- * who has it (by name), or with the level it waits for.
+ * who has it (by name, unless the directory was down), or with the level it waits for.
  */
 const limitNote = z.object({
   event: z.literal("limit_reached"),
-  then: z.enum(["closed", "transferred", "analyst"]),
-  level: analystLevel.nullable(),
-  analystName: z.string().nullable(),
+  limit: z.discriminatedUnion("then", [
+    z.object({ then: z.literal("closed") }),
+    z.object({ then: z.literal("transferred"), level: analystLevel }),
+    z.object({ then: z.literal("with_analyst"), analystName: z.string().nullable() }),
+    z.object({ then: z.literal("waiting"), level: analystLevel }),
+  ]),
 });
 
 /** A note, ready to be written: "Rafael Lima assumiu · agent pausado". */
@@ -323,7 +327,8 @@ export type MessageMeta = z.infer<typeof messageMeta>;
 export type NexoUIMessage = UIMessage<MessageMeta, { conversation: ConversationView; note: ChatNote; analyst: AnalystPart }, NexoTools>;
 
 /**
- * GET /api/conversation: the active conversation, or none, with its messages in order and its drafts as they are now.
+ * GET /api/conversation: the conversation by id; without one, her active one, or the last that ended, or none. With its
+ * messages in order and its drafts as they are now.
  * A saved reply keeps the draft as it was shown; the card draws the current one, confirmed, edited or cancelled since.
  */
 export type ConversationResponse = {

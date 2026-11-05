@@ -21,13 +21,10 @@ const PRESENCE_MS = 20_000;
 export function useConversationSync({
   conversationId,
   state,
-  awaitingLimit = false,
   onLoaded,
 }: {
   conversationId: string | null;
   state: ConversationState | null;
-  /** The message that reached the limit was answered: it reads until the limit shows, as while an analyst has it. */
-  awaitingLimit?: boolean;
   /** serverWins: the messages as saved replace what the chat has, instead of being merged with it. */
   onLoaded: (saved: ConversationResponse, options: { serverWins: boolean }) => void;
 }) {
@@ -41,7 +38,7 @@ export function useConversationSync({
   /**
    * The one read of the conversation the chat makes. By default, the conversation on screen, even closed, merged with what
    * the chat has. serverWins is for a reply the network lost: the server is right about where she is, so it reads her
-   * active conversation, and its messages as saved replace the chat's. Answers whether the server answered.
+   * active conversation, or the last that ended, and its messages as saved replace the chat's. Answers whether the server answered.
    */
   const refresh = useCallback(
     async ({ serverWins = false }: { serverWins?: boolean } = {}) => {
@@ -75,7 +72,7 @@ export function useConversationSync({
     [refresh],
   );
 
-  usePolling(async () => void (await refresh()), { intervalMs: POLL_MS, hiddenIntervalMs: HIDDEN_POLL_MS, enabled: awaitingLimit || (state !== null && isPaused(state)) });
+  usePolling(async () => void (await refresh()), { intervalMs: POLL_MS, hiddenIntervalMs: HIDDEN_POLL_MS, enabled: state !== null && isPaused(state) });
 
   useEffect(() => {
     const beat = () => {

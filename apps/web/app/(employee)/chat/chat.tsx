@@ -8,10 +8,8 @@ import {
   type ConversationResponse,
   type ConversationView,
   clockTime,
-  counterText,
   type DraftView,
   employeeNoteLabel,
-  LIMIT_WARNING_FROM,
   MESSAGE_LIMIT,
   type NexoUIMessage,
   textOf,
@@ -19,7 +17,8 @@ import {
 import { DefaultChatTransport } from "ai";
 import { CircleAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { noteIcon, SystemNote } from "@/components/system-note";
+import { SystemNote } from "@/components/system-note";
+import { counterOf, LIMIT_WARNING_FROM } from "@/lib/counter";
 import { THINKING_LABEL } from "@/lib/agent-actions";
 import { currentDraft, dayBreaks, lastDraftId, liveTurns, messageCount, type Turn, withSaved } from "@/lib/chat-turns";
 import { firstName } from "@/lib/format";
@@ -124,7 +123,7 @@ export function Chat({
       const known = conversationRef.current;
       if (part?.type === "data-conversation" && (part.data.id !== known?.id || part.data.state !== known?.state)) setConversation(part.data);
       const transferred = message.parts.some((one) => one.type === "tool-transferToAnalyst" && one.state === "output-available" && one.output.ok);
-      // The message that reached the limit was answered: the limit applies on the server right after, and the chat reads it.
+      // The message that reached the limit was answered: the server applied the limit before this stream ended.
       const atLimit = part?.type === "data-conversation" && part.data.messageCount >= MESSAGE_LIMIT;
       if (transferred || atLimit || (part?.type === "data-conversation" && part.data.state !== "with_agent")) void sync.refresh();
     },
@@ -135,13 +134,10 @@ export function Chat({
   statusRef.current = status;
   const busy = status === "submitted" || status === "streaming";
   const count = messageCount(messages, status, savedCount);
-  // The Nexo answered the message that reached the limit: the chat reads the conversation until the limit applies.
-  const awaitingLimit = conversation?.state === "with_agent" && !conversation.limitReached && count >= MESSAGE_LIMIT && !busy;
   // Everything the chat learns from the server lands here: the conversation, its counter, its drafts and its messages.
   const sync = useConversationSync({
     conversationId: conversation?.id ?? null,
     state: conversation?.state ?? null,
-    awaitingLimit,
     onLoaded: (saved, { serverWins }) => {
       if (saved.conversation) setConversation(saved.conversation);
       setDrafts(byId(saved.drafts));
@@ -161,7 +157,7 @@ export function Chat({
   const now = useNow();
   useTitleBadge(turns);
   const days = dayBreaks(messages, now);
-  const counter = counterText(count, {
+  const counter = counterOf(count, {
     state: conversation?.state ?? "with_agent",
     limitReached: conversation?.limitReached ?? false,
     analystName: conversation?.analyst?.name ?? null,
@@ -231,7 +227,7 @@ export function Chat({
               turn.kind === "employee" ? (
                 <EmployeeMessage key={turn.id} text={turn.text} unsent={turn.unsent} onRetry={retry} />
               ) : turn.kind === "note" ? (
-                <SystemNote key={turn.id} event={noteIcon(turn.note)} text={noteText(turn.note)} />
+                <SystemNote key={turn.id} note={turn.note} text={noteText(turn.note)} />
               ) : turn.kind === "analyst" ? (
                 <AnalystMessage key={turn.id} turn={turn} />
               ) : (
@@ -253,7 +249,7 @@ export function Chat({
         {conversation?.state === "waiting_for_analyst" ? <WaitingRow conversation={conversation} now={now} /> : null}
         <Composer
           counter={counter}
-          announceCounter={counter.tone === "warning" && (count === LIMIT_WARNING_FROM || count === MESSAGE_LIMIT - 1)}
+          announceCounter={counter.kind === "left" && (count === LIMIT_WARNING_FROM || counter.left === 1)}
           busy={busy}
           onSend={send}
           inputRef={inputRef}

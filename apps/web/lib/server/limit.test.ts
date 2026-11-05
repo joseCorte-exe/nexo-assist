@@ -65,21 +65,21 @@ describe("applyLimit", () => {
   it("does nothing under 30 messages", async () => {
     const deps = await testDeps();
     const id = await conversationAt(deps, { count: 29, lastReply: plainReply });
-    expect(await applyLimit(deps, id)).toEqual({ applied: false });
+    await applyLimit(deps, id);
     expect(await rowOf(deps, id)).toMatchObject({ state: "with_agent", limitReachedAt: null });
   });
 
   it("closes the conversation at 30 with nothing pending, with one note, and tells the agent", async () => {
     const deps = await testDeps();
     const id = await conversationAt(deps, { count: 30, lastReply: plainReply });
-    expect(await applyLimit(deps, id)).toEqual({ applied: true, then: "closed" });
+    await applyLimit(deps, id);
 
     expect(await rowOf(deps, id)).toMatchObject({ state: "closed", outcome: "limit_reached", closedAt: NOW, limitReachedAt: NOW });
     const [note, ...more] = await notesOf(deps, id);
     expect(more).toEqual([]);
     expect(note).toMatchObject({ author: "system", text: "A conversa chegou ao limite de 30 mensagens e foi encerrada.", createdAt: NOW });
     expect(note?.parts).toEqual([
-      { type: "data-note", data: { event: "limit_reached", then: "closed", level: null, analystName: null, at: NOW.toISOString() } },
+      { type: "data-note", data: { event: "limit_reached", limit: { then: "closed" }, at: NOW.toISOString() } },
     ]);
     expect(deps.notes).toEqual(["(atendimento) A conversa chegou ao limite de 30 mensagens e foi encerrada."]);
   });
@@ -87,9 +87,8 @@ describe("applyLimit", () => {
   it("applies once: a second call, or a second tab, leaves no second note", async () => {
     const deps = await testDeps();
     const id = await conversationAt(deps, { count: 30, lastReply: plainReply });
-    const [first, second] = await Promise.all([applyLimit(deps, id), applyLimit(deps, id)]);
-    expect([first, second]).toContainEqual({ applied: true, then: "closed" });
-    expect(await applyLimit(deps, id)).toEqual({ applied: false });
+    await Promise.all([applyLimit(deps, id), applyLimit(deps, id)]);
+    await applyLimit(deps, id);
     expect(await notesOf(deps, id)).toHaveLength(1);
   });
 
@@ -98,7 +97,7 @@ describe("applyLimit", () => {
     const id = await conversationAt(deps, { count: 30, lastReply: plainReply });
     await draftFor(deps, id);
     deps.memory.getWorkingMemory = async () => "# Caso\n- Problema: notebook não liga\n- Situação: rascunho montado";
-    expect(await applyLimit(deps, id)).toEqual({ applied: true, then: "transferred" });
+    await applyLimit(deps, id);
 
     const row = await rowOf(deps, id);
     // Stopped, same day, only her: high priority, which goes to N1 with a wait of 4 business hours.
@@ -117,13 +116,13 @@ describe("applyLimit", () => {
     // Her 30th message is the first one the analyst has not read.
     expect(row.needsAnalystSince).toEqual((await deps.db.select().from(messages).where(eq(messages.id, "ana-29")))[0]!.createdAt);
     const [note] = await notesOf(deps, id);
-    expect(note?.parts?.[0]).toMatchObject({ data: { event: "limit_reached", then: "transferred", level: "N1" } });
+    expect(note?.parts?.[0]).toMatchObject({ data: { event: "limit_reached", limit: { then: "transferred", level: "N1" } } });
   });
 
   it("sends an open question of the Nexo to an analyst, and the overdue ticket it looked up to N2, marking the ticket", async () => {
     const deps = await testDeps();
     const id = await conversationAt(deps, { count: 30, lastReply: overdueLookup.concat(askingReply) });
-    expect(await applyLimit(deps, id)).toEqual({ applied: true, then: "transferred" });
+    await applyLimit(deps, id);
 
     const row = await rowOf(deps, id);
     expect(row).toMatchObject({ targetLevel: "N2", transferReason: "overdue", ticketId: "INC-20311" });
@@ -142,7 +141,7 @@ describe("applyLimit", () => {
   it("sends her last message, left without an answer, to an analyst", async () => {
     const deps = await testDeps();
     const id = await conversationAt(deps, { count: 30, lastReply: null });
-    expect(await applyLimit(deps, id)).toEqual({ applied: true, then: "transferred" });
+    await applyLimit(deps, id);
     expect((await rowOf(deps, id)).transferSummary).toBe(
       "A conversa chegou ao limite de 30 mensagens com a última mensagem do funcionário sem resposta. Leia a conversa para o contexto.",
     );
@@ -152,29 +151,30 @@ describe("applyLimit", () => {
     const deps = await testDeps();
     deps.ticketService.setDown(true);
     const id = await conversationAt(deps, { count: 30, lastReply: overdueLookup.concat(askingReply) });
-    expect(await applyLimit(deps, id)).toEqual({ applied: true, then: "transferred" });
+    await applyLimit(deps, id);
     expect(await rowOf(deps, id)).toMatchObject({ state: "waiting_for_analyst", targetLevel: "N1", transferReason: "message_limit", ticketId: null });
   });
 
   it("leaves a conversation with the analyst who has it, and says who stays", async () => {
     const deps = await testDeps();
     const id = await conversationAt(deps, { count: 30, lastReply: plainReply, state: "with_analyst" });
-    expect(await applyLimit(deps, id)).toEqual({ applied: true, then: "analyst" });
+    await applyLimit(deps, id);
     expect(await rowOf(deps, id)).toMatchObject({ state: "with_analyst", analystId: rafael.id, limitReachedAt: NOW });
     const [note] = await notesOf(deps, id);
-    expect(note?.parts?.[0]).toMatchObject({ data: { event: "limit_reached", then: "analyst", analystName: "Rafael Lima", level: null } });
+    expect(note?.parts?.[0]).toMatchObject({ data: { event: "limit_reached", limit: { then: "with_analyst", analystName: "Rafael Lima" } } });
   });
 
   it("leaves a waiting conversation with the level it waits for", async () => {
     // Carla's conversation waits for N1 in the sample data; she reaches 30 while waiting.
     const deps = await testDeps();
     await deps.db.update(conversations).set({ messageCount: 30 }).where(eq(conversations.id, "conv-carla"));
-    expect(await applyLimit(deps, "conv-carla")).toEqual({ applied: true, then: "analyst" });
+    await applyLimit(deps, "conv-carla");
     const [note] = await notesOf(deps, "conv-carla");
     expect(note).toMatchObject({ text: "A conversa chegou ao limite de 30 mensagens e espera o Suporte N1." });
+    expect(note?.parts?.[0]).toMatchObject({ data: { event: "limit_reached", limit: { then: "waiting", level: "N1" } } });
   });
 
-  it("decides again when an analyst takes the conversation while the transfer is being prepared", async () => {
+  it("reads again when an analyst takes the conversation while the transfer is being prepared", async () => {
     const deps = await testDeps();
     const id = await conversationAt(deps, { count: 30, lastReply: askingReply });
     // Rafael assumes between the read and the write.
@@ -185,14 +185,16 @@ describe("applyLimit", () => {
         .where(eq(conversations.id, id));
       return null;
     };
-    expect(await applyLimit(deps, id)).toEqual({ applied: true, then: "analyst" });
+    await applyLimit(deps, id);
     expect(await rowOf(deps, id)).toMatchObject({ state: "with_analyst", transferReason: null, limitReachedAt: NOW });
-    expect(await notesOf(deps, id)).toHaveLength(1);
+    const notes = await notesOf(deps, id);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]?.parts?.[0]).toMatchObject({ data: { limit: { then: "with_analyst", analystName: "Rafael Lima" } } });
   });
 
-  it("reads what it needs in one round trip and writes in one", async () => {
+  it("reads the case in one round trip, then moves like any other move: the row, then the write", async () => {
     const deps = await testDeps();
     const id = await conversationAt(deps, { count: 30, lastReply: plainReply });
-    expect(await roundTrips(deps, () => applyLimit(deps, id))).toBe(2);
+    expect(await roundTrips(deps, () => applyLimit(deps, id))).toBe(3);
   });
 });

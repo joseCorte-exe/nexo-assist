@@ -9,6 +9,7 @@ import {
   panelSections,
   takeoverBar,
   ticketEvent,
+  transferSummaryLabel,
 } from "./console-view";
 
 // 2026-10-26 is a Monday. Times are São Paulo local (-03:00).
@@ -203,5 +204,17 @@ describe("ticketEvent", () => {
     const assumed = { ...ana, state: "with_analyst" as const, analyst: RAFAEL, assumedAt: at("2026-10-26T10:12") };
     expect(ticketEvent(assumed)).toEqual({ icon: "analyst", text: "Assumido por Rafael Lima", at: assumed.assumedAt });
     expect(ticketEvent({ ...ana, transferredAt: null })).toBeNull();
+  });
+});
+
+describe("transferSummaryLabel", () => {
+  it("names who wrote the summary a note of transfer opens", () => {
+    expect(transferSummaryLabel({ event: "transferred", level: "N1" })).toBe("Resumo do agent");
+    expect(transferSummaryLabel({ event: "limit_reached", limit: { then: "transferred", level: "N1" } })).toBe("Resumo do caso");
+  });
+
+  it("is nothing for a note that opens no summary", () => {
+    expect(transferSummaryLabel({ event: "limit_reached", limit: { then: "closed" } })).toBeNull();
+    expect(transferSummaryLabel({ event: "closed", analystName: "Rafael Lima" })).toBeNull();
   });
 });
