@@ -18,12 +18,9 @@ export type ModelCall = { outcome: "granted"; key: string } | { outcome: "over_c
 /** The calls one message may make in a day: the first, and two more after replies that failed. */
 const MAX_CALLS_PER_MESSAGE = 3;
 
-/**
- * Where the request came from. On Vercel the platform writes these headers and drops what the client sent. Anywhere else
- * a client could forge them and only get away from its own ceiling: the global one still holds. In a local run with
- * neither, every message counts as the same visitor.
- */
+/** Where the request came from. In a local run with neither header, every message counts as the same visitor. */
 export function clientIp({ headers }: Pick<NextRequest, "headers">): string {
+  // Trusted because Vercel overwrites these headers, so a client cannot forge them there; off Vercel the global ceiling still caps cost.
   return headers.get("x-forwarded-for")?.split(",")[0]?.trim() || headers.get("x-real-ip")?.trim() || "local";
 }
 
