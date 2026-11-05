@@ -212,6 +212,7 @@ export function fakeTicketService({
         dueAt: dueAt({ priority: input.priority, createdAt: NOW, lastItResponseAt: null, reopenedAt: null }).toISOString(),
         resolvedAt: null,
       };
+      tickets.push(created);
       return Response.json(created, { status: 201 });
     }
     const [, id, reopen] = path.match(/^\/tickets\/([^/]+)(\/reopen)?$/) ?? [];
