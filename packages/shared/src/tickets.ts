@@ -96,5 +96,9 @@ export type TicketTransferInput = z.infer<typeof ticketTransferInput>;
 export const ticketAssignInput = z.object({ employeeId: z.string().min(1), analystId: z.string().min(1) });
 export type TicketAssignInput = z.infer<typeof ticketAssignInput>;
 
+/** Body of POST /tickets/:id/answer: what an analyst wrote in the conversation about the ticket. Fits any message of the console. */
+export const ticketAnswerInput = z.object({ employeeId: z.string().min(1), text: z.string().trim().min(1).max(2000) });
+export type TicketAnswerInput = z.infer<typeof ticketAnswerInput>;
+
 /** How many people the console asks for at once: the employees of a page of the list. */
 export const MAX_EMPLOYEE_IDS = 200;
