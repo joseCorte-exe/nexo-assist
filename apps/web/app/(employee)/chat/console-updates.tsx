@@ -16,6 +16,7 @@ function spokenNote(note: ChatNote): string | null {
     case "assumed":
       return `${employeeNoteLabel(note)}, ${LEVEL_LABEL[note.level]}.`;
     case "closed":
+    case "resolved":
       return `${employeeNoteLabel(note)}. Sua próxima mensagem começa uma nova conversa.`;
     default:
       return `${employeeNoteLabel(note)}.`;

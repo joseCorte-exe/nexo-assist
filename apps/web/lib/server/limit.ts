@@ -11,6 +11,7 @@ import {
   reachedLimit,
   routeTransfer,
   type Ticket,
+  WAITING_DRAFT,
 } from "@nexo/shared";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { conversations, drafts, messages } from "@/db/schema";
@@ -41,7 +42,7 @@ async function readCase(db: Deps["db"], conversationId: string) {
     db
       .select()
       .from(drafts)
-      .where(and(eq(drafts.conversationId, conversationId), inArray(drafts.status, ["pending", "confirming"])))
+      .where(and(eq(drafts.conversationId, conversationId), inArray(drafts.status, WAITING_DRAFT)))
       .orderBy(desc(drafts.createdAt))
       .limit(1),
     db

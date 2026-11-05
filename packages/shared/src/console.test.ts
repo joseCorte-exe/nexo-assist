@@ -114,6 +114,7 @@ describe("noteLabel", () => {
     expect(noteLabel({ event: "assumed", level: "N2", analystName: "Rafael Lima" })).toBe("Rafael Lima assumiu · agent pausado");
     expect(noteLabel({ event: "released", analystName: "Rafael Lima" })).toBe("Rafael Lima devolveu ao agent");
     expect(noteLabel({ event: "closed", analystName: "Rafael Lima" })).toBe("Rafael Lima encerrou o atendimento");
+    expect(noteLabel({ event: "resolved" })).toBe("Resolvida pelo agent · conversa encerrada");
   });
 
   it("writes the limit with what happened to the conversation", () => {
@@ -178,6 +179,7 @@ describe("employeeNoteLabel", () => {
     expect(employeeNoteLabel({ event: "assumed", level: "N2", analystName: "Rafael Lima" })).toBe("Rafael Lima entrou na conversa");
     expect(employeeNoteLabel({ event: "released", analystName: "Rafael Lima" })).toBe("Rafael Lima devolveu a conversa ao Nexo");
     expect(employeeNoteLabel({ event: "closed", analystName: "Rafael Lima" })).toBe("Rafael Lima encerrou o atendimento");
+    expect(employeeNoteLabel({ event: "resolved" })).toBe("Resolvida pelo Nexo · conversa encerrada");
   });
 
   it("tells her who stays with her when the limit comes while an analyst has her", () => {

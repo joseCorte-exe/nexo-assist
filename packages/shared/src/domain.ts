@@ -50,6 +50,9 @@ export type DraftOperation = z.infer<typeof draftOperation>;
 export const draftStatus = z.enum(["pending", "confirming", "confirmed", "cancelled", "superseded", "rejected"]);
 export type DraftStatus = z.infer<typeof draftStatus>;
 
+/** A draft still waiting for her: nothing may end the conversation as if it were not there. */
+export const WAITING_DRAFT: DraftStatus[] = ["pending", "confirming"];
+
 /** message_limit: the code transferred it at the 30 messages, with something still pending (feature 6). */
 export const transferReason = z.enum(["employee_request", "critical", "overdue", "agent_unsure", "message_limit"]);
 export type TransferReason = z.infer<typeof transferReason>;
@@ -62,5 +65,5 @@ export type DraftRejection = z.infer<typeof draftRejection>;
 /** The longest summary a transfer keeps, from the model, the code or the ticket-service. */
 export const MAX_TRANSFER_SUMMARY = 600;
 
-export const conversationEvent = z.enum(["transferred", "assumed", "released", "closed", "limit_reached"]);
+export const conversationEvent = z.enum(["transferred", "assumed", "released", "closed", "resolved", "limit_reached"]);
 export type ConversationEvent = z.infer<typeof conversationEvent>;
