@@ -23,6 +23,7 @@ import type { Deps } from "./deps";
 import { jsonError, readBody, readEmployeeSession } from "./http";
 import { applyLimit } from "./limit";
 import { replyPlace } from "./messages";
+import { claimModelCall, clientIp, releaseModelCall } from "./usage";
 
 const AGENT_FAILED = "O Nexo não conseguiu responder. Tente de novo.";
 
@@ -30,6 +31,7 @@ const REFUSALS = {
   already_answered: { code: "already_answered", message: "Essa mensagem já foi respondida." },
   message_conflict: { code: "message_conflict", message: "Essa mensagem já foi enviada." },
   limit_due: { code: "conversation_busy", message: "A conversa acabou de mudar. Tente de novo." },
+  repeat: { code: "resend_refused", message: "Essa mensagem não pode ser reenviada agora. Envie outra." },
 };
 
 /**
@@ -168,6 +170,27 @@ async function pausedTurn(
 }
 
 /**
+ * A message past a ceiling of the day: saved already, and copied to the agent memory as she wrote it, so the agent knows
+ * it when the demo comes back. The model is not called, and the answer says so. The limit of a 30th message left like
+ * this applies at her next one, as for any message left without an answer.
+ */
+async function unavailableTurn(
+  deps: Deps,
+  { conversation, employeeId, id, text, at }: { conversation: ConversationView; employeeId: string; id: string; text: string; at: Date },
+) {
+  await rememberNote(deps.memory, { id, conversationId: conversation.id, employeeId, text, at, prefix: null });
+  const stream = createUIMessageStream<NexoUIMessage>({
+    execute: ({ writer }) => {
+      writer.write({ type: "start" });
+      writer.write({ type: "data-conversation", data: conversation });
+      writer.write({ type: "data-unavailable", data: null });
+      writer.write({ type: "finish" });
+    },
+  });
+  return createUIMessageStreamResponse({ stream });
+}
+
+/**
  * She came back on another São Paulo day: before her message, the agent reads since when, so it looks again at what may
  * have changed. Under an id of her message, so a retry replaces the note instead of repeating it.
  */
@@ -209,6 +232,11 @@ export async function chat(request: NextRequest, deps: Deps) {
   const { conversation, startedAt } = turn;
   if (turn.paused) return pausedTurn(deps, { conversation, employeeId, id, text, at: startedAt });
   await rememberResume(deps, { conversationId: conversation.id, employeeId, messageId: id, previousAt: turn.previousAt, startedAt });
+  // Right before the model, so only a message that would call it counts (ARQUITETURA.md, section 9).
+  const call = await claimModelCall(deps, { messageId: id, ip: clientIp(request) });
+  if (call.outcome === "over_ceiling") return unavailableTurn(deps, { conversation, employeeId, id, text, at: startedAt });
+  if (call.outcome === "repeat") return jsonError(409, REFUSALS.repeat.code, REFUSALS.repeat.message);
+  const callKey = call.key;
   const reply = streamReply(deps.agent, { conversationId: conversation.id, employeeId, text, startedAt });
   const stream = createUIMessageStream<NexoUIMessage>({
     execute: async ({ writer }) => {
@@ -224,6 +252,8 @@ export async function chat(request: NextRequest, deps: Deps) {
       if (finishReason === undefined || finishReason === "error") {
         console.error("agent reply not saved", { conversationId: conversation.id, finishReason });
         await discardDrafts(deps.db, responseMessage);
+        // It failed, so she may try again ("Tentar de novo"), a few times. A reply saved keeps the call: it is never repeated.
+        await releaseModelCall(deps.db, callKey);
         return;
       }
       await saveReply(deps.db, { conversationId: conversation.id, startedAt, now: deps.now(), reply: responseMessage });
