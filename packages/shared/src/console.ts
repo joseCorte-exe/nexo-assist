@@ -8,6 +8,7 @@ import {
   type ConversationOutcome,
   conversationState,
   type ConversationState,
+  MAX_MESSAGE_TEXT,
   messageAuthor,
   priority,
   ticketStatus,
@@ -115,7 +116,7 @@ export const analystMessageInput = z.object({
     .string({ error: "Escreva sua mensagem." })
     .trim()
     .min(1, "Escreva sua mensagem.")
-    .max(2000, "A mensagem pode ter até 2.000 caracteres."),
+    .max(MAX_MESSAGE_TEXT, "A mensagem pode ter até 2.000 caracteres."),
 });
 export type AnalystMessageInput = z.infer<typeof analystMessageInput>;
 

@@ -228,6 +228,28 @@ describe("addFollowUp and reopenTicket", () => {
   });
 });
 
+describe("answerTicket", () => {
+  const body = { employeeId: "emp-ana", text: "Pode deixar ligado?" };
+
+  it("notes the answer with the message as the idempotency key, and retries it", async () => {
+    const { client, fetch } = clientWith([json(503, {}), json(200, ticket)]);
+    expect(await client.answerTicket("INC-20312", body, "msg-1")).toEqual({ ok: true, data: ticket });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const [url, init] = fetch.mock.calls[1]!;
+    expect(String(url)).toBe("http://tickets.test/tickets/INC-20312/answer");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual(body);
+    expect((init.headers as Record<string, string>)[IDEMPOTENCY_KEY_HEADER]).toBe("msg-1");
+  });
+
+  it("keeps the code of a refusal, without trying again", async () => {
+    const { client, fetch } = clientWith([json(409, { error: { code: "ticket_resolved", message: "The ticket is resolved" } })]);
+    const result = await client.answerTicket("INC-20150", body, "msg-2");
+    expect(!result.ok && result.error.serviceCode).toBe("ticket_resolved");
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("ticket-service client", () => {
   it("sends the service secret", async () => {
     const { client, fetch } = clientWith([json(200, { ok: true })]);

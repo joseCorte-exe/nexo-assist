@@ -25,6 +25,7 @@ export type Deps = {
     | "searchEmployees"
     | "setAvailability"
     | "assignTicket"
+    | "answerTicket"
     | "getTicket"
     | "transferTicket"
   >;

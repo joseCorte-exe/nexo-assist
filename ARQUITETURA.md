@@ -230,6 +230,7 @@ Toda rota exige o cabeçalho com o segredo compartilhado entre os dois projetos.
 | POST /tickets/:id/reopen | reabre se foi resolvido há até 7 dias |
 | POST /tickets/:id/transfer | marca a transferência com nível e resumo |
 | POST /tickets/:id/assign | analista assumiu (status Em atendimento) |
+| POST /tickets/:id/answer | resposta do analista no console: grava `last_it_response_at`, recalcula `due_at` e guarda o texto no histórico (RN-02). Recusa chamado resolvido. Exige `Idempotency-Key` = id da mensagem |
 | GET /kb/search?q= | busca na central de ajuda |
 | POST /admin/outage?seconds= | força uma janela de queda (protegida por chave de admin) |
 | POST /admin/reseed | recria os dados de exemplo com datas de hoje (protegida por chave de admin) |

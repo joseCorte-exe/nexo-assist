@@ -89,10 +89,23 @@ export const releaseHandler = consoleMove(moves.release);
 export const closeHandler = consoleMove(moves.close);
 
 /**
+ * The message of the analyst is the answer of IT on the ticket of the conversation, which restarts its deadline (RN-02).
+ * The message is the key, so a retry notes it once. The message is saved already and reaches her chat either way, so a
+ * failure is logged, without the text: until a next message gets through, the ticket keeps the deadline it had.
+ */
+async function answerTicket(deps: Deps, row: Row, messageId: string, text: string) {
+  if (!row.ticketId) return;
+  const answered = await deps.ticketService.answerTicket(row.ticketId, { employeeId: row.employeeId, text }, messageId);
+  // A resolved ticket has no deadline to restart: nothing went wrong.
+  if (answered.ok || answered.error.serviceCode === "ticket_resolved") return;
+  console.error("analyst answer not noted on the ticket", { ticketId: row.ticketId, messageId, error: answered.error.code });
+}
+
+/**
  * POST /api/console/conversations/:id/messages. A message of the analyst in a conversation they attend, under the id the
  * console gave it: sent again, it is the same message. Written over the version of the conversation it was decided on,
- * so a move in between is never written past. It shows in her chat with their name and level, and goes to the agent
- * memory.
+ * so a move in between is never written past. It shows in her chat with their name and level, goes to the agent memory
+ * and, after the response, to the linked ticket: the analyst does not wait for the ticket-service to see it sent.
  */
 export async function messageHandler(request: NextRequest, deps: Deps, id: string): Promise<Response> {
   const auth = await analystOf(request, deps);
@@ -128,6 +141,7 @@ export async function messageHandler(request: NextRequest, deps: Deps, id: strin
   if (inserted.rowsAffected === 1) {
     const memory = `${analyst.name}, analista do ${LEVEL_LABEL[analyst.level]}, escreveu: "${text}"`;
     await rememberNote(deps.memory, { id: messageId, conversationId: id, employeeId: row.employeeId, text: memory, at, prefix: CONSOLE_NOTE });
+    deps.waitUntil(answerTicket(deps, row, messageId, text));
   }
   return sentMessage(saved, { id, analyst, text, row });
 }

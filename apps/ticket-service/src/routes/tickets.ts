@@ -164,6 +164,28 @@ export function ticketRoutes(deps: Deps) {
         if (!row) throw new Error("Update returned no row");
         return toTicket(row);
       });
+    })
+    // An analyst answered in the conversation about the ticket: the answer of IT, so the last update and the deadline
+    // count from now (RN-02), and the agent can tell what they wrote. A resolved ticket has no deadline left to restart.
+    .post("/:id/answer", async (c) => {
+      const id = ticketId.safeParse(c.req.param("id"));
+      if (!id.success) return c.json(errorBody("invalid_ticket", "Invalid ticket number"), 400);
+      const body = await parseWrite(c, ticketFollowUpInput);
+      if (!body.ok) return body.response;
+      const { employeeId, text } = body.data;
+      const scope = `POST /tickets/${id.data}/answer for ${employeeId}`;
+      return idempotent(deps, c, { key: body.key, scope, status: 200 }, async (tx, now) => {
+        const ticket = await ticketOf(tx, id.data, employeeId);
+        refuseChange("update", ticket, now);
+        const [row] = await tx
+          .update(tickets)
+          .set({ lastItResponseAt: now, updatedAt: now, dueAt: dueAt({ ...ticket, lastItResponseAt: now }) })
+          .where(eq(tickets.id, ticket.id))
+          .returning();
+        if (!row) throw new Error("Update returned no row");
+        await addUpdate(tx, { ticketId: ticket.id, author: "analyst", text, now });
+        return toTicket(row);
+      });
     });
 }
 

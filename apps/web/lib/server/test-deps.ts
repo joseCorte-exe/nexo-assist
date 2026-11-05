@@ -60,7 +60,7 @@ type SampleTicket = Pick<Ticket, "id" | "title" | "openedBy"> & {
   resolvedDaysAgo?: number;
 };
 
-/** Ana's tickets, as in the design and Annex B, and one of Diego's. Their rules are tested in the ticket-service. */
+/** Ana's tickets, as in the design and Annex B, one of Diego's and one of Fábio's. Their rules are tested in the ticket-service. */
 const sampleTickets: SampleTicket[] = [
   { id: "INC-20311", title: "Notebook lento após atualização do Windows", openedBy: "emp-ana", priority: "medium", status: "waiting_for_analyst", openedDaysAgo: 6 },
   { id: "INC-20298", title: "Acesso à pasta Financeiro no SharePoint", openedBy: "emp-ana", priority: "medium", status: "in_progress", category: "access", openedDaysAgo: 8, itAnsweredDaysAgo: 1 },
@@ -68,6 +68,7 @@ const sampleTickets: SampleTicket[] = [
   { id: "INC-20150", title: "Senha do SAP bloqueada", openedBy: "emp-ana", priority: "medium", status: "resolved", category: "access", openedDaysAgo: 5, itAnsweredDaysAgo: 4, resolvedDaysAgo: 4 },
   { id: "INC-19877", title: "Outlook não sincroniza no celular", openedBy: "emp-ana", priority: "low", status: "resolved", category: "email", openedDaysAgo: 15, itAnsweredDaysAgo: 12, resolvedDaysAgo: 12 },
   { id: "INC-20319", title: "Sistema de pedidos fora do ar para a equipe", openedBy: "emp-diego", priority: "critical", status: "waiting_for_analyst", openedDaysAgo: 0 },
+  { id: "INC-20302", title: "VPN com erro 809", openedBy: "emp-fabio", priority: "high", status: "assigned", category: "network_vpn", openedDaysAgo: 0 },
 ];
 
 function toTicket({ openedDaysAgo, itAnsweredDaysAgo, resolvedDaysAgo, category = "hardware", ...sample }: SampleTicket): Ticket {
@@ -180,6 +181,14 @@ export function fakeTicketService({
       if (!found) return Response.json({ error: { code: "analyst_not_found", message: "Analyst not found" } }, { status: 404 });
       Object.assign(found, body as { available: boolean });
       return Response.json(found);
+    }
+    const answered = path.match(/^\/tickets\/([^/]+)\/answer$/);
+    if (answered) {
+      const { employeeId } = body as { employeeId: string };
+      const ticket = tickets.find((one) => one.id === answered[1] && one.openedBy === employeeId);
+      if (!ticket) return notFound();
+      const refusal = changeRefusal("update", ticket, NOW);
+      return refusal ? refused(refusal) : Response.json(ticket);
     }
     const mark = path.match(/^\/tickets\/([^/]+)\/(transfer|assign)$/);
     if (mark) {
