@@ -21,9 +21,10 @@ export type { Step };
 
 /**
  * thinking: nothing to show yet; working: decision recorded, tools running; writing: text arriving;
- * done; failed: no answer at all; interrupted: the answer stopped in the middle.
+ * done; failed: no answer at all; interrupted: the answer stopped in the middle; unavailable: the demo reached a
+ * ceiling of the day, so the model was not called.
  */
-export type Phase = "thinking" | "working" | "writing" | "done" | "failed" | "interrupted";
+export type Phase = "thinking" | "working" | "writing" | "done" | "failed" | "interrupted" | "unavailable";
 
 /**
  * How an offer takes a click. open: each item is a button that sends the choice; busy: the agent is still answering,
@@ -130,11 +131,13 @@ function agentTurn(message: NexoUIMessage, answer: string | null, busy: boolean)
   if (draft) blocks.push(draft);
 
   const decision = decisionOf(message.parts);
-  const phase: Phase = text ? "writing" : decision ? "working" : "thinking";
+  const unavailable = message.parts.some((part) => part.type === "data-unavailable");
+  const phase: Phase = unavailable ? "unavailable" : text ? "writing" : decision ? "working" : "thinking";
   return { kind: "agent", id: message.id, text, decision, steps, blocks, phase };
 }
 
 function settle(turn: AgentTurn, status: ChatStatus): AgentTurn {
+  if (turn.phase === "unavailable") return turn;
   if (status === "ready") return { ...turn, phase: "done" };
   if (status === "error") return { ...turn, phase: turn.text ? "interrupted" : "failed" };
   return turn;
@@ -168,7 +171,7 @@ export function liveTurns(all: readonly NexoUIMessage[], status: ChatStatus, { p
     } else if (message.role === "user") {
       turns.push({ kind: "employee", id: message.id, text: textOf(message.parts), unsent: false });
     } else {
-      turns.push({ ...agentTurn(message, answerTo(index), busy), phase: "done" });
+      turns.push(settle(agentTurn(message, answerTo(index), busy), "ready"));
     }
   });
 

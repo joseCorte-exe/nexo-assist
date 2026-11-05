@@ -124,7 +124,9 @@ export function Chat({
       if (part?.type === "data-conversation" && (part.data.id !== known?.id || part.data.state !== known?.state)) setConversation(part.data);
       const transferred = message.parts.some((one) => one.type === "tool-transferToAnalyst" && one.state === "output-available" && one.output.ok);
       // The message that reached the limit was answered: the server applied the limit before this stream ended.
-      const atLimit = part?.type === "data-conversation" && reachedLimit(part.data.messageCount);
+      // Unless the demo was unavailable: nobody answered, so it applies at her next message, and a read would take the notice away.
+      const unavailable = message.parts.some((one) => one.type === "data-unavailable");
+      const atLimit = !unavailable && part?.type === "data-conversation" && reachedLimit(part.data.messageCount);
       if (transferred || atLimit || (part?.type === "data-conversation" && part.data.state !== "with_agent")) void sync.refresh();
     },
   });
