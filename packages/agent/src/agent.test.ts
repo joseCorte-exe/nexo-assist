@@ -368,6 +368,27 @@ describe("the transfer to an analyst", () => {
     expect(savedTransfers.map((transfer) => transfer.reason)).toEqual(["agent_unsure"]);
   });
 
+  it("lets the model choose when the decision is low only for lack of information: it asks instead of transferring", async () => {
+    savedTransfers.length = 0;
+    const { agent, model } = setup([
+      { toolCalls: [{ toolName: "recordDecision", input: { ...unsure, needsInformation: true } }] },
+      { text: "Qual mensagem aparece quando o Excel fecha?" },
+    ]);
+    await replyOf(agent, turn);
+    expect(model.calls[1]?.toolChoice).toEqual({ type: "auto" });
+    expect(savedTransfers).toEqual([]);
+  });
+
+  it("still transfers a low decision that says nothing is missing", async () => {
+    const { agent, model } = setup([
+      { toolCalls: [{ toolName: "recordDecision", input: { ...unsure, needsInformation: false } }] },
+      { toolCalls: [{ toolName: "transferToAnalyst", input: { reason: "agent_unsure", summary } }] },
+      { text: handedOver },
+    ]);
+    await replyOf(agent, turn);
+    expect(model.calls[1]?.toolChoice).toEqual({ type: "tool", toolName: "transferToAnalyst" });
+  });
+
   it("lets the model choose when it is sure enough, 0.6 included", async () => {
     const { agent, model } = setup([{ toolCalls: [{ toolName: "recordDecision", input: { ...unsure, confidence: 0.6 } }] }, { text: "Me conte mais." }]);
     await replyOf(agent, turn);

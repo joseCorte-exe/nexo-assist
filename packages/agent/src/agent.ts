@@ -222,10 +222,13 @@ const draftedCritical = (steps: ReadonlyArray<Step>) =>
     }),
   );
 
-/** The confidence recordDecision gave in the first step, if the input was a valid one. */
-function recordedConfidence(step: Step | undefined): number | null {
-  const input = step?.toolResults.find((result) => result.toolName === "recordDecision")?.input as { confidence?: unknown } | undefined;
-  return typeof input?.confidence === "number" ? input.confidence : null;
+/** The decision recordDecision recorded in the first step, if the input was a valid one. */
+function recordedDecision(step: Step | undefined) {
+  const input = step?.toolResults.find((result) => result.toolName === "recordDecision")?.input as { confidence?: unknown; needsInformation?: unknown } | undefined;
+  return {
+    confidence: typeof input?.confidence === "number" ? input.confidence : null,
+    needsInformation: input?.needsInformation === true,
+  };
 }
 
 /** One reply of the agent: the Mastra stream, which the route turns into the chat stream and saves at the end. */
@@ -247,15 +250,18 @@ export function streamReply(agent: NexoAgent, { conversationId, employeeId, text
     stopWhen: ({ steps }: { steps: ReadonlyArray<Step> }) => replyDone(steps.at(-1)),
     // recordDecision is mandatory in the first step and gone after it. Once a draft is shown, the offers go too: its card
     // has Confirmar, Editar and Cancelar, and quick replies under it would only send those words as a message. Below 0.6
-    // the step after the decision transfers, as the doubt of the agent: the code says so, not the model. Once
+    // the step after the decision transfers, as the doubt of the agent: the code says so, not the model. Unless the
+    // decision says what is missing is information, which is asked for. Once
     // transferred, or drafted as critical, which the route transfers, the model only says to whom and until when; once
     // resolved, its closing sentence.
     prepareStep: ({ stepNumber, steps }) => {
       if (stepNumber === 0) return { toolChoice: { type: "tool", toolName: "recordDecision" } };
       if (ran(steps, "transferToAnalyst") || ran(steps, "markResolved") || draftedCritical(steps)) return { activeTools: [WORKING_MEMORY_TOOL] };
       if (stepNumber === 1) {
-        turn.confidence = recordedConfidence(steps[0]);
-        if (turn.confidence !== null && turn.confidence < MIN_CONFIDENCE) return { toolChoice: { type: "tool", toolName: "transferToAnalyst" } };
+        const { confidence, needsInformation } = recordedDecision(steps[0]);
+        turn.confidence = confidence;
+        turn.needsInformation = needsInformation;
+        if (confidence !== null && confidence < MIN_CONFIDENCE && !needsInformation) return { toolChoice: { type: "tool", toolName: "transferToAnalyst" } };
       }
       return { activeTools: ran(steps, "draftTicket") ? AFTER_DRAFT_TOOLS : AFTER_DECISION_TOOLS };
     },

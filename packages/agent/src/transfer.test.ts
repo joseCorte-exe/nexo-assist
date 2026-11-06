@@ -75,11 +75,11 @@ function setup({ reads = "up", marks = "up", stillWithAgent = true } = {}) {
 const summary = "Notebook lento há 6 dias desde a atualização; o INC-20311 venceu e a Ana pediu um analista.";
 
 /** The context of one reply, as the agent builds it: the confidence is what its decision recorded. */
-function replyContext({ confidence = null as number | null, employeeId = "emp-ana" } = {}) {
+function replyContext({ confidence = null as number | null, needsInformation = false, employeeId = "emp-ana" } = {}) {
   return new RequestContext<unknown>([
     ["employeeId", employeeId],
     ["conversationId", "conv-ana"],
-    ["turn", { ...newReplyTurn(TURN_STARTED_AT), confidence }],
+    ["turn", { ...newReplyTurn(TURN_STARTED_AT), confidence, needsInformation }],
   ]);
 }
 
@@ -143,6 +143,13 @@ describe("transferToAnalyst", () => {
     const result = await run(transferToAnalyst, { reason: "employee_request", summary }, { confidence: 0.41 });
     expect(result).toMatchObject({ ok: true, transferReason: "agent_unsure" });
     expect(transfers[0]).toMatchObject({ reason: "agent_unsure", confidence: 0.41 });
+  });
+
+  it("does not call it doubt when the decision was low for lack of information: she asked for the analyst", async () => {
+    const { transferToAnalyst, transfers } = setup();
+    const result = await run(transferToAnalyst, { reason: "employee_request", summary }, { confidence: 0.41, needsInformation: true });
+    expect(result).toMatchObject({ ok: true, transferReason: "employee_request" });
+    expect(transfers[0]).toMatchObject({ reason: "employee_request", confidence: 0.41 });
   });
 
   it("keeps how sure the decision was with a transfer she asked for, for the console", async () => {

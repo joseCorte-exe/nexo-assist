@@ -57,6 +57,12 @@ describe("decisionRecord", () => {
     expect(decisionRecord.safeParse({ ...record, confidence: 0 }).success).toBe(true);
   });
 
+  it("says whether the doubt is for lack of information, and still reads the decisions saved without it", () => {
+    expect(decisionRecord.parse({ ...record, needsInformation: true })).toEqual({ ...record, needsInformation: true });
+    expect(decisionRecord.safeParse({ ...record, needsInformation: "sim" }).success).toBe(false);
+    expect(decisionRecord.parse(record).needsInformation).toBeUndefined();
+  });
+
   it("needs every field filled", () => {
     expect(decisionRecord.safeParse({ ...record, reason: "" }).success).toBe(false);
     expect(decisionRecord.safeParse({ ...record, understanding: undefined }).success).toBe(false);

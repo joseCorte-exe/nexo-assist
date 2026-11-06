@@ -87,16 +87,18 @@ export const MIN_CONFIDENCE = 0.6;
 type ReplyDraft = { input: string; output: Promise<DraftTicketOutput> };
 
 /**
- * What one reply knows across its steps: when it started, how sure its decision was, once recorded, and the transfer
- * and the draft it made, if any. The agent puts one in the request context of each reply.
+ * What one reply knows across its steps: when it started, how sure its decision was, once recorded, and whether it was
+ * unsure for lack of information, which is asked for, not a doubt; and the transfer and the draft it made, if any. The
+ * agent puts one in the request context of each reply.
  */
 export type ReplyTurn = {
   startedAt: Date;
   confidence: number | null;
+  needsInformation: boolean;
   transfer: Promise<TransferToAnalystOutput> | null;
   draft: ReplyDraft | null;
 };
-export const newReplyTurn = (startedAt: Date): ReplyTurn => ({ startedAt, confidence: null, transfer: null, draft: null });
+export const newReplyTurn = (startedAt: Date): ReplyTurn => ({ startedAt, confidence: null, needsInformation: false, transfer: null, draft: null });
 
 /** A draft as the tool hands it to be saved: what the card shows, plus what the console and the analyst need. */
 export type DraftRecord = {
@@ -437,7 +439,7 @@ export function createTools({
 
   async function transferOnce(
     input: TransferToAnalystInput,
-    { employeeId, conversationId, turn: { confidence, startedAt } }: TurnContext & { turn: ReplyTurn },
+    { employeeId, conversationId, turn: { confidence, needsInformation, startedAt } }: TurnContext & { turn: ReplyTurn },
   ): Promise<TransferToAnalystOutput> {
     let ticket: Ticket | null = null;
     if (input.ticketId) {
@@ -454,7 +456,7 @@ export function createTools({
     const at = now();
     const { impact, urgency, affected } = input;
     // Below 0.6 the code made the model transfer: the reason is the doubt of the agent, whatever the model wrote.
-    const unsure = confidence !== null && confidence < MIN_CONFIDENCE;
+    const unsure = confidence !== null && confidence < MIN_CONFIDENCE && !needsInformation;
     const route = routeTransfer({
       requested: unsure ? "agent_unsure" : input.reason,
       ticket,

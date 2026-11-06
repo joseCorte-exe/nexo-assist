@@ -43,6 +43,10 @@ export const decisionRecord = z.object({
   action: z.string().trim().min(1).max(300).describe("A ação que você vai tomar agora, em uma frase."),
   confidence: z.number().min(0).max(1).describe("Sua segurança nessa ação, de 0 a 1."),
   reason: z.string().trim().min(1).max(500).describe("Por que essa ação, em uma ou duas frases."),
+  needsInformation: z
+    .boolean()
+    .optional()
+    .describe("Sempre responda. true se falta uma informação sobre o problema (o que acontece, desde quando, o que ele já tentou) que você vai pedir; false se ele já deu os detalhes."),
 });
 export type DecisionRecord = z.infer<typeof decisionRecord>;
 
