@@ -28,6 +28,7 @@ Para entrar, qualquer senha serve. `ana.souza@nexo.com.br` entra como funcionár
 | `pnpm test` | Roda os testes de unidade e de integração |
 | `pnpm test:e2e` | Sobe o ticket-service e o web com bancos novos e roda os testes no navegador. Na primeira vez, rode `pnpm --filter @nexo/web exec playwright install chromium` |
 | `pnpm typecheck` | Confere os tipos dos quatro pacotes |
+| `pnpm eval` | Roda os casos do agent com o modelo real. Precisa de `ANTHROPIC_API_KEY` e custa centavos |
 
 ## Arquitetura
 
@@ -104,11 +105,11 @@ Acima de cada resposta aparece a linha de ações ("consultou seus chamados", "c
 
 ## Como garanti a qualidade das decisões
 
-Os 833 testes de unidade e de integração cobrem as regras do código: prioridade, prazo, reabertura, privacidade, idempotência, quedas do serviço e as ferramentas do agent. Como essas regras não dependem do modelo, os testes dão o mesmo resultado a cada execução.
+Os 857 testes de unidade e de integração cobrem as regras do código: prioridade, prazo, reabertura, privacidade, idempotência, quedas do serviço e as ferramentas do agent. Como essas regras não dependem do modelo, os testes dão o mesmo resultado a cada execução.
 
 Os 60 testes em Playwright rodam as histórias do PRD de ponta a ponta com o modelo simulado: login, consulta, rascunho, confirmação, analista assumindo, limite e volta em outro dia.
 
-O que depende do modelo foi testado com o Haiku 5.5 de verdade. Cada feature a partir da 3 rodou seus caminhos, em geral três vezes cada, e o resultado está no relatório dela. Os casos críticos e o encerramento como resolvida estão nos PRs [14](https://github.com/joseCorte-exe/nexo-assist/pull/14) e [12](https://github.com/joseCorte-exe/nexo-assist/pull/12). Exemplos:
+O que depende do modelo roda com o Haiku 5.5 de verdade em `pnpm eval`, com 16 casos ligados às histórias e regras do PRD, 3 rodadas cada, por cerca de US$ 0,07. Na última execução, 14 casos passaram 3 de 3, e o resultado está em [docs/evals/resultado.md](docs/evals/resultado.md). Um roteiro para testar à mão está em [docs/roteiro-de-aceite.md](docs/roteiro-de-aceite.md), mas ainda não foi percorrido num navegador. Antes disso, cada feature a partir da 3 rodou seus caminhos, em geral três vezes cada, e o resultado está no relatório dela. Os casos críticos e o encerramento como resolvida estão nos PRs [14](https://github.com/joseCorte-exe/nexo-assist/pull/14) e [12](https://github.com/joseCorte-exe/nexo-assist/pull/12). Exemplos:
 
 | Caso | Resultado |
 |---|---|
@@ -154,7 +155,7 @@ As instruções e as ferramentas ficam em cache por cerca de 5 minutos e são li
 ## Limitações conhecidas
 
 - Numa queda do ticket-service com a lista de analistas ainda válida no cache do web, a mensagem do analista fica gravada, mas o prazo e a linha do histórico do chamado não são registrados. O prazo só recomeça na próxima mensagem que passar.
-- Os testes com o modelo real foram rodados à mão. Não existe um comando que os repita.
+- Perguntar quando falta informação ainda depende do modelo. Se ele gravar confiança baixa sem marcar que falta informação, o código transfere. No caso do Teams isso aconteceu em 2 de 3 rodadas, e o resultado varia entre execuções.
 - "Tentar de novo" depois de uma resposta que falhou não conta nos tetos de uso, até 3 chamadas por mensagem. O custo de um dia ruim pode passar da conta feita só com primeiras tentativas.
 - O teto por IP pode ser contornado por quem troca de endereço, como no IPv6. O teto global por dia continua segurando o custo.
 - Só um chamado novo crítico transfere sozinho. Um chamado crítico já existente segue pela consulta. Se o funcionário nunca confirmar o rascunho, o caso fica com o analista sem chamado aberto.
@@ -164,10 +165,12 @@ As instruções e as ferramentas ficam em cache por cerca de 5 minutos e são li
 
 O web e o ticket-service são dois projetos na Vercel, cada um com seu banco no Turso. As chaves ficam só no painel da Vercel, e o script `build` do ticket-service junta o serviço e o `packages/shared` num arquivo só, que o `apps/ticket-service/vercel.json` manda publicar, porque o Node da Vercel não abre TypeScript dentro de `node_modules`.
 
-Link publicado: a preencher.
+Link publicado: https://nexo-assist-ten.vercel.app
+
+As migrações e o seed rodam contra o Turso antes de publicar. Os dois tetos de uso usam os valores padrão, 300 mensagens por IP e 1000 no total por dia.
 
 ## O que faria com mais tempo
 
-- Transformar as rodadas com o modelo real em um comando, com cada caso ligado a uma história ou regra do PRD, para repetir a cada mudança nas instruções.
+- Deixar o agent buscar na central antes de registrar a decisão, para separar falta de informação de insegurança sem depender do modelo.
 - Trocar a busca periódica por uma conexão aberta no chat e no console.
 - Testar um modelo feito só para decisões para dar a nota de confiança, deixando o Haiku com a conversa.
