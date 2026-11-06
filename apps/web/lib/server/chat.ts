@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { toAISdkStream } from "@mastra/ai-sdk";
-import { rememberNote, RESUME_NOTE, resumeNote, streamReply } from "@nexo/agent";
+import { OFFER_TOOLS, rememberNote, RESUME_NOTE, resumeNote, streamReply } from "@nexo/agent";
 import {
   chatInput,
   type ConversationView,
@@ -29,6 +29,7 @@ import { criticalTransfer } from "./transfers";
 import { claimModelCall, clientIp, releaseModelCall } from "./usage";
 
 const AGENT_FAILED = "O Nexo não conseguiu responder. Tente de novo.";
+const NOTHING_TO_READ = "Não consegui terminar a resposta desta vez. Pode escrever de novo?";
 
 const REFUSALS = {
   already_answered: { code: "already_answered", message: "Essa mensagem já foi respondida." },
@@ -211,6 +212,34 @@ async function pausedTurn(
 }
 
 /**
+ * The agent stream, with a sentence before its end when she would have nothing to read: no text, and no offer, whose
+ * question is on its card. A reply can end like that when the model is cut short or runs out of steps. The sentence is
+ * part of the stream, so the chat shows it and the saved reply keeps it. A stream that failed is left alone: it is not
+ * saved, and the chat offers to try again.
+ */
+function withSomethingToRead(stream: ReadableStream<InferUIMessageChunk<NexoUIMessage>>) {
+  let readable = false;
+  let failed = false;
+  const offers = new Set<string>();
+  return stream.pipeThrough(
+    new TransformStream<InferUIMessageChunk<NexoUIMessage>, InferUIMessageChunk<NexoUIMessage>>({
+      transform(chunk, controller) {
+        if (chunk.type === "text-delta" && chunk.delta.trim() !== "") readable = true;
+        else if (chunk.type === "tool-input-available" && OFFER_TOOLS.has(chunk.toolName)) offers.add(chunk.toolCallId);
+        else if (chunk.type === "tool-output-available" && offers.has(chunk.toolCallId) && (chunk.output as { ok?: unknown } | undefined)?.ok === true) readable = true;
+        else if (chunk.type === "error") failed = true;
+        if (chunk.type === "finish" && !readable && !failed) {
+          controller.enqueue({ type: "text-start", id: "nothing-to-read" });
+          controller.enqueue({ type: "text-delta", id: "nothing-to-read", delta: NOTHING_TO_READ });
+          controller.enqueue({ type: "text-end", id: "nothing-to-read" });
+        }
+        controller.enqueue(chunk);
+      },
+    }),
+  );
+}
+
+/**
  * A message past a ceiling of the day: saved already, and copied to the agent memory as she wrote it, so the agent knows
  * it when the demo comes back. The model is not called, and the answer says so. The limit of a 30th message left like
  * this applies at her next one, as for any message left without an answer.
@@ -284,7 +313,7 @@ export async function chat(request: NextRequest, deps: Deps) {
       writer.write({ type: "data-conversation", data: conversation });
       const agentStream = toAISdkStream(await reply, { from: "agent", version: "v7", onError: () => AGENT_FAILED });
       // Mastra types its data parts loosely; this agent only streams text and the tools of NexoTools.
-      writer.merge(agentStream as ReadableStream<InferUIMessageChunk<NexoUIMessage>>);
+      writer.merge(withSomethingToRead(agentStream as ReadableStream<InferUIMessageChunk<NexoUIMessage>>));
     },
     onError: () => AGENT_FAILED,
     onEnd: async ({ responseMessage, finishReason }) => {

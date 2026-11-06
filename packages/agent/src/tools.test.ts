@@ -9,7 +9,7 @@ import {
   type TicketServiceResult,
 } from "@nexo/shared";
 import { describe, expect, it } from "vitest";
-import { createTools, type DraftRecord, type DraftStore, type TicketDesk } from "./tools";
+import { createTools, type DraftRecord, type DraftStore, newReplyTurn, type TicketDesk } from "./tools";
 
 // Monday 10:00 in São Paulo.
 const NOW = new Date("2026-10-26T13:00:00Z");
@@ -86,14 +86,15 @@ const run = <I, O>(tool: { execute?: (input: I, context: never) => Promise<O> },
   tool.execute!(input, {} as never);
 const runAs = <I, O>(employeeId: string, tool: { execute?: (input: I, context: never) => Promise<O> }, input: I) =>
   tool.execute!(input, { requestContext: new RequestContext([["employeeId", employeeId]]) } as never);
-/** As the route runs a turn: the employee of the session and the conversation the reply belongs to. */
+/** As the route runs a turn: the employee of the session, the conversation the reply belongs to, and the reply itself. */
+const replyContext = (employeeId = "emp-ana") =>
+  new RequestContext<unknown>([
+    ["employeeId", employeeId],
+    ["conversationId", "conv-1"],
+    ["turn", newReplyTurn(NOW)],
+  ]);
 const runInTurn = <I, O>(tool: { execute?: (input: I, context: never) => Promise<O> }, input: I, employeeId = "emp-ana") =>
-  tool.execute!(input, {
-    requestContext: new RequestContext([
-      ["employeeId", employeeId],
-      ["conversationId", "conv-1"],
-    ]),
-  } as never);
+  tool.execute!(input, { requestContext: replyContext(employeeId) } as never);
 
 describe("recordDecision", () => {
   it("only acknowledges: the route saves the decision at the end of the reply", async () => {
@@ -652,6 +653,39 @@ describe("draftTicket", () => {
       message: "O serviço de chamados não respondeu.",
     });
     expect(drafts.saved).toEqual([]);
+  });
+
+  it("drafts once when the model asks again with the same input in the same reply, and answers both the same", async () => {
+    const drafts = draftStore();
+    const { draftTicket } = tools(ticketDesk().desk, drafts);
+    const context = { requestContext: replyContext() } as never;
+    const [first, again] = await Promise.all([draftTicket.execute!(vpnTicket, context), draftTicket.execute!(vpnTicket, context)]);
+    const later = await draftTicket.execute!(vpnTicket, context);
+    expect(first).toMatchObject({ ok: true, draft: { id: "draft-1" } });
+    expect(again).toEqual(first);
+    expect(later).toEqual(first);
+    expect(drafts.saved).toHaveLength(1);
+  });
+
+  it("drafts again when the input changed, which replaces the pending one", async () => {
+    const drafts = draftStore();
+    const { draftTicket } = tools(ticketDesk().desk, drafts);
+    const context = { requestContext: replyContext() } as never;
+    await draftTicket.execute!(vpnTicket, context);
+    const changed = await draftTicket.execute!({ ...vpnTicket, title: "VPN não conecta — erro 809 no notebook novo" }, context);
+    expect(changed).toMatchObject({ ok: true, draft: { id: "draft-2" } });
+    expect(drafts.saved).toHaveLength(2);
+  });
+
+  it("lets the model repeat a refused call in the same reply: only a draft that was made is kept", async () => {
+    const drafts = draftStore();
+    const { draftTicket } = tools(ticketDesk().desk, drafts);
+    const context = { requestContext: replyContext() } as never;
+    const duplicate = { ...vpnTicket, category: "hardware" as const };
+    expect(await draftTicket.execute!(duplicate, context)).toMatchObject({ ok: false, reason: "possible_duplicate" });
+    expect(await draftTicket.execute!(duplicate, context)).toMatchObject({ ok: false, reason: "possible_duplicate" });
+    expect(await draftTicket.execute!({ ...duplicate, notDuplicateReason: "É outro problema." }, context)).toMatchObject({ ok: true });
+    expect(drafts.saved).toHaveLength(1);
   });
 
   it("never runs without the conversation of the turn", async () => {

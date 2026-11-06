@@ -83,12 +83,22 @@ export type ResolutionStore = {
 /** Below this, the agent does not know what to do and an analyst takes the case (ARQUITETURA.md, section 2). */
 export const MIN_CONFIDENCE = 0.6;
 
+/** The draft a reply made, under the input that made it, so the same call again finds it. */
+type ReplyDraft = { input: string; output: Promise<DraftTicketOutput> };
+
 /**
- * What one reply knows across its steps: when it started, how sure its decision was, once recorded, and the transfer it
- * made, if any. The agent puts one in the request context of each reply.
+ * What one reply knows across its steps: when it started, how sure its decision was, once recorded, and whether it was
+ * unsure for lack of information, which is asked for, not a doubt; and the transfer and the draft it made, if any. The
+ * agent puts one in the request context of each reply.
  */
-export type ReplyTurn = { startedAt: Date; confidence: number | null; transfer: Promise<TransferToAnalystOutput> | null };
-export const newReplyTurn = (startedAt: Date): ReplyTurn => ({ startedAt, confidence: null, transfer: null });
+export type ReplyTurn = {
+  startedAt: Date;
+  confidence: number | null;
+  needsInformation: boolean;
+  transfer: Promise<TransferToAnalystOutput> | null;
+  draft: ReplyDraft | null;
+};
+export const newReplyTurn = (startedAt: Date): ReplyTurn => ({ startedAt, confidence: null, needsInformation: false, transfer: null, draft: null });
 
 /** A draft as the tool hands it to be saved: what the card shows, plus what the console and the analyst need. */
 export type DraftRecord = {
@@ -138,9 +148,11 @@ const employeeOf = (context: { requestContext: { get: (key: "employeeId") => Emp
 const turnContext = employeeContext.extend({ conversationId: z.string().min(1) });
 type TurnContext = z.infer<typeof turnContext>;
 
-/** A transfer also reads the reply it happens in: its decision, and whether it transferred already. */
+/** A draft and a transfer also read the reply they happen in: its decision, and whether it drafted or transferred already. */
 const replyContext = turnContext.extend({
-  turn: z.custom<ReplyTurn>((value) => typeof value === "object" && value !== null && "confidence" in value && "transfer" in value),
+  turn: z.custom<ReplyTurn>(
+    (value) => typeof value === "object" && value !== null && "confidence" in value && "transfer" in value && "draft" in value,
+  ),
 });
 
 type DraftFailure = Extract<DraftTicketOutput, { ok: false }>;
@@ -379,11 +391,23 @@ export function createTools({
     description:
       "Monta o rascunho de um chamado novo (create), do complemento de um chamado aberto (update) ou da reabertura de um chamado resolvido há até 7 dias (reopen). O funcionário vê o card e confere: nada é criado antes de ele clicar em Confirmar. O código calcula o tipo, a prioridade e o prazo e confere duplicidade e a janela de reabertura.",
     ...nexoToolSchemas.draftTicket,
-    requestContextSchema: turnContext,
+    requestContextSchema: replyContext,
     execute: async (input, context) => {
+      const reply = context.requestContext.get("turn");
+      // The model sometimes drafts the same thing again, in the same step or the next: one draft, and the same answer.
+      const key = JSON.stringify(input);
+      if (reply.draft?.input === key) return reply.draft.output;
       const turn = { employeeId: employeeOf(context), conversationId: context.requestContext.get("conversationId") };
       const request = draftRequest(input);
-      return request.operation === "create" ? draftNew(request, turn) : draftChange(request, turn);
+      const output = request.operation === "create" ? draftNew(request, turn) : draftChange(request, turn);
+      reply.draft = { input: key, output };
+      // A refused call, or one that failed, is not a draft: the model may call again, fixed.
+      const result = await output.catch((error: unknown) => {
+        reply.draft = null;
+        throw error;
+      });
+      if (!result.ok) reply.draft = null;
+      return result;
     },
   });
 
@@ -415,7 +439,7 @@ export function createTools({
 
   async function transferOnce(
     input: TransferToAnalystInput,
-    { employeeId, conversationId, turn: { confidence, startedAt } }: TurnContext & { turn: ReplyTurn },
+    { employeeId, conversationId, turn: { confidence, needsInformation, startedAt } }: TurnContext & { turn: ReplyTurn },
   ): Promise<TransferToAnalystOutput> {
     let ticket: Ticket | null = null;
     if (input.ticketId) {
@@ -432,7 +456,7 @@ export function createTools({
     const at = now();
     const { impact, urgency, affected } = input;
     // Below 0.6 the code made the model transfer: the reason is the doubt of the agent, whatever the model wrote.
-    const unsure = confidence !== null && confidence < MIN_CONFIDENCE;
+    const unsure = confidence !== null && confidence < MIN_CONFIDENCE && !needsInformation;
     const route = routeTransfer({
       requested: unsure ? "agent_unsure" : input.reason,
       ticket,

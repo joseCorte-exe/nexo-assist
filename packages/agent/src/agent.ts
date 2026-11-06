@@ -9,7 +9,9 @@ import { createTools, type DraftStore, MIN_CONFIDENCE, newReplyTurn, OFFER_TOOLS
 
 // Explicit limits, so one reply never runs away with time or cost (ARQUITETURA.md, section 9).
 const MAX_STEPS = 5;
-const MAX_OUTPUT_TOKENS = 800;
+// The model's reasoning counts against the output of a step: at 800 a step that only called a short tool was cut mid-way
+// and the reply ended with nothing written.
+const MAX_OUTPUT_TOKENS = 2000;
 const TOTAL_TIMEOUT_MS = 45_000;
 const LAST_MESSAGES = 20;
 
@@ -144,8 +146,9 @@ export function createNexoAgent({
   return new Agent({
     id: "nexo-assist",
     name: "Nexo Assist",
-    // The tools and these instructions are the same on every call (3.5 thousand tokens, measured on Haiku 5.5):
-    // cached, the next steps of a reply, and every later reply within five minutes, read them at a tenth of the price.
+    // The tools and these instructions are the same on every call (7.9 thousand tokens in the first step, 7.4 thousand
+    // from the second on, without recordDecision; measured on Haiku 5.5): cached, the next steps of a reply, and every
+    // later reply within five minutes, read them at a tenth of the price.
     instructions: {
       role: "system",
       content: instructions,
@@ -175,8 +178,14 @@ type Step = { text: string; toolResults: ReadonlyArray<ToolResult> };
 /** The Mastra tool the model calls to keep the summary of the case (the working memory). */
 const WORKING_MEMORY_TOOL = "updateWorkingMemory";
 
-/** Every tool but the offers, for the steps after a draft was shown. */
-const AFTER_DRAFT_TOOLS = [...Object.keys(nexoToolSchemas).filter((tool) => !OFFER_TOOLS.has(tool)), WORKING_MEMORY_TOOL];
+/**
+ * Every tool but recordDecision, for the steps after the first. The decision is recorded once: the first one is what the
+ * screen and the console keep (decisionOf), so a second only costs a step of the five.
+ */
+const AFTER_DECISION_TOOLS = [...Object.keys(nexoToolSchemas).filter((tool) => tool !== "recordDecision"), WORKING_MEMORY_TOOL];
+
+/** Those but the offers, for the steps after a draft was shown. */
+const AFTER_DRAFT_TOOLS = AFTER_DECISION_TOOLS.filter((tool) => !OFFER_TOOLS.has(tool));
 
 /** Tools that close a reply once the model wrote its sentence about them: the screen draws the rest. */
 const CLOSING_TOOLS = new Set(["draftTicket", "transferToAnalyst", "markResolved"]);
@@ -207,6 +216,15 @@ function replyDone(step: Step | undefined) {
 const ran = (steps: ReadonlyArray<Step>, toolName: string) =>
   steps.some((step) => step.toolResults.some((result) => result.toolName === toolName && answeredOk(result)));
 
+/** An analyst took the conversation during the reply: the transfer was refused, and asking for it again would only spend steps. */
+const heldByAnalyst = (steps: ReadonlyArray<Step>) =>
+  steps.some((step) =>
+    step.toolResults.some((result) => {
+      const wrapped = result.output as { type?: string; value?: { reason?: unknown } } | undefined;
+      return result.toolName === "transferToAnalyst" && wrapped?.type === "json" && wrapped.value?.reason === "not_with_agent";
+    }),
+  );
+
 /** The model drafted a critical case: the route transfers it once the reply is saved. */
 const draftedCritical = (steps: ReadonlyArray<Step>) =>
   steps.some((step) =>
@@ -216,10 +234,13 @@ const draftedCritical = (steps: ReadonlyArray<Step>) =>
     }),
   );
 
-/** The confidence recordDecision gave in the first step, if the input was a valid one. */
-function recordedConfidence(step: Step | undefined): number | null {
-  const input = step?.toolResults.find((result) => result.toolName === "recordDecision")?.input as { confidence?: unknown } | undefined;
-  return typeof input?.confidence === "number" ? input.confidence : null;
+/** The decision recordDecision recorded in the first step, if the input was a valid one. */
+function recordedDecision(step: Step | undefined) {
+  const input = step?.toolResults.find((result) => result.toolName === "recordDecision")?.input as { confidence?: unknown; needsInformation?: unknown } | undefined;
+  return {
+    confidence: typeof input?.confidence === "number" ? input.confidence : null,
+    needsInformation: input?.needsInformation === true,
+  };
 }
 
 /** One reply of the agent: the Mastra stream, which the route turns into the chat stream and saves at the end. */
@@ -239,19 +260,21 @@ export function streamReply(agent: NexoAgent, { conversationId, employeeId, text
     // An offer that was shown hands the turn to the employee, who answers with a click: calling the model again would
     // only cost. One that could not be shown (refused input, no ticket of hers, service down) lets the model explain.
     stopWhen: ({ steps }: { steps: ReadonlyArray<Step> }) => replyDone(steps.at(-1)),
-    // recordDecision is mandatory in the first step; afterwards the model chooses. Once a draft is shown, the offers go:
-    // its card has Confirmar, Editar and Cancelar, and quick replies under it would only send those words as a message.
-    // Below 0.6 the step after the decision transfers, as the doubt of the agent: the code says so, not the model. Once
+    // recordDecision is mandatory in the first step and gone after it. Once a draft is shown, the offers go too: its card
+    // has Confirmar, Editar and Cancelar, and quick replies under it would only send those words as a message. Below 0.6
+    // the step after the decision transfers, as the doubt of the agent: the code says so, not the model. Unless the
+    // decision says what is missing is information, which is asked for. Once
     // transferred, or drafted as critical, which the route transfers, the model only says to whom and until when; once
     // resolved, its closing sentence.
     prepareStep: ({ stepNumber, steps }) => {
       if (stepNumber === 0) return { toolChoice: { type: "tool", toolName: "recordDecision" } };
       if (ran(steps, "transferToAnalyst") || ran(steps, "markResolved") || draftedCritical(steps)) return { activeTools: [WORKING_MEMORY_TOOL] };
-      if (stepNumber === 1) {
-        turn.confidence = recordedConfidence(steps[0]);
-        if (turn.confidence !== null && turn.confidence < MIN_CONFIDENCE) return { toolChoice: { type: "tool", toolName: "transferToAnalyst" } };
-      }
-      return ran(steps, "draftTicket") ? { activeTools: AFTER_DRAFT_TOOLS } : undefined;
+      const { confidence, needsInformation } = recordedDecision(steps[0]);
+      turn.confidence = confidence;
+      turn.needsInformation = needsInformation;
+      // Until it happened: a transfer the tool refused (a classification given by halves, say) is asked for again.
+      if (confidence !== null && confidence < MIN_CONFIDENCE && !needsInformation && !heldByAnalyst(steps)) return { toolChoice: { type: "tool", toolName: "transferToAnalyst" } };
+      return { activeTools: ran(steps, "draftTicket") ? AFTER_DRAFT_TOOLS : AFTER_DECISION_TOOLS };
     },
     modelSettings: { maxOutputTokens: MAX_OUTPUT_TOKENS, timeout: { totalMs: TOTAL_TIMEOUT_MS } },
   });
