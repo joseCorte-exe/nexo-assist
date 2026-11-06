@@ -137,7 +137,7 @@ Medido com preço de US$ 0,10 por milhão de tokens de entrada, US$ 0,01 de leit
 | Complementar um chamado | 3 a 4 s | cerca de US$ 0,002 |
 | Transferir para um analista | 4 a 5 s | US$ 0,0008 a 0,0015 por resposta |
 
-As instruções e as ferramentas ficam em cache por cerca de 5 minutos e são lidas a um décimo do preço. Os relatórios não separam as respostas com e sem cache, e uma resposta sem cache custa mais. Cada resposta tem limite de 5 passos, 800 tokens de saída por passo e 45 segundos.
+As instruções e as ferramentas ficam em cache por cerca de 5 minutos e são lidas a um décimo do preço. Os relatórios não separam as respostas com e sem cache, e uma resposta sem cache custa mais. Cada resposta tem limite de 5 passos, 2000 tokens de saída por passo e 45 segundos.
 
 ## Principais trade-offs
 
