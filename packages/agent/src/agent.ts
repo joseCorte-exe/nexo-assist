@@ -9,7 +9,9 @@ import { createTools, type DraftStore, MIN_CONFIDENCE, newReplyTurn, OFFER_TOOLS
 
 // Explicit limits, so one reply never runs away with time or cost (ARQUITETURA.md, section 9).
 const MAX_STEPS = 5;
-const MAX_OUTPUT_TOKENS = 800;
+// The model's reasoning counts against the output of a step: at 800 a step that only called a short tool was cut mid-way
+// and the reply ended with nothing written.
+const MAX_OUTPUT_TOKENS = 2000;
 const TOTAL_TIMEOUT_MS = 45_000;
 const LAST_MESSAGES = 20;
 

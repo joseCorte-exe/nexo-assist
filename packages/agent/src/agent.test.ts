@@ -196,7 +196,7 @@ describe("streamReply", () => {
   it("caps the tokens of each step", async () => {
     const { agent, model } = setup(hoursScript());
     await replyOf(agent, turn);
-    expect(model.calls[0]?.maxOutputTokens).toBe(800);
+    expect(model.calls[0]?.maxOutputTokens).toBe(2000);
   });
 
   it("gives the ticket tools the employee of the turn, from the session", async () => {
