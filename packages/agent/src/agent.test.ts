@@ -368,6 +368,33 @@ describe("the transfer to an analyst", () => {
     expect(savedTransfers.map((transfer) => transfer.reason)).toEqual(["agent_unsure"]);
   });
 
+  it("asks for the transfer again when the tool refused the first call, until it happens", async () => {
+    savedTransfers.length = 0;
+    const { agent, model } = setup([
+      { toolCalls: [{ toolName: "recordDecision", input: unsure }] },
+      // A classification by halves: the input is refused and nothing is transferred.
+      { toolCalls: [{ toolName: "transferToAnalyst", input: { reason: "agent_unsure", summary, impact: "degraded" } }] },
+      { toolCalls: [{ toolName: "transferToAnalyst", input: { reason: "agent_unsure", summary } }] },
+      { text: handedOver },
+    ]);
+    await replyOf(agent, turn);
+    expect(model.calls[2]?.toolChoice).toEqual({ type: "tool", toolName: "transferToAnalyst" });
+    expect(model.calls[3]?.toolChoice).toEqual({ type: "auto" });
+    expect(savedTransfers).toHaveLength(1);
+  });
+
+  it("stops asking for the transfer once an analyst has the conversation", async () => {
+    const model = scriptedModel([
+      { toolCalls: [{ toolName: "recordDecision", input: unsure }] },
+      { toolCalls: [{ toolName: "transferToAnalyst", input: { reason: "agent_unsure", summary } }] },
+      { text: "Um analista já está com a conversa." },
+    ]);
+    const taken: TransferStore = { transfer: async () => ({ transferred: false }) };
+    const agent = createNexoAgent({ model, memory: createMemory({ url: ":memory:" }), ticketService, drafts, transfers: taken, resolutions });
+    await replyOf(agent, turn);
+    expect(model.calls[2]?.toolChoice).toEqual({ type: "auto" });
+  });
+
   it("lets the model choose when the decision is low only for lack of information: it asks instead of transferring", async () => {
     savedTransfers.length = 0;
     const { agent, model } = setup([

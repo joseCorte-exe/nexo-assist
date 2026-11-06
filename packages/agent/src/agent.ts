@@ -216,6 +216,15 @@ function replyDone(step: Step | undefined) {
 const ran = (steps: ReadonlyArray<Step>, toolName: string) =>
   steps.some((step) => step.toolResults.some((result) => result.toolName === toolName && answeredOk(result)));
 
+/** An analyst took the conversation during the reply: the transfer was refused, and asking for it again would only spend steps. */
+const heldByAnalyst = (steps: ReadonlyArray<Step>) =>
+  steps.some((step) =>
+    step.toolResults.some((result) => {
+      const wrapped = result.output as { type?: string; value?: { reason?: unknown } } | undefined;
+      return result.toolName === "transferToAnalyst" && wrapped?.type === "json" && wrapped.value?.reason === "not_with_agent";
+    }),
+  );
+
 /** The model drafted a critical case: the route transfers it once the reply is saved. */
 const draftedCritical = (steps: ReadonlyArray<Step>) =>
   steps.some((step) =>
@@ -260,12 +269,11 @@ export function streamReply(agent: NexoAgent, { conversationId, employeeId, text
     prepareStep: ({ stepNumber, steps }) => {
       if (stepNumber === 0) return { toolChoice: { type: "tool", toolName: "recordDecision" } };
       if (ran(steps, "transferToAnalyst") || ran(steps, "markResolved") || draftedCritical(steps)) return { activeTools: [WORKING_MEMORY_TOOL] };
-      if (stepNumber === 1) {
-        const { confidence, needsInformation } = recordedDecision(steps[0]);
-        turn.confidence = confidence;
-        turn.needsInformation = needsInformation;
-        if (confidence !== null && confidence < MIN_CONFIDENCE && !needsInformation) return { toolChoice: { type: "tool", toolName: "transferToAnalyst" } };
-      }
+      const { confidence, needsInformation } = recordedDecision(steps[0]);
+      turn.confidence = confidence;
+      turn.needsInformation = needsInformation;
+      // Until it happened: a transfer the tool refused (a classification given by halves, say) is asked for again.
+      if (confidence !== null && confidence < MIN_CONFIDENCE && !needsInformation && !heldByAnalyst(steps)) return { toolChoice: { type: "tool", toolName: "transferToAnalyst" } };
       return { activeTools: ran(steps, "draftTicket") ? AFTER_DRAFT_TOOLS : AFTER_DECISION_TOOLS };
     },
     modelSettings: { maxOutputTokens: MAX_OUTPUT_TOKENS, timeout: { totalMs: TOTAL_TIMEOUT_MS } },
