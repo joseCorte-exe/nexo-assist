@@ -205,6 +205,48 @@ describe("POST /api/chat", () => {
     expect(reply?.decision).toMatchObject({ understanding: null, action: null, confidence: null, reason: null, toolsUsed: [] });
   });
 
+  it("tells her when the reply ended with nothing to read, in the stream and in the saved reply", async () => {
+    // A ticket card and no sentence: the model stopped after the lookup, as when its output was cut short.
+    const script = [
+      { toolCalls: [{ toolName: "recordDecision", input: decision }] },
+      { toolCalls: [{ toolName: "getTicket", input: { ticketId: "INC-20311" } }] },
+      { text: "" },
+    ];
+    const deps = await testDeps({ agent: testAgent(scriptedModel(script)) });
+    const chunks = await readStream(await chat(await say("Como está o INC-20311?"), deps));
+    await deps.settled();
+
+    const sentence = "Não consegui terminar a resposta desta vez. Pode escrever de novo?";
+    expect(chunks.filter((chunk) => chunk.type === "text-delta").map((chunk) => chunk.delta)).toEqual([sentence]);
+    expect(chunks.at(-1)?.type).toBe("finish");
+    const [, reply] = await messagesOf(deps, (await anaConversation(deps))!.id);
+    expect(reply?.text).toBe(sentence);
+  });
+
+  it("adds nothing when the reply ends on an offer, whose question is on its card", async () => {
+    const offer = { question: "Quem está sendo afetado?", options: ["Só eu", "Minha equipe"] };
+    const script = [
+      { toolCalls: [{ toolName: "recordDecision", input: decision }] },
+      { toolCalls: [{ toolName: "offerReplies", input: offer }] },
+    ];
+    const deps = await testDeps({ agent: testAgent(scriptedModel(script)) });
+    const chunks = await readStream(await chat(await say("O Teams não abre"), deps));
+    await deps.settled();
+
+    expect(chunks.some((chunk) => chunk.type === "text-delta")).toBe(false);
+    const [, reply] = await messagesOf(deps, (await anaConversation(deps))!.id);
+    expect(reply?.text).toBe(offer.question);
+  });
+
+  it("leaves a reply that failed to the retry, without the sentence", async () => {
+    const deps = await testDeps({ agent: testAgent(scriptedModel([new Error("overloaded")])) });
+    const chunks = await readStream(await chat(await say("Minha VPN dá erro 809"), deps));
+    await deps.settled();
+
+    expect(chunks.some((chunk) => chunk.type === "text-delta")).toBe(false);
+    expect(chunks.some((chunk) => chunk.type === "error")).toBe(true);
+  });
+
   it("saves and counts a message while the conversation waits for an analyst, without calling the agent", async () => {
     // Carla's conversation is waiting for an analyst in the sample data.
     const model = scriptedModel(vpnScript());
